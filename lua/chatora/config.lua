@@ -1,3 +1,5 @@
+-- Plugin configuration: user-facing defaults (see setup()), plus resolution
+-- of the plugin/repo root and the chatora LSP server command to launch.
 local M = {}
 
 local defaults = {

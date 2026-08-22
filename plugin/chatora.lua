@@ -1,3 +1,5 @@
+-- Registers the :Chatora user command (with subcommand completion), which
+-- dispatches into lua/chatora's M.dispatch.
 if vim.g.loaded_chatora then
   return
 end

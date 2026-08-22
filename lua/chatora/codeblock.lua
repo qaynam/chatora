@@ -14,7 +14,7 @@ local DEBOUNCE_MS = 150
 local PRIORITY = 130
 
 local uv = vim.uv or vim.loop
-local timers = {} -- bufnr -> uv_timer
+local timers_by_bufnr = {}
 
 local function is_blank(line)
   return line:match('^%s*$') ~= nil
@@ -187,10 +187,10 @@ function M.refresh(bufnr)
 end
 
 local function schedule_refresh(bufnr)
-  local timer = timers[bufnr]
+  local timer = timers_by_bufnr[bufnr]
   if not timer then
     timer = uv.new_timer()
-    timers[bufnr] = timer
+    timers_by_bufnr[bufnr] = timer
   end
   pcall(function()
     timer:stop()
@@ -205,13 +205,13 @@ local function schedule_refresh(bufnr)
 end
 
 local function cleanup_timer(bufnr)
-  local timer = timers[bufnr]
+  local timer = timers_by_bufnr[bufnr]
   if timer then
     pcall(function()
       timer:stop()
       timer:close()
     end)
-    timers[bufnr] = nil
+    timers_by_bufnr[bufnr] = nil
   end
 end
 

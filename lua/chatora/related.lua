@@ -1,3 +1,5 @@
+-- Related-pages side panel: a fixed bottom split listing 1-hop/2-hop links
+-- for the current page, refreshed whenever a page buffer is (re)loaded.
 local M = {}
 
 local config = require('chatora.config')
@@ -96,8 +98,8 @@ function M.refresh(project, title)
   end)
 end
 
---- Called by page.lua whenever a page buffer is (re)loaded. Refreshes the
---- panel if it's currently open; otherwise just remembers the target page.
+--- Notify the panel that a page was (re)loaded: refreshes it if currently
+--- open, otherwise just remembers the target page for next time it opens.
 function M.on_page_opened(project, title)
   if is_open() then
     M.refresh(project, title)

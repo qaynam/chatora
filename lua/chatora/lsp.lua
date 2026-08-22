@@ -1,3 +1,5 @@
+-- Thin wrapper around vim.lsp for the chatora language server: lazily
+-- starts/attaches the client, and unwraps its chatora/* request envelope.
 local M = {}
 
 local config = require('chatora.config')

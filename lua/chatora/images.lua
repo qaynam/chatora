@@ -25,9 +25,9 @@ local config = require('chatora.config')
 
 local DEBOUNCE_MS = 150
 local uv = vim.uv or vim.loop
-local timers = {} -- bufnr -> uv_timer
-local placements = {} -- bufnr -> list of snacks placement objects
-local buf_project = {} -- bufnr -> project name
+local timers_by_bufnr = {}
+local placements_by_bufnr = {} -- values are lists of snacks placement objects
+local project_by_bufnr = {}
 
 local IMAGE_EXTENSIONS = { png = true, jpg = true, jpeg = true, gif = true, webp = true }
 
@@ -53,9 +53,11 @@ local function images_enabled()
   return snacks_image() ~= nil
 end
 
---- Percent-encode a page title for an HTTP path segment: mirrors the
---- server's encodeTitleForUrl (space -> `_`, percent-encode `% / ? #` and
---- control chars, unicode left raw). See docs/ARCHITECTURE.md.
+--- Percent-encode a page title for an HTTP path segment: same rule as the
+--- server's encodeTitleForUrl (space -> `_`, percent-encode `% / ? #`), plus
+--- control characters defensively since this becomes a URL path
+--- (encodeTitleForUrl itself does not escape them). Unicode left raw.
+--- See docs/ARCHITECTURE.md.
 local function encode_path_segment(name)
   name = name:gsub(' ', '_')
   return (name:gsub('[%%/%?#%c]', function(c)
@@ -117,7 +119,7 @@ local function standalone_image_src(line)
 end
 
 local function clear_placements(bufnr)
-  local list = placements[bufnr]
+  local list = placements_by_bufnr[bufnr]
   if not list then
     return
   end
@@ -126,7 +128,7 @@ local function clear_placements(bufnr)
       p:close()
     end)
   end
-  placements[bufnr] = nil
+  placements_by_bufnr[bufnr] = nil
 end
 
 --- Clear and re-render every image placement in bufnr, synchronously.
@@ -138,7 +140,7 @@ function M.refresh(bufnr)
   if not image then
     return
   end
-  local project = buf_project[bufnr]
+  local project = project_by_bufnr[bufnr]
   if not project then
     return
   end
@@ -169,14 +171,14 @@ function M.refresh(bufnr)
     end
   end
 
-  placements[bufnr] = new_placements
+  placements_by_bufnr[bufnr] = new_placements
 end
 
 local function schedule_refresh(bufnr)
-  local timer = timers[bufnr]
+  local timer = timers_by_bufnr[bufnr]
   if not timer then
     timer = uv.new_timer()
-    timers[bufnr] = timer
+    timers_by_bufnr[bufnr] = timer
   end
   pcall(function()
     timer:stop()
@@ -191,13 +193,13 @@ local function schedule_refresh(bufnr)
 end
 
 local function cleanup_timer(bufnr)
-  local timer = timers[bufnr]
+  local timer = timers_by_bufnr[bufnr]
   if timer then
     pcall(function()
       timer:stop()
       timer:close()
     end)
-    timers[bufnr] = nil
+    timers_by_bufnr[bufnr] = nil
   end
 end
 
@@ -211,7 +213,7 @@ function M.attach(bufnr, project)
   if not images_enabled() then
     return
   end
-  buf_project[bufnr] = project
+  project_by_bufnr[bufnr] = project
 
   if vim.b[bufnr].chatora_images_attached then
     schedule_refresh(bufnr)
@@ -228,7 +230,7 @@ function M.attach(bufnr, project)
       vim.schedule(function()
         pcall(vim.api.nvim_buf_set_var, bufnr, 'chatora_images_attached', false)
         clear_placements(bufnr)
-        buf_project[bufnr] = nil
+        project_by_bufnr[bufnr] = nil
       end)
     end,
   })

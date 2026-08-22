@@ -75,6 +75,9 @@ local function fetch(query)
   if not s then
     return
   end
+  -- Bump the generation so a response for a since-superseded query (out of
+  -- order due to network/debounce timing) is dropped instead of overwriting
+  -- fresher results.
   s.gen = s.gen + 1
   local gen = s.gen
 
@@ -194,7 +197,7 @@ function M.open(project, initial_query)
 
   local prev_win = vim.api.nvim_get_current_win()
   local width = math.min(70, vim.o.columns - 8)
-  local total_height = LIST_HEIGHT + 4 -- input (1) + two borders (2+2) - shared row math kept simple
+  local total_height = LIST_HEIGHT + 4 -- rough total incl. input + borders, for vertical centering only
   local row = math.max(1, math.floor((vim.o.lines - total_height) / 2))
   local col = math.floor((vim.o.columns - width) / 2)
 

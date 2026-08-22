@@ -1,3 +1,6 @@
+-- Left sidebar listing a project's pages (infinite-scroll via
+-- chatora/listPages), with unsaved-change (●) marks kept in sync with
+-- buffer state.
 local M = {}
 
 local config = require('chatora.config')

@@ -1,3 +1,6 @@
+-- Public plugin API: setup() plus the :Chatora subcommand entry points
+-- (open/new/search/related/logout/help), and resolution of the active
+-- Cosense project shared by all of them.
 local M = {}
 
 local config = require('chatora.config')

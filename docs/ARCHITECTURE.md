@@ -4,7 +4,7 @@
 
 chatora は Cosense（旧 Scrapbox）の Neovim クライアント。構成は 2 層:
 
-1. **Lua プラグイン**（`nvim/`）— サイドバー・関連ページパネル・検索・バッファ管理などの薄い UI 層
+1. **Lua プラグイン**（リポジトリ直下の `lua/` と `plugin/`）— サイドバー・関連ページパネル・検索・バッファ管理などの薄い UI 層
 2. **TypeScript LSP サーバー**（`packages/server`、`@chatora/server`）— `@cosense-toolbox/parser` によるハイライト（semantic tokens）・リンク補完・定義ジャンプ、および `chatora/*` カスタムリクエストで Cosense API を仲介
 
 API クライアント・認証・diff などの純ロジックは `packages/core`（`@chatora/core`）に分離し、単体テスト可能にする。
@@ -73,7 +73,7 @@ origin は既定 `https://scrapbox.io`（設定で変更可能に）。
 | ベクトル検索 | `GET /api/pages/:project/search/vector/titles?q=`（HTTP 490 = 機能無効 → 空配列扱い） |
 | タイトル一覧（補完用） | `GET /api/pages/:project/search/titles` |
 
-タイトルの URL エンコードは `encodeURIComponent`。レスポンス型は寛容にパースする（未知フィールドを許容、必要フィールドだけ検証。zod は使わず手書きの narrow で十分）。
+タイトルの URL エンコードは cosense-cli の `encodeTitleForUrl` 方式（`CosenseApi` 内部で処理）。レスポンス型は寛容にパースする（未知フィールドを許容、必要フィールドだけ検証。zod は使わず手書きの narrow で十分）。
 
 ### Write（2 段階 REST、page-edit-for-ai）
 
@@ -88,7 +88,7 @@ origin は既定 `https://scrapbox.io`（設定で変更可能に）。
 - エラー: `409 {"error":"NotFastForward"}`（楽観ロック競合 → 再取得して再 preview）、`409 DuplicateTitle`、`422`（不正な lineId 等）
 - 新規挿入行の `id` はクライアント生成の 24 桁 lowercase hex。cosense-cli 実装は `randomBytes(12).toString('hex')`（unixtime や userId は**含まない**）。`@chatora/core` の `createNewLineId()` が実装済み。
 - **存在しないページは 404 にならない**: `GET /api/pages/v2/...` は HTTP 200 + `persistent: false` + 偽の id/commitId/行 id を返す。偽 id をアンカーに使うと事故るため、`CosenseApi.getPage()` は `persistent:false` を `null` に畳み込み済み。
-- HTTP パス上のタイトルエンコードは encodeURIComponent ではなく cosense-cli の `encodeTitleForUrl` 方式（`% / ? #` のみ encode、空白→`_`、unicode は生）。これは `CosenseApi` 内部に実装済みで、呼び出し側は生タイトルを渡すだけでよい。**cosense:// URI スキームは従来どおり encodeURIComponent** であり別物（HTTP パスとは無関係）。
+- HTTP パス上のタイトルエンコードは encodeURIComponent ではなく cosense-cli の `encodeTitleForUrl` 方式（`% / ? #` のみ encode、空白→`_`、unicode は生）。これは `CosenseApi` 内部に実装済みで、呼び出し側は生タイトルを渡すだけでよい。**cosense:// URI スキームは最小限エンコード（下記）** であり別物（HTTP パスとは無関係）。
 
 ## @chatora/core 公開 API（サーバーが依存する契約）
 
@@ -128,7 +128,7 @@ createNewLineId(userId: string): string
 ### 標準機能
 
 - `textDocument/semanticTokens/full`（+ range）: parser AST → トークン。**トークンは行をまたげない**ので複数行ノード（codeBlock 等）は行ごとに分割して出す。
-- `textDocument/completion`: trigger characters `[` `#`。行テキストとカーソル位置から未クローズの `[query` / `#query` を検出。候補の第一ソースは **vector（意味）検索** `GET /api/pages/:project/search/vector/titles?q=`（本家 Web エディタがキーストロークごとに叩いているのを HAR で実測確認。score 順・`exists:false` = 赤リンク）。ローカルのタイトルインデックス（exact > prefix > substring > asearch ファジー階層）を後段にマージし、vector が使えないプロジェクト（490/404）ではローカルのみで動く。textEdit で `[title]` / `#title` 全体を置換。コードブロック内・inlineCode 内では発火しない。`isIncomplete: true` で毎キーストローク再クエリ。
+- `textDocument/completion`: trigger characters `[` `#` ` `（スペースはクライアントが単語区切りでメニューを閉じた後の再表示用）。リンク補完は**閉じた `[...]` ペアの内側にカーソルがある時だけ**発火し、クエリはカーソル位置に依らず**ブラケット内の全文**（Cosense と同じセマンティクス）。確定時はペア全体を置換。候補の第一ソースは **vector（意味）検索** `GET /api/pages/:project/search/vector/titles?q=`（本家 Web エディタがキーストロークごとに叩いているのを HAR で実測確認。score 順・`exists:false` = 赤リンク）。ローカルのタイトルインデックス（exact > prefix > substring > asearch ファジー階層）を後段にマージし、vector が使えないプロジェクト（490/404）ではローカルのみで動く。textEdit で `[title]` / `#title` 全体を置換。コードブロック内・inlineCode 内では発火しない。`isIncomplete: true` で毎キーストローク再クエリ。
 - `textDocument/definition`: カーソル下の internalLink / hashtag / projectLink → `cosense://<project>/<title>` の Location。
 - sync: `TextDocuments` ヘルパー（incremental）。
 
@@ -161,9 +161,9 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 
 ### URI スキーム
 
-`cosense://<project>/<encodeURIComponent(title)>`。Lua/サーバー双方でこの規約を共有。パースは `vscode-uri` を使わず単純な文字列処理でよい（authority = project、path = title）。
+`cosense://<project>/<title>`。URI はバッファ名を兼ねてタブ等に表示されるため unicode は生のまま、構造を壊す `%` `/` `?` `#` と制御文字のみパーセントエンコードする。Lua（uri.lua）とサーバー（uriScheme.ts）でバイト単位に同一の規則を共有。パースは単純な文字列処理（authority = project、path = title）で、フルエンコードされた旧形式 URI も受理する。
 
-## Neovim プラグイン仕様（nvim/）
+## Neovim プラグイン仕様（lua/ + plugin/）
 
 - nvim >= 0.11 前提。依存プラグインなし（telescope/snacks 連携は後回し。picker は `vim.ui.select`、入力は `vim.ui.input`、PAT 入力のみ `vim.fn.inputsecret`）。
 - `require('chatora').setup({ origin?, project?, server_cmd?, sidebar_width?, related_height? })`
@@ -209,7 +209,7 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 
 - core: fetch をモック注入して API クライアント・credentials（settings.json パスは `CHATORA_SETTINGS_PATH` 環境変数で差し替え、`COSENSE_SETTINGS_PATH` もエイリアスとして有効。Keychain は `security` コマンドを exec ラッパー経由にしてモック）・computeChanges を `bun test` で。
 - server: semantic tokens 変換・補完検出・URI 変換を純関数として切り出して `bun test`。
-- e2e: `nvim --headless` でプラグイン読込 + `:Chatora` コマンド存在確認のスモークテスト（`nvim/tests/smoke.lua`）。実 API を叩くテストは書かない（ユーザーが実 PAT で手動確認）。
+- e2e: `nvim --headless` でプラグイン読込 + `:Chatora` コマンド存在確認のスモークテスト（`tests/smoke.lua`）。実 API を叩くテストは書かない（ユーザーが実 PAT で手動確認）。
 
 ## セキュリティ / 作法
 

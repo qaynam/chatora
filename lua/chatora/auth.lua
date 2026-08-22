@@ -1,3 +1,5 @@
+-- Cosense PAT auth flow: gates plugin actions behind an authenticated check,
+-- prompting for and submitting a PAT via the LSP when not yet logged in.
 local M = {}
 
 local lsp = require('chatora.lsp')

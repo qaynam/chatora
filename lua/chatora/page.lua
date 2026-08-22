@@ -13,7 +13,7 @@ local uv = vim.uv or vim.loop
 local autosave_timers = {}
 
 --- Debounced autosave: (re)arm the buffer's timer; fires config.autosave
---- seconds after the last edit, saving only if still modified.
+--- seconds (minimum 1s) after the last edit, saving only if still modified.
 local function schedule_autosave(bufnr)
   local secs = config.options.autosave
   if not secs or secs == false then
