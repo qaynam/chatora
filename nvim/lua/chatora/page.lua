@@ -4,6 +4,48 @@ local M = {}
 local uri = require('chatora.uri')
 local lsp = require('chatora.lsp')
 local related = require('chatora.related')
+local codeblock = require('chatora.codeblock')
+local images = require('chatora.images')
+local pads = require('chatora.pads')
+local config = require('chatora.config')
+
+local uv = vim.uv or vim.loop
+local autosave_timers = {}
+
+--- Debounced autosave: (re)arm the buffer's timer; fires config.autosave
+--- seconds after the last edit, saving only if still modified.
+local function schedule_autosave(bufnr)
+  local secs = config.options.autosave
+  if not secs or secs == false then
+    return
+  end
+  local timer = autosave_timers[bufnr]
+  if not timer then
+    timer = uv.new_timer()
+    autosave_timers[bufnr] = timer
+  end
+  timer:stop()
+  timer:start(
+    math.max(1000, math.floor(secs * 1000)),
+    0,
+    vim.schedule_wrap(function()
+      if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].modified then
+        vim.api.nvim_buf_call(bufnr, function()
+          vim.cmd('silent write')
+        end)
+      end
+    end)
+  )
+end
+
+local function drop_autosave(bufnr)
+  local timer = autosave_timers[bufnr]
+  if timer then
+    timer:stop()
+    timer:close()
+    autosave_timers[bufnr] = nil
+  end
+end
 
 --- Replace buffer content without polluting undo history.
 local function set_content(bufnr, text)
@@ -35,11 +77,15 @@ local function finalize_buffer(bufnr, project, title)
     vim.b[bufnr].chatora_attached = true
     vim.api.nvim_buf_attach(bufnr, false, {
       on_lines = function()
-        vim.schedule(refresh_sidebar_marks)
+        vim.schedule(function()
+          refresh_sidebar_marks()
+          schedule_autosave(bufnr)
+        end)
       end,
       on_detach = function()
         vim.schedule(function()
           pcall(vim.api.nvim_buf_set_var, bufnr, 'chatora_attached', false)
+          drop_autosave(bufnr)
           refresh_sidebar_marks()
         end)
       end,
@@ -52,6 +98,10 @@ local function finalize_buffer(bufnr, project, title)
   vim.keymap.set('n', 'gs', function()
     require('chatora').search()
   end, { buffer = bufnr, nowait = true, silent = true })
+
+  codeblock.attach(bufnr)
+  images.attach(bufnr, project)
+  pads.attach(bufnr)
 end
 
 local function handle_read(ev)
@@ -69,6 +119,12 @@ local function handle_read(ev)
   vim.bo[bufnr].buftype = 'acwrite'
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].filetype = 'cosense'
+  -- Cosense indentation: 1 whitespace char = 1 level. Make >> / <C-t> / Tab
+  -- shift by one space, and keep tabs narrow when a page contains them.
+  vim.bo[bufnr].expandtab = true
+  vim.bo[bufnr].shiftwidth = 1
+  vim.bo[bufnr].softtabstop = 1
+  vim.bo[bufnr].tabstop = 2
 
   lsp.request_ok('chatora/openPage', { project = project, title = title }, function(result)
     if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -120,6 +176,9 @@ local function handle_write(ev)
     end
 
     vim.bo[bufnr].modified = false
+    -- The modified flag just flipped without any text change, so no autocmd or
+    -- on_lines fires — refresh the sidebar's ● mark explicitly.
+    refresh_sidebar_marks()
 
     if result.titleChanged then
       -- Renaming the buffer in place would desync the LSP client (didOpen was sent for the

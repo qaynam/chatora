@@ -6,6 +6,16 @@ local defaults = {
   server_cmd = nil,
   sidebar_width = 32,
   related_height = 8,
+  -- 'auto' = render inline images when snacks.nvim's image module is
+  -- installed and the terminal supports it; false = never.
+  images = 'auto',
+  -- Seconds of idle time after an edit before the page is saved automatically;
+  -- false disables autosave.
+  autosave = false,
+  -- Cosense-style bullet pads on indented lines (guides + a bullet at the
+  -- deepest level, plus inline spacing so it reads as a list). false disables;
+  -- a table customizes: { bullet = '●', guide = '│', spacing = true }.
+  pads = true,
 }
 
 M.options = vim.deepcopy(defaults)

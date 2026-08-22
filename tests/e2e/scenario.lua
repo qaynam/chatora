@@ -263,7 +263,8 @@ local ok, err = pcall(function()
       return false
     end
     for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
-      if l == 'メモ' then
+      -- Item lines carry a 2-space indent under their bold section header.
+      if l == '  メモ' then
         related_buf = b
         return true
       end
@@ -381,6 +382,73 @@ local ok, err = pcall(function()
     fail('timed out waiting for the ● unsaved mark to clear')
   end
   log('sidebar unsaved mark OK (appears and clears)')
+
+  -- ===================================================================================
+  -- STEP: incremental search picker — recent pages on empty query, live search
+  -- results while typing, <CR>-equivalent accept opens the page
+  -- ===================================================================================
+  step('picker')
+
+  local picker = require('chatora.picker')
+  picker.open('testproj')
+  log('picker opened')
+
+  local function items_contain(title)
+    for _, item in ipairs(picker.get_items() or {}) do
+      if item.title == title then
+        return true
+      end
+    end
+    return false
+  end
+
+  if not wait_for(10000, function()
+    return items_contain('ホーム')
+  end) then
+    fail(
+      'picker: timed out waiting for recent pages on empty query; items='
+        .. vim.inspect(picker.get_items())
+    )
+  end
+  log('picker recent list OK')
+
+  picker.set_query('検索テスト')
+  if not wait_for(10000, function()
+    return items_contain('メモ')
+  end) then
+    fail('picker: timed out waiting for search results; items=' .. vim.inspect(picker.get_items()))
+  end
+  log('picker live query OK')
+
+  -- Move the selection onto メモ (bounded — the item list is fixed here).
+  local items = picker.get_items() or {}
+  local target_idx = nil
+  for i, item in ipairs(items) do
+    if item.title == 'メモ' then
+      target_idx = i
+      break
+    end
+  end
+  assert(target_idx, 'メモ not in picker items')
+  for _ = 1, target_idx - 1 do
+    picker.move(1)
+  end
+  picker.accept()
+  log('picker accepted')
+  assert(not picker.is_open(), 'picker should close on accept')
+
+  local memo_uri = uri_mod.format('testproj', 'メモ')
+  if not wait_for(10000, function()
+    local b = vim.fn.bufnr(memo_uri)
+    if b == -1 then
+      return false
+    end
+    local first = vim.api.nvim_buf_get_lines(b, 0, 1, false)[1]
+    return first == 'メモ'
+  end) then
+    fail('picker: timed out waiting for メモ to open after accept')
+  end
+  log('picker OK (recent list, live query, accept opens page)')
 
   -- ===================================================================================
   -- STEP: final-checks

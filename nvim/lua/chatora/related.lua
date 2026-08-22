@@ -6,6 +6,12 @@ local lsp = require('chatora.lsp')
 local buf, win, parent_win
 local cur_project, cur_title
 local line_items = {}
+local ns = vim.api.nvim_create_namespace('chatora_related')
+
+local function ensure_hl()
+  vim.api.nvim_set_hl(0, 'ChatoraRelatedHeader', { bold = true, underline = true, default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraRelatedEmpty', { link = 'NonText', default = true })
+end
 
 local function is_open()
   return win ~= nil and vim.api.nvim_win_is_valid(win)
@@ -33,16 +39,21 @@ local function ensure_buf()
 end
 
 local function render(links1hop, links2hop)
+  ensure_hl()
   line_items = {}
   local lines = {}
+  local header_lines = {}
+  local empty_lines = {}
 
   local function add_section(name, items)
-    lines[#lines + 1] = '# ' .. name
+    lines[#lines + 1] = name
+    header_lines[#header_lines + 1] = #lines - 1
     if not items or #items == 0 then
       lines[#lines + 1] = '  (none)'
+      empty_lines[#empty_lines + 1] = #lines - 1
     else
       for _, item in ipairs(items) do
-        lines[#lines + 1] = item.title or '(untitled)'
+        lines[#lines + 1] = '  ' .. (item.title or '(untitled)')
         line_items[#lines] = item
       end
     end
@@ -54,6 +65,19 @@ local function render(links1hop, links2hop)
 
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  for _, l in ipairs(header_lines) do
+    vim.api.nvim_buf_set_extmark(buf, ns, l, 0, {
+      end_col = #lines[l + 1],
+      hl_group = 'ChatoraRelatedHeader',
+    })
+  end
+  for _, l in ipairs(empty_lines) do
+    vim.api.nvim_buf_set_extmark(buf, ns, l, 0, {
+      end_col = #lines[l + 1],
+      hl_group = 'ChatoraRelatedEmpty',
+    })
+  end
   vim.bo[buf].modifiable = false
 end
 
