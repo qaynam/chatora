@@ -156,6 +156,7 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 'chatora/relatedPages' { project, title }         → { ok, links1hop: RelatedPage[], links2hop: RelatedPage[] }
 'chatora/search'      { project, query, mode? }   → { ok, pages: { title, lines?: string[] }[] }  // mode: 'fulltext'(既定)|'vector'
 'chatora/newPage'     { project, title }          → { ok, uri, text }  // 空ページとして open（保存時に新規 preview/submit）
+'chatora/fetchAsset'  { project, url }            → { ok, path }  // url を取得しローカルキャッシュ（$XDG_CACHE_HOME/chatora/assets）のファイルパスを返す。資格情報ヘッダーは url が session origin と同一のときのみ付与し、リダイレクトで origin を離れた時点で外す
 ```
 
 ### URI スキーム

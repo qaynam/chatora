@@ -1,0 +1,309 @@
+import { createHash, randomBytes } from 'node:crypto'
+import { mkdir, readdir, rename, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import type { Credential, HttpClientShape } from '@chatora/core'
+import { HttpClient } from '@chatora/core'
+import { Context, Data, Deferred, Effect, Layer, Option, SynchronizedRef } from 'effect'
+import type { ErrCode, ErrEnvelope } from './pages'
+import { SessionState } from './state'
+
+const err = (code: ErrCode, message: string): ErrEnvelope => ({ ok: false, code, message })
+const UNAUTHORIZED_STATUSES: ReadonlySet<number> = new Set([401, 403])
+
+export interface FetchAssetSuccess {
+  readonly ok: true
+  readonly path: string
+}
+export type FetchAssetResult = FetchAssetSuccess | ErrEnvelope
+
+/**
+ * `status` mirrors CosenseApiError's convention: the real HTTP status for a non-2xx final
+ * response, or `0` for a failure below the HTTP layer (transport, redirect-limit, disk I/O).
+ * `message` is always safe to forward to the client — it never includes a header value.
+ */
+class AssetFetchError extends Data.TaggedError('AssetFetchError')<{
+  readonly status: number
+  readonly message: string
+}> {}
+
+// ---------------------------------------------------------------------------
+// cache directory + on-disk lookup
+// ---------------------------------------------------------------------------
+
+/**
+ * `$XDG_CACHE_HOME/chatora/assets`, falling back to `~/.cache/chatora/assets`.
+ * `CHATORA_CACHE_DIR` overrides the whole path when set, so tests can point the cache at a
+ * throwaway temp directory instead of touching the real home directory.
+ */
+const resolveCacheDir = (): string => {
+  const override = process.env.CHATORA_CACHE_DIR
+  if (override !== undefined && override !== '') return override
+  const xdgCacheHome = process.env.XDG_CACHE_HOME
+  const base =
+    xdgCacheHome !== undefined && xdgCacheHome !== '' ? xdgCacheHome : join(homedir(), '.cache')
+  return join(base, 'chatora', 'assets')
+}
+
+/** First 32 hex chars of sha256(url) — enough to make collisions a non-concern for a local icon/image cache. */
+const cacheKey = (url: string): string =>
+  createHash('sha256').update(url).digest('hex').slice(0, 32)
+
+const CONTENT_TYPE_EXTENSIONS: Readonly<Record<string, string>> = {
+  'image/png': '.png',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg',
+}
+const FALLBACK_EXTENSION = '.img'
+
+// snacks.nvim sniffs image content itself, so an unrecognized content-type isn't fatal —
+// '.img' just keeps the cache file's name meaningful without guessing wrong.
+const extensionFor = (contentType: string | null): string => {
+  if (contentType === null) return FALLBACK_EXTENSION
+  const mime = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
+  return CONTENT_TYPE_EXTENSIONS[mime] ?? FALLBACK_EXTENSION
+}
+
+/**
+ * Any file already on disk for this hash, regardless of which extension it was written with —
+ * a cache hit skips the network entirely, since icons rarely change (a future refresh command
+ * can invalidate by deleting the cache directory).
+ */
+const findCached = (cacheDir: string, hash: string): Effect.Effect<Option.Option<string>> =>
+  Effect.tryPromise(() => readdir(cacheDir)).pipe(
+    Effect.map((names) => names.find((name) => name.startsWith(hash))),
+    Effect.map((name) => (name === undefined ? Option.none() : Option.some(join(cacheDir, name)))),
+    // readdir fails with ENOENT before the cache directory has ever been created; either way
+    // that just means "not cached yet".
+    Effect.orElseSucceed(() => Option.none<string>()),
+  )
+
+const writeAtomic = (
+  cacheDir: string,
+  hash: string,
+  ext: string,
+  body: Uint8Array,
+): Effect.Effect<string, AssetFetchError> =>
+  Effect.gen(function* () {
+    yield* Effect.tryPromise(() => mkdir(cacheDir, { recursive: true })).pipe(
+      Effect.mapError(
+        () => new AssetFetchError({ status: 0, message: 'failed to create asset cache directory' }),
+      ),
+    )
+    const finalPath = join(cacheDir, `${hash}${ext}`)
+    // Write-then-rename: a concurrent reader (snacks placing the previous refresh's image)
+    // never observes a partially-written file at the final path.
+    const tmpPath = join(cacheDir, `.${hash}${ext}.${randomBytes(4).toString('hex')}.tmp`)
+    yield* Effect.tryPromise(() => writeFile(tmpPath, body)).pipe(
+      Effect.mapError(
+        () => new AssetFetchError({ status: 0, message: 'failed to write cached asset' }),
+      ),
+    )
+    yield* Effect.tryPromise(() => rename(tmpPath, finalPath)).pipe(
+      Effect.mapError(
+        () => new AssetFetchError({ status: 0, message: 'failed to finalize cached asset' }),
+      ),
+    )
+    return finalPath
+  })
+
+// ---------------------------------------------------------------------------
+// credential-scoped fetch with manual redirects
+// ---------------------------------------------------------------------------
+
+// cosense-cli's own file-download path never forwards credential headers across a redirect
+// (docs/ARCHITECTURE.md "セキュリティ / 作法"); the icon endpoint specifically 302s to GCS,
+// which is the case this whole manual-redirect walk exists for.
+const MAX_REDIRECTS = 3
+const isRedirectStatus = (status: number): boolean => status >= 300 && status < 400
+
+const buildCredentialHeaders = (credential: Credential): Record<string, string> =>
+  credential.type === 'serviceAccount'
+    ? { 'x-service-account-access-key': credential.value }
+    : { 'x-personal-access-token': credential.value }
+
+const originOf = (url: string): string | null => {
+  try {
+    return new URL(url).origin
+  } catch {
+    return null
+  }
+}
+
+/** Recomputed at every hop from the *current* URL, so the header is dropped the instant a redirect leaves the session origin (and never re-attached if it somehow returns). */
+const headersForUrl =
+  (sessionOrigin: string, credential: Option.Option<Credential>) =>
+  (url: string): Record<string, string> =>
+    Option.isSome(credential) && originOf(url) === originOf(sessionOrigin)
+      ? buildCredentialHeaders(credential.value)
+      : {}
+
+const fetchFollowingRedirects = (
+  fetch: HttpClientShape['fetch'],
+  headersFor: (url: string) => Record<string, string>,
+  startUrl: string,
+): Effect.Effect<Response, AssetFetchError> =>
+  Effect.gen(function* () {
+    let url = startUrl
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const response = yield* fetch(url, { headers: headersFor(url), redirect: 'manual' }).pipe(
+        Effect.mapError(
+          (error) =>
+            new AssetFetchError({ status: 0, message: `fetch failed: ${String(error.cause)}` }),
+        ),
+      )
+      if (!isRedirectStatus(response.status)) return response
+      if (hop === MAX_REDIRECTS) {
+        return yield* Effect.fail(new AssetFetchError({ status: 0, message: 'too many redirects' }))
+      }
+      const location = response.headers.get('location')
+      if (location === null) return response // nothing to follow; the non-2xx check below reports it
+      url = new URL(location, url).toString()
+    }
+    return yield* Effect.fail(new AssetFetchError({ status: 0, message: 'too many redirects' }))
+  })
+
+const fromAssetFetchError = (error: AssetFetchError): ErrEnvelope =>
+  UNAUTHORIZED_STATUSES.has(error.status)
+    ? err('unauthorized', 'authentication failed')
+    : err('error', error.message)
+
+const fetchAndCache = (
+  fetch: HttpClientShape['fetch'],
+  headersFor: (url: string) => Record<string, string>,
+  cacheDir: string,
+  hash: string,
+  url: string,
+): Effect.Effect<FetchAssetResult> =>
+  Effect.gen(function* () {
+    const response = yield* fetchFollowingRedirects(fetch, headersFor, url)
+    if (!response.ok) {
+      return yield* Effect.fail(
+        new AssetFetchError({
+          status: response.status,
+          message: `HTTP ${response.status} ${response.statusText}`.trim(),
+        }),
+      )
+    }
+    const body = yield* Effect.tryPromise(() => response.arrayBuffer()).pipe(
+      Effect.mapError(
+        () => new AssetFetchError({ status: 0, message: 'failed to read response body' }),
+      ),
+    )
+    const ext = extensionFor(response.headers.get('content-type'))
+    const path = yield* writeAtomic(cacheDir, hash, ext, new Uint8Array(body))
+    return { ok: true as const, path }
+  }).pipe(Effect.catchTag('AssetFetchError', (error) => Effect.succeed(fromAssetFetchError(error))))
+
+// ---------------------------------------------------------------------------
+// in-flight dedupe
+// ---------------------------------------------------------------------------
+
+export interface AssetCacheShape {
+  /**
+   * Runs `effect` for `key` at most once at a time: a second call for the same key while the
+   * first is still in flight joins the first's result instead of starting its own fetch. A
+   * page full of repeated icon notation for the same page name is the motivating case.
+   */
+  readonly dedupe: (
+    key: string,
+    effect: Effect.Effect<FetchAssetResult>,
+  ) => Effect.Effect<FetchAssetResult>
+}
+
+export class AssetCache extends Context.Tag('@chatora/server/AssetCache')<
+  AssetCache,
+  AssetCacheShape
+>() {}
+
+interface PendingLookup {
+  readonly deferred: Deferred.Deferred<FetchAssetResult>
+  readonly isNew: boolean
+}
+
+export const AssetCacheLive: Layer.Layer<AssetCache> = Layer.effect(
+  AssetCache,
+  Effect.gen(function* () {
+    const pendingRef = yield* SynchronizedRef.make<
+      ReadonlyMap<string, Deferred.Deferred<FetchAssetResult>>
+    >(new Map())
+
+    const dedupe: AssetCacheShape['dedupe'] = (key, effect) =>
+      Effect.gen(function* () {
+        // SynchronizedRef serializes this read-or-register step, so two callers racing on the
+        // same key can never both conclude "I'm first" and start two fetches.
+        const { deferred, isNew } = yield* SynchronizedRef.modifyEffect(
+          pendingRef,
+          (
+            pending,
+          ): Effect.Effect<
+            readonly [PendingLookup, ReadonlyMap<string, Deferred.Deferred<FetchAssetResult>>]
+          > => {
+            const existing = pending.get(key)
+            if (existing !== undefined) {
+              return Effect.succeed([{ deferred: existing, isNew: false }, pending])
+            }
+            return Deferred.make<FetchAssetResult>().pipe(
+              Effect.map((fresh) => [
+                { deferred: fresh, isNew: true },
+                new Map(pending).set(key, fresh),
+              ]),
+            )
+          },
+        )
+
+        if (isNew) {
+          yield* effect.pipe(
+            Effect.exit,
+            Effect.flatMap((exit) => Deferred.done(deferred, exit)),
+            Effect.zipRight(
+              SynchronizedRef.update(pendingRef, (pending) => {
+                if (!pending.has(key)) return pending
+                const next = new Map(pending)
+                next.delete(key)
+                return next
+              }),
+            ),
+            Effect.forkDaemon,
+          )
+        }
+
+        return yield* Deferred.await(deferred)
+      })
+
+    return AssetCache.of({ dedupe })
+  }),
+)
+
+// ---------------------------------------------------------------------------
+// chatora/fetchAsset
+// ---------------------------------------------------------------------------
+
+export const fetchAsset = (params: {
+  readonly project: string
+  readonly url: string
+}): Effect.Effect<FetchAssetResult, never, SessionState | HttpClient | AssetCache> =>
+  Effect.gen(function* () {
+    const session = yield* SessionState
+    const cache = yield* AssetCache
+    const http = yield* HttpClient
+    const cacheDir = resolveCacheDir()
+    const hash = cacheKey(params.url)
+
+    const cached = yield* findCached(cacheDir, hash)
+    if (Option.isSome(cached)) return { ok: true as const, path: cached.value }
+
+    const credential = yield* session.getCredential()
+    const headersFor = headersForUrl(session.origin, credential)
+
+    // `params.project` isn't read here: Lua already resolved the icon path into an absolute
+    // `url` before sending this request. It stays part of the wire contract for symmetry with
+    // the other chatora/* requests.
+    return yield* cache.dedupe(
+      params.url,
+      fetchAndCache(http.fetch, headersFor, cacheDir, hash, params.url),
+    )
+  })

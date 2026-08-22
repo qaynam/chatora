@@ -14,6 +14,7 @@ import {
   TextDocuments,
 } from 'vscode-languageserver/node'
 import { TextDocument } from 'vscode-languageserver-textdocument'
+import { type AssetCache, AssetCacheLive, fetchAsset } from './assets'
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
 import { definitionLocation, findDefinitionTarget } from './definition'
@@ -27,12 +28,13 @@ const DEFAULT_ORIGIN = 'https://scrapbox.io'
 const connection = createConnection()
 const documents = new TextDocuments(TextDocument)
 
-type AppRuntime = ManagedRuntime.ManagedRuntime<SessionState | HttpClient, never>
+type AppRuntime = ManagedRuntime.ManagedRuntime<SessionState | HttpClient | AssetCache, never>
 
-/** One origin's worth of infrastructure: HttpClient (network), and SessionState wired to CredentialStore/CommandExecutor (Keychain access). */
-const buildAppLayer = (origin: string): Layer.Layer<SessionState | HttpClient> =>
+/** One origin's worth of infrastructure: HttpClient (network), SessionState wired to CredentialStore/CommandExecutor (Keychain access), and AssetCache (chatora/fetchAsset's in-flight fetch dedupe). */
+const buildAppLayer = (origin: string): Layer.Layer<SessionState | HttpClient | AssetCache> =>
   Layer.mergeAll(
     HttpClientLive,
+    AssetCacheLive,
     makeSessionStateLayer(origin).pipe(
       Layer.provide(CredentialStoreLive.pipe(Layer.provide(CommandExecutorLive))),
     ),
@@ -165,6 +167,9 @@ connection.onRequest(
   'chatora/search',
   (params: { project: string; query: string; mode?: 'fulltext' | 'vector' }) =>
     runtime.runPromise(handlers.search(params)),
+)
+connection.onRequest('chatora/fetchAsset', (params: { project: string; url: string }) =>
+  runtime.runPromise(fetchAsset(params)),
 )
 
 documents.listen(connection)

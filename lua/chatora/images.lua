@@ -15,19 +15,25 @@
 --                                  -- it's safe on our acwrite buffers)
 --     opts.height = <cells>
 --   placement:close()             -- removes its extmarks + augroup
--- Remote src (http/https) is fetched with a plain `curl -L -o file src`
--- (see convert.lua's `url` command) -- no auth headers are sent, so
--- private-project icons will 404. snacks fails that placement silently,
--- which is acceptable here (see limitations in the module doc / help.lua).
+-- `src` is always a *local* file path here, never a remote URL: every
+-- target is resolved through the `chatora/fetchAsset` LSP request first
+-- (see lua/chatora/lsp.lua), which the server fetches with session
+-- credential headers when (and only when) the URL is same-origin, so
+-- private-project icons work instead of 404ing the way a bare unauthenticated
+-- `curl` would. See docs/ARCHITECTURE.md's chatora/* request list and
+-- packages/server/src/assets.ts.
 local M = {}
 
 local config = require('chatora.config')
+local lsp = require('chatora.lsp')
 
 local DEBOUNCE_MS = 150
 local uv = vim.uv or vim.loop
 local timers_by_bufnr = {}
 local placements_by_bufnr = {} -- values are lists of snacks placement objects
 local project_by_bufnr = {}
+local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async fetchAsset replies
+local path_by_url = {} -- url -> local file path, resolved once via fetchAsset and reused
 
 local IMAGE_EXTENSIONS = { png = true, jpg = true, jpeg = true, gif = true, webp = true }
 
@@ -131,7 +137,10 @@ local function clear_placements(bufnr)
   placements_by_bufnr[bufnr] = nil
 end
 
---- Clear and re-render every image placement in bufnr, synchronously.
+--- Clear and re-render every image placement in bufnr. Placement itself is
+--- asynchronous (each target's local file path comes back from a
+--- `chatora/fetchAsset` request), so this kicks off requests and returns
+--- immediately; placements land as replies arrive.
 function M.refresh(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -147,31 +156,59 @@ function M.refresh(bufnr)
 
   clear_placements(bufnr)
 
-  local origin = config.options.origin
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local new_placements = {}
+  -- Bumped so a fetchAsset reply for a target this refresh no longer has
+  -- (buffer edited again, or detached, before the reply arrived) is
+  -- dropped instead of placing an extmark against a stale position --
+  -- the next debounced refresh already supersedes it.
+  local epoch = (epoch_by_bufnr[bufnr] or 0) + 1
+  epoch_by_bufnr[bufnr] = epoch
 
-  local function place(src, row, col, opts)
+  local new_placements = {}
+  placements_by_bufnr[bufnr] = new_placements
+
+  local function place(path, row, col, opts)
+    if epoch_by_bufnr[bufnr] ~= epoch or not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
     local placement_opts = vim.tbl_extend('force', { pos = { row, col }, inline = true }, opts or {})
-    local ok, p = pcall(image.placement.new, bufnr, src, placement_opts)
+    local ok, p = pcall(image.placement.new, bufnr, path, placement_opts)
     if ok and p then
       new_placements[#new_placements + 1] = p
     end
   end
 
+  --- Resolve url to a local path (via the fetchAsset cache, or a fresh LSP
+  --- request) and place it. Fetch failures are silent -- this is a
+  --- cosmetic feature, matching the previous curl-based behavior.
+  local function place_url(url, row, col, opts)
+    local cached_path = path_by_url[url]
+    if cached_path then
+      place(cached_path, row, col, opts)
+      return
+    end
+    lsp.request('chatora/fetchAsset', { project = project, url = url }, function(err, result)
+      if err or not result or result.ok == false then
+        return
+      end
+      path_by_url[url] = result.path
+      place(result.path, row, col, opts)
+    end)
+  end
+
+  local origin = config.options.origin
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
   for i, line in ipairs(lines) do
     for _, target in ipairs(icon_targets(line)) do
-      local src = origin .. '/api/pages/' .. project .. '/' .. encode_path_segment(target.name) .. '/icon'
-      place(src, i, target.col, { height = 1 })
+      local url = origin .. '/api/pages/' .. project .. '/' .. encode_path_segment(target.name) .. '/icon'
+      place_url(url, i, target.col, { height = 1 })
     end
 
     local standalone_src = standalone_image_src(line)
     if standalone_src then
-      place(standalone_src, i, 0, { max_height = 20 })
+      place_url(standalone_src, i, 0, { max_height = 20 })
     end
   end
-
-  placements_by_bufnr[bufnr] = new_placements
 end
 
 local function schedule_refresh(bufnr)
@@ -231,6 +268,7 @@ function M.attach(bufnr, project)
         pcall(vim.api.nvim_buf_set_var, bufnr, 'chatora_images_attached', false)
         clear_placements(bufnr)
         project_by_bufnr[bufnr] = nil
+        epoch_by_bufnr[bufnr] = nil
       end)
     end,
   })
