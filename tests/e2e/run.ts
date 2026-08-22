@@ -92,7 +92,6 @@ const runScenario = async (): Promise<{ exitCode: number; stdout: string; stderr
     ...(process.env as Record<string, string>),
     COSENSE_PAT: 'test-pat',
     CHATORA_TEST_ORIGIN: fake.origin,
-    CHATORA_SETTINGS_PATH: '/nonexistent/chatora-e2e-settings.json',
     COSENSE_SETTINGS_PATH: '/nonexistent/chatora-e2e-settings.json',
   }
 

@@ -89,38 +89,38 @@ origin は既定 `https://scrapbox.io`（設定で変更可能に）。
 - **存在しないページは 404 にならない**: `GET /api/pages/v2/...` は HTTP 200 + `persistent: false` + 偽の id/commitId/行 id を返す。偽 id をアンカーに使うと事故るため、`CosenseApi.getPage()` は `persistent:false` を `null` に畳み込み済み。
 - HTTP パス上のタイトルエンコードは encodeURIComponent ではなく cosense-cli の `encodeTitleForUrl` 方式（`% / ? #` のみ encode、空白→`_`、unicode は生）。これは `CosenseApi` 内部に実装済みで、呼び出し側は生タイトルを渡すだけでよい。**cosense:// URI スキームは最小限エンコード（下記）** であり別物（HTTP パスとは無関係）。
 
-## @chatora/core 公開 API（サーバーが依存する契約）
+## @chatora/core 公開 API（effect-ts、サーバーが依存する契約）
+
+TS 層は effect-ts（^3.22）全面採用。サービスは Context.Tag + Layer、エラーは Data.TaggedError、
+レスポンスは寛容な Schema でデコード（現行 API が受理するレスポンスをデコード失敗にしない）。
 
 ```ts
-// credentials.ts
-type Credential = { type: 'pat' | 'serviceAccount'; value: string; source: 'env' | 'keychain' | 'settingsJson' }
-resolveCredential(origin: string, opts?): Promise<Credential | null>
-storeCredential(origin: string, pat: string): Promise<void>   // Keychain 保存
-deleteCredential(origin: string): Promise<void>
+// errors.ts — throw しない。全操作が Effect<A, E, R> を返す
+CosenseApiError { status: number; code?: string }   // status 0 = transport、code 'NotFastForward' 等
+KeychainError / CommandExecutorError / HttpClientError
 
-// api.ts — fetch 注入可能（テスト用）
-class CosenseApi {
-  constructor(opts: { origin: string; credential: Credential; fetch?: typeof fetch })
-  me(): Promise<Me>                       // { id, name, displayName }
-  projects(): Promise<ProjectSummary[]>
-  listPages(project, { skip?, limit?, sort? }): Promise<{ count: number; pages: PageSummary[] }>
-  getPage(project, title): Promise<PageDetail | null>   // 404 → null。lines: {id,text}[] 必須
-  relatedPages(project, title): Promise<RelatedPages>    // links1hop/links2hop
-  searchFullText(project, query): Promise<SearchResult>
-  searchVector(project, query): Promise<VectorResult>    // 490 → { pages: [] }
-  searchTitles(project): Promise<TitleEntry[]>
-  previewEdit(project, body): Promise<PreviewResponse>
-  submitEdit(project, previewId): Promise<SubmitResponse>
-}
-// エラーは class CosenseApiError extends Error { status, code?: 'NotFastForward'|'DuplicateTitle'|... }
+// サービス（それぞれ *Live Layer あり）
+CommandExecutor  // execFile ラッパー（argv 配列、shell 文字列禁止）
+HttpClient       // fetch ラッパー（テストで差し替え）
+CredentialStore  // resolve(origin): Effect<Option<Credential>>（env COSENSE_PAT → Keychain）
+                 // store(origin, pat) / remove(origin)（Keychain のみ）
+                 // CredentialStoreLive は CommandExecutor を要求
 
-// changes.ts — 保存時の diff
-computeChanges(base: { id: string; text: string }[], next: string[], newLineId: () => string): RawChange[]
-// 行単位 diff（jsdiff の diffArrays か Myers 自前実装）。同一行の更新は _update、追加は直後アンカーの _insert、削除は _delete。
+// api.ts
+makeCosenseApi({ origin, credential }): CosenseApiShape
+// 各操作は Effect<A, CosenseApiError, HttpClient>:
+// me / projects / listPages / getPage → Option<PageDetail>（404 と persistent:false は none、
+// 偽 ID を絶対に漏らさない）/ relatedPages（1hop+2hop 並列）/ searchFullText /
+// searchVector（490 → {pages:[]}）/ searchTitles / previewEdit / submitEdit
 
-// lineId.ts
-createNewLineId(userId: string): string
+// 純関数（Effect で包まない）
+computeChanges(base, next, newLineId): readonly RawChange[]
+createNewLineId(userId): string   // 24 hex（userId は未使用、cosense-cli 互換）
 ```
+
+サーバー側は initialize 時に origin を受けて ManagedRuntime を構築し、LSP コールバックの縁で
+`runtime.runPromise` する。セッション状態（credential/検証結果/タイトル・vector キャッシュ/
+ページ base 状態）は SynchronizedRef/Ref を持つ SessionState サービス（TTL は Clock 経由）。
 
 ## LSP プロトコル
 

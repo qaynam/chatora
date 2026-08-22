@@ -23,15 +23,12 @@ if (!existsSync(serverPath)) {
 // the bundle needs zero node_modules assistance, matching how nvim spawns it standalone.
 const cwd = mkdtempSync(path.join(os.tmpdir(), 'chatora-smoke-'))
 
-// Hermetic: no env COSENSE_PAT, and CHATORA_SETTINGS_PATH points at a path that doesn't
-// exist, so resolveCredential's settings.json branch cleanly finds nothing. A real macOS
-// Keychain lookup may still run (findGenericPassword shells out to `security`) — it must
-// soft-fail to null when the "chatora" entry is absent, which is exactly what we're
-// asserting authStatus survives without hanging or crashing.
+// Hermetic: no env COSENSE_PAT, so CredentialStore.resolve falls through to its only other
+// source, the macOS Keychain (findGenericPassword shells out to `security`) — it must
+// soft-fail to Option.none when the "chatora" entry for this origin is absent, which is
+// exactly what we're asserting authStatus survives without hanging or crashing.
 const env = { ...process.env }
 delete env.COSENSE_PAT
-env.CHATORA_SETTINGS_PATH = path.join(cwd, 'does-not-exist', 'settings.json')
-env.COSENSE_SETTINGS_PATH = env.CHATORA_SETTINGS_PATH
 
 const child = spawn('node', [serverPath, '--stdio'], {
   cwd,

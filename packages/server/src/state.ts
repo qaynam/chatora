@@ -1,142 +1,262 @@
-import type { Credential, Me, TitleEntry, VectorResultPage } from '@chatora/core'
-import { CosenseApi, resolveCredential } from '@chatora/core'
+import type {
+  CosenseApiError,
+  CosenseApiShape,
+  Credential,
+  HttpClient,
+  KeychainError,
+  Me,
+  PageDetailLine,
+  TitleEntry,
+  VectorResultPage,
+} from '@chatora/core'
+import { CredentialStore, makeCosenseApi } from '@chatora/core'
+import { Clock, Context, Effect, Layer, Option, Ref, SynchronizedRef } from 'effect'
 
 export interface BasePageState {
   readonly project: string
   readonly title: string
   readonly pageId?: string
   readonly commitId?: string
-  readonly baseLines: readonly { id: string; text: string }[]
+  readonly baseLines: readonly PageDetailLine[]
   readonly exists: boolean
 }
+
+const TITLES_CACHE_TTL_MS = 60_000
+const VECTOR_CACHE_TTL_MS = 30_000
+const VECTOR_CACHE_MAX = 200
 
 interface TitlesCacheEntry {
   readonly fetchedAt: number
   readonly titles: readonly TitleEntry[]
 }
 
-const TITLES_CACHE_TTL_MS = 60_000
-const VECTOR_CACHE_TTL_MS = 30_000
-const VECTOR_CACHE_MAX = 200
-// Credential resolution has no project scope for these calls (see docs/ARCHITECTURE.md
-// resolveCredential(origin, project?)) — a distinct key from any real project name.
-const NO_PROJECT_KEY = '\0no-project'
+interface VectorCacheEntry {
+  readonly at: number
+  readonly pages: readonly VectorResultPage[]
+}
 
-/**
- * Session state for one LSP connection: origin, cached credential/CosenseApi per project
- * (a project may resolve to its own service-account credential), the once-per-session
- * verified user, per-project title caches (for completion), and open pages' base diff state
- * keyed by cosense:// URI (see openPage/savePage in pages.ts).
- */
-export class ServerState {
+// Tri-state memo: 'unresolved' until the first getCredential() call, then pinned to
+// whatever CredentialStore.resolve found — including "found nothing" — for the rest of the
+// session. CredentialStore.resolve(origin) takes no project (one credential per origin now
+// that service accounts have no resolver), so unlike the old per-project ServerState there
+// is exactly one slot to cache, not a Map.
+type CredentialCache =
+  | { readonly status: 'unresolved' }
+  | { readonly status: 'resolved'; readonly credential: Option.Option<Credential> }
+
+const UNRESOLVED_CREDENTIAL: CredentialCache = { status: 'unresolved' }
+
+type VerifiedCache =
+  | { readonly status: 'unattempted' }
+  | { readonly status: 'ok'; readonly user: Me }
+  | { readonly status: 'failed' }
+
+const UNATTEMPTED_VERIFIED: VerifiedCache = { status: 'unattempted' }
+
+export interface SessionStateShape {
   readonly origin: string
-  private credentialCache = new Map<string, Credential | null>()
-  private apiCache = new Map<string, CosenseApi>()
-  private titlesCache = new Map<string, TitlesCacheEntry>()
-  private vectorCache = new Map<
-    string,
-    { readonly at: number; readonly pages: VectorResultPage[] }
-  >()
-  private pages = new Map<string, BasePageState>()
-  verifiedUser: Me | undefined
-  private verifyFailed = false
-
-  constructor(origin: string) {
-    this.origin = origin
-  }
-
-  private credentialKey(project?: string): string {
-    return project ?? NO_PROJECT_KEY
-  }
-
-  async getCredential(project?: string): Promise<Credential | null> {
-    const key = this.credentialKey(project)
-    const cached = this.credentialCache.get(key)
-    if (cached !== undefined) return cached
-    const credential = await resolveCredential(this.origin, project)
-    this.credentialCache.set(key, credential)
-    return credential
-  }
-
-  async getApi(project?: string): Promise<CosenseApi | null> {
-    const key = this.credentialKey(project)
-    const cached = this.apiCache.get(key)
-    if (cached) return cached
-    const credential = await this.getCredential(project)
-    if (!credential) return null
-    const api = new CosenseApi({ origin: this.origin, credential })
-    this.apiCache.set(key, api)
-    return api
-  }
-
-  /** Uncached: builds a CosenseApi for an explicit credential (login verifies before caching). */
-  apiFor(credential: Credential): CosenseApi {
-    return new CosenseApi({ origin: this.origin, credential })
-  }
-
-  /** Login/logout invalidate every cache — a fresh credential may resolve differently per project. */
-  invalidateCredentials(): void {
-    this.credentialCache.clear()
-    this.apiCache.clear()
-    this.titlesCache.clear()
-    this.vectorCache.clear()
-    this.verifiedUser = undefined
-    this.verifyFailed = false
-  }
-
-  /** authStatus calls this — verifies /api/users/me at most once per session (until invalidated). */
-  async ensureVerified(): Promise<Me | undefined> {
-    if (this.verifiedUser || this.verifyFailed) return this.verifiedUser
-    const api = await this.getApi()
-    if (!api) return undefined
-    try {
-      this.verifiedUser = await api.me()
-    } catch {
-      this.verifyFailed = true
-    }
-    return this.verifiedUser
-  }
-
+  /** Resolution order: env, then Keychain (@chatora/core CredentialStore) — cached for the session. */
+  readonly getCredential: () => Effect.Effect<Option.Option<Credential>>
+  /** `getCredential` plus building a `CosenseApi` bound to it; `Option.none` when unauthenticated. */
+  readonly getApi: () => Effect.Effect<Option.Option<CosenseApiShape>>
+  /** Uncached: builds a CosenseApi for an explicit credential (login verifies before storing/caching it). */
+  readonly apiFor: (credential: Credential) => CosenseApiShape
+  /** Login/logout invalidate every cache — a fresh credential may resolve, or verify, differently. */
+  readonly invalidateCredentials: () => Effect.Effect<void>
+  /** Verifies /api/users/me at most once per session; both success and failure stay cached until invalidated. */
+  readonly ensureVerified: () => Effect.Effect<Option.Option<Me>, never, HttpClient>
+  readonly setVerifiedUser: (user: Me) => Effect.Effect<void>
+  /** The verified user's id, or '' if this session hasn't verified yet (savePage's line-id generation). */
+  readonly verifiedUserId: () => Effect.Effect<string>
+  readonly storeCredential: (pat: string) => Effect.Effect<void, KeychainError>
+  readonly removeCredential: () => Effect.Effect<void, KeychainError>
   /**
    * Vector (semantic) title search, cached briefly per (project, query) — completion
-   * re-queries on every keystroke, and backspacing replays recent queries. Throws on
-   * failure (490 = disabled returns [] from the API layer); callers fall back to the
-   * local title index.
+   * re-queries on every keystroke, and backspacing replays recent queries. Fails on API
+   * error (490 = disabled already folds into `{pages:[]}` inside @chatora/core); callers
+   * fall back to the local title index on failure.
    */
-  async searchVectorCached(project: string, query: string): Promise<VectorResultPage[]> {
-    const key = `${project}\0${query}`
-    const cached = this.vectorCache.get(key)
-    if (cached && Date.now() - cached.at < VECTOR_CACHE_TTL_MS) return cached.pages
-    const api = await this.getApi(project)
-    if (!api) return []
-    const result = await api.searchVector(project, query)
-    if (this.vectorCache.size >= VECTOR_CACHE_MAX) {
-      const oldest = this.vectorCache.keys().next().value
-      if (oldest !== undefined) this.vectorCache.delete(oldest)
-    }
-    this.vectorCache.set(key, { at: Date.now(), pages: result.pages })
-    return result.pages
-  }
-
-  async getTitles(project: string): Promise<readonly TitleEntry[]> {
-    const cached = this.titlesCache.get(project)
-    if (cached && Date.now() - cached.fetchedAt < TITLES_CACHE_TTL_MS) return cached.titles
-    const api = await this.getApi(project)
-    if (!api) return []
-    const titles = await api.searchTitles(project)
-    this.titlesCache.set(project, { fetchedAt: Date.now(), titles })
-    return titles
-  }
-
-  getPage(uri: string): BasePageState | undefined {
-    return this.pages.get(uri)
-  }
-
-  setPage(uri: string, state: BasePageState): void {
-    this.pages.set(uri, state)
-  }
-
-  deletePage(uri: string): void {
-    this.pages.delete(uri)
-  }
+  readonly searchVectorCached: (
+    project: string,
+    query: string,
+  ) => Effect.Effect<readonly VectorResultPage[], CosenseApiError, HttpClient>
+  readonly getTitles: (
+    project: string,
+  ) => Effect.Effect<readonly TitleEntry[], CosenseApiError, HttpClient>
+  readonly getPage: (uri: string) => Effect.Effect<Option.Option<BasePageState>>
+  readonly setPage: (uri: string, state: BasePageState) => Effect.Effect<void>
+  readonly deletePage: (uri: string) => Effect.Effect<void>
 }
+
+/**
+ * Session state for one LSP connection: origin, cached credential, the once-per-session
+ * verified user, the title cache and vector-search cache (both used by completion), and
+ * open pages' base diff state keyed by cosense:// URI (see openPage/savePage in pages.ts).
+ */
+export class SessionState extends Context.Tag('@chatora/server/SessionState')<
+  SessionState,
+  SessionStateShape
+>() {}
+
+/** Builds the `SessionState` service for one connection; `origin` is fixed at construction time. */
+export const makeSessionStateLayer = (
+  origin: string,
+): Layer.Layer<SessionState, never, CredentialStore> =>
+  Layer.effect(
+    SessionState,
+    Effect.gen(function* () {
+      const store = yield* CredentialStore
+      const credentialRef = yield* SynchronizedRef.make<CredentialCache>(UNRESOLVED_CREDENTIAL)
+      const verifiedRef = yield* SynchronizedRef.make<VerifiedCache>(UNATTEMPTED_VERIFIED)
+      const titlesCacheRef = yield* Ref.make<ReadonlyMap<string, TitlesCacheEntry>>(new Map())
+      const vectorCacheRef = yield* Ref.make<ReadonlyMap<string, VectorCacheEntry>>(new Map())
+      const pagesRef = yield* Ref.make<ReadonlyMap<string, BasePageState>>(new Map())
+
+      // SynchronizedRef serializes concurrent callers onto one CredentialStore.resolve call
+      // instead of racing several in-flight resolutions to the same cache slot.
+      const getCredential: SessionStateShape['getCredential'] = () =>
+        SynchronizedRef.modifyEffect(credentialRef, (cache) =>
+          cache.status === 'resolved'
+            ? Effect.succeed([cache.credential, cache] as const)
+            : Effect.map(
+                store.resolve(origin),
+                (credential): readonly [Option.Option<Credential>, CredentialCache] => [
+                  credential,
+                  { status: 'resolved', credential },
+                ],
+              ),
+        )
+
+      const getApi: SessionStateShape['getApi'] = () =>
+        Effect.map(
+          getCredential(),
+          Option.map((credential) => makeCosenseApi({ origin, credential })),
+        )
+
+      const apiFor: SessionStateShape['apiFor'] = (credential) =>
+        makeCosenseApi({ origin, credential })
+
+      const invalidateCredentials: SessionStateShape['invalidateCredentials'] = () =>
+        Effect.all(
+          [
+            SynchronizedRef.set(credentialRef, UNRESOLVED_CREDENTIAL),
+            SynchronizedRef.set(verifiedRef, UNATTEMPTED_VERIFIED),
+            Ref.set(titlesCacheRef, new Map()),
+            Ref.set(vectorCacheRef, new Map()),
+          ],
+          { discard: true },
+        )
+
+      const ensureVerified: SessionStateShape['ensureVerified'] = () =>
+        SynchronizedRef.modifyEffect(verifiedRef, (cache) => {
+          if (cache.status !== 'unattempted') {
+            const user = cache.status === 'ok' ? Option.some(cache.user) : Option.none<Me>()
+            return Effect.succeed([user, cache] as const)
+          }
+          return Effect.flatMap(getApi(), (apiOpt) =>
+            Option.match(apiOpt, {
+              // No credential at all: leave the cache 'unattempted' so a later login can
+              // still trigger a real verification instead of being permanently 'failed'.
+              onNone: () => Effect.succeed([Option.none<Me>(), cache] as const),
+              onSome: (api) =>
+                api.me().pipe(
+                  Effect.map((user): readonly [Option.Option<Me>, VerifiedCache] => [
+                    Option.some(user),
+                    { status: 'ok', user },
+                  ]),
+                  Effect.catchAll(() =>
+                    Effect.succeed([
+                      Option.none<Me>(),
+                      { status: 'failed' } as VerifiedCache,
+                    ] as const),
+                  ),
+                ),
+            }),
+          )
+        })
+
+      const setVerifiedUser: SessionStateShape['setVerifiedUser'] = (user) =>
+        SynchronizedRef.set(verifiedRef, { status: 'ok', user })
+
+      const verifiedUserId: SessionStateShape['verifiedUserId'] = () =>
+        Effect.map(SynchronizedRef.get(verifiedRef), (cache) =>
+          cache.status === 'ok' ? cache.user.id : '',
+        )
+
+      const storeCredential: SessionStateShape['storeCredential'] = (pat) =>
+        store.store(origin, pat)
+      const removeCredential: SessionStateShape['removeCredential'] = () => store.remove(origin)
+
+      const searchVectorCached: SessionStateShape['searchVectorCached'] = (project, query) =>
+        Effect.gen(function* () {
+          const key = `${project}\0${query}`
+          const now = yield* Clock.currentTimeMillis
+          const cache = yield* Ref.get(vectorCacheRef)
+          const cached = cache.get(key)
+          if (cached && now - cached.at < VECTOR_CACHE_TTL_MS) return cached.pages
+
+          const apiOpt = yield* getApi()
+          if (Option.isNone(apiOpt)) return []
+          const result = yield* apiOpt.value.searchVector(project, query)
+
+          yield* Ref.update(vectorCacheRef, (map) => {
+            const next = new Map(map)
+            if (next.size >= VECTOR_CACHE_MAX) {
+              const oldestKey = next.keys().next().value
+              if (oldestKey !== undefined) next.delete(oldestKey)
+            }
+            next.set(key, { at: now, pages: result.pages })
+            return next
+          })
+          return result.pages
+        })
+
+      const getTitles: SessionStateShape['getTitles'] = (project) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const cache = yield* Ref.get(titlesCacheRef)
+          const cached = cache.get(project)
+          if (cached && now - cached.fetchedAt < TITLES_CACHE_TTL_MS) return cached.titles
+
+          const apiOpt = yield* getApi()
+          if (Option.isNone(apiOpt)) return []
+          const titles = yield* apiOpt.value.searchTitles(project)
+          yield* Ref.update(titlesCacheRef, (map) =>
+            new Map(map).set(project, { fetchedAt: now, titles }),
+          )
+          return titles
+        })
+
+      const getPage: SessionStateShape['getPage'] = (uri) =>
+        Effect.map(Ref.get(pagesRef), (map) => Option.fromNullable(map.get(uri)))
+
+      const setPage: SessionStateShape['setPage'] = (uri, pageState) =>
+        Ref.update(pagesRef, (map) => new Map(map).set(uri, pageState))
+
+      const deletePage: SessionStateShape['deletePage'] = (uri) =>
+        Ref.update(pagesRef, (map) => {
+          if (!map.has(uri)) return map
+          const next = new Map(map)
+          next.delete(uri)
+          return next
+        })
+
+      return SessionState.of({
+        origin,
+        getCredential,
+        getApi,
+        apiFor,
+        invalidateCredentials,
+        ensureVerified,
+        setVerifiedUser,
+        verifiedUserId,
+        storeCredential,
+        removeCredential,
+        searchVectorCached,
+        getTitles,
+        getPage,
+        setPage,
+        deletePage,
+      })
+    }),
+  )

@@ -1,6 +1,8 @@
+import type { HttpClient } from '@chatora/core'
 import type { Page } from '@cosense-toolbox/parser'
 import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
+import { Effect } from 'effect'
 import {
   type CompletionItem,
   CompletionItemKind,
@@ -8,7 +10,7 @@ import {
   type TextEdit,
 } from 'vscode-languageserver/node'
 import { Asearch } from './asearch'
-import type { ServerState } from './state'
+import { SessionState } from './state'
 
 export interface CompletionDetection {
   readonly kind: 'link' | 'hashtag'
@@ -273,36 +275,12 @@ export const mergeCandidates = (
   return out
 }
 
-/**
- * Fetches candidates and builds LSP CompletionItems. Impure — not unit tested.
- * Primary source is Cosense's vector (semantic) title search — the same endpoint the real
- * web editor queries on every keystroke (verified via a HAR capture of scrapbox.io) — with
- * the local title index (exact/prefix/substring/asearch tiers) merged in behind it, and as
- * the sole source when vector search is unavailable (HTTP 490/404) or the query is empty.
- */
-export const buildCompletionItems = async (
-  state: ServerState,
-  project: string,
+const toCompletionItems = (
+  matches: readonly Candidate[],
   line: number,
   detection: CompletionDetection,
-): Promise<CompletionItem[]> => {
-  const noSpaces = detection.kind === 'hashtag'
-  const titles = await state.getTitles(project)
-  const candidates = buildCandidateIndex(titles)
-  const local = rankCandidates(candidates, detection.query, { noSpaces })
-
-  let matches = local
-  if (detection.query !== '') {
-    try {
-      let vector = vectorCandidates(await state.searchVectorCached(project, detection.query))
-      if (noSpaces) vector = vector.filter((c) => !/\s/.test(c.title))
-      if (vector.length > 0) matches = mergeCandidates(vector, local)
-    } catch {
-      // vector search unavailable for this project — local tiers already cover it
-    }
-  }
-
-  return matches.map((entry: Candidate, index: number) => {
+): CompletionItem[] =>
+  matches.map((entry, index) => {
     const edit = buildTextEdit(line, detection, entry.title)
     const { kind, detail } = candidateItemFields(entry.exists)
     const item: CompletionItem = {
@@ -317,4 +295,36 @@ export const buildCompletionItems = async (
     if (detail !== undefined) item.detail = detail
     return item
   })
-}
+
+/**
+ * Fetches candidates and builds LSP CompletionItems. Impure — not unit tested (the pure
+ * ranking/merge functions above are). Primary source is Cosense's vector (semantic) title
+ * search — the same endpoint the real web editor queries on every keystroke (verified via a
+ * HAR capture of scrapbox.io) — with the local title index (exact/prefix/substring/asearch
+ * tiers) merged in behind it, and as the sole source when vector search is unavailable
+ * (HTTP 490/404, a title/titles fetch failure, or an empty query).
+ */
+export const buildCompletionItems = (
+  project: string,
+  line: number,
+  detection: CompletionDetection,
+): Effect.Effect<CompletionItem[], never, SessionState | HttpClient> =>
+  Effect.gen(function* () {
+    const session = yield* SessionState
+    const noSpaces = detection.kind === 'hashtag'
+    const titles = yield* session.getTitles(project).pipe(Effect.catchAll(() => Effect.succeed([])))
+    const candidates = buildCandidateIndex(titles)
+    const local = rankCandidates(candidates, detection.query, { noSpaces })
+
+    let matches = local
+    if (detection.query !== '') {
+      const vectorPages = yield* session
+        .searchVectorCached(project, detection.query)
+        .pipe(Effect.catchAll(() => Effect.succeed([])))
+      let vector = vectorCandidates(vectorPages)
+      if (noSpaces) vector = vector.filter((c) => !/\s/.test(c.title))
+      if (vector.length > 0) matches = mergeCandidates(vector, local)
+    }
+
+    return toCompletionItems(matches, line, detection)
+  })
