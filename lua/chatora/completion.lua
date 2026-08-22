@@ -5,16 +5,33 @@
 -- unclosed `[`, re-open the menu through whichever client is installed.
 local M = {}
 
---- Same backward scan as the server's detectLink: true when the cursor sits
---- after an unclosed `[` (and not inside `[[`).
+--- Mirrors the server's detectLink: true only when the cursor sits inside a
+--- *closed* bracket pair `[...|...]` (and not inside `[[`).
 local function in_link_context(line, col)
+  local open = nil
   for i = col, 1, -1 do
     local ch = line:sub(i, i)
     if ch == ']' then
       return false
     end
     if ch == '[' then
-      return line:sub(i - 1, i - 1) ~= '['
+      if line:sub(i - 1, i - 1) == '[' then
+        return false
+      end
+      open = i
+      break
+    end
+  end
+  if not open then
+    return false
+  end
+  for j = col + 1, #line do
+    local ch = line:sub(j, j)
+    if ch == '[' then
+      return false
+    end
+    if ch == ']' then
+      return true
     end
   end
   return false

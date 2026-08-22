@@ -21,12 +21,13 @@ const cand = (title: string, exists = true): Candidate => ({
 })
 
 describe('detectCompletion — multi-word and re-entry', () => {
-  test('space inside an unclosed [ keeps the whole query', () => {
-    const line = '[sakura プロモーション'
-    const d = detectCompletion(line, line.length)
+  test('space inside a closed pair keeps the whole query', () => {
+    const line = '[sakura プロモーション]'
+    const d = detectCompletion(line, line.length - 1)
     expect(d).not.toBeNull()
     expect(d?.kind).toBe('link')
     expect(d?.query).toBe('sakura プロモーション')
+    expect(d?.replaceEnd).toBe(line.length)
   })
 
   test('cursor inside an existing [..] replaces through the closing bracket', () => {
@@ -38,11 +39,9 @@ describe('detectCompletion — multi-word and re-entry', () => {
     expect(d?.query).toBe('fo')
   })
 
-  test('a following [ stops the forward bracket extension', () => {
+  test('a following [ before any ] -> null (not a closed pair)', () => {
     const line = '[ab [cd]'
-    const d = detectCompletion(line, 3) // inside first, unclosed [ab
-    expect(d).not.toBeNull()
-    expect(d?.replaceEnd).toBe(3)
+    expect(detectCompletion(line, 3)).toBeNull()
   })
 })
 
@@ -77,14 +76,18 @@ describe('mergeCandidates', () => {
 })
 
 describe('detectCompletion — link', () => {
-  test('unclosed [ mid-line', () => {
-    const line = 'see [que'
-    expect(detectCompletion(line, line.length)).toEqual({
+  test('closed pair mid-line: cursor inside [que|] triggers', () => {
+    const line = 'see [que]'
+    expect(detectCompletion(line, 8)).toEqual({
       kind: 'link',
       query: 'que',
       replaceStart: 4,
-      replaceEnd: 8,
+      replaceEnd: 9,
     })
+  })
+
+  test('unclosed [ does NOT trigger (Cosense: completion only inside [])', () => {
+    expect(detectCompletion('see [que', 8)).toBeNull()
   })
 
   test('closed [done] -> null (cursor after the closing bracket)', () => {
@@ -111,14 +114,8 @@ describe('detectCompletion — link', () => {
     expect(result).toEqual({ kind: 'link', query: 'foo', replaceStart: 0, replaceEnd: 5 })
   })
 
-  test('no following ] leaves replaceEnd at the cursor', () => {
-    const line = '[foo'
-    expect(detectCompletion(line, 4)).toEqual({
-      kind: 'link',
-      query: 'foo',
-      replaceStart: 0,
-      replaceEnd: 4,
-    })
+  test('no following ] -> null (pair must be closed)', () => {
+    expect(detectCompletion('[foo', 4)).toBeNull()
   })
 
   test('[[ is not a link trigger (bold/large-image syntax)', () => {
@@ -177,14 +174,14 @@ describe('detectCompletionInDocument (AST-aware suppression)', () => {
   })
 
   test('cursor outside code contexts still detects normally', () => {
-    const lines = ['Title', 'see [que']
+    const lines = ['Title', 'see [que]']
     const text = lines.join('\n')
-    const character = (lines[1] as string).length
+    const character = (lines[1] as string).length - 1
     expect(detectCompletionInDocument(text, { line: 1, character })).toEqual({
       kind: 'link',
       query: 'que',
       replaceStart: 4,
-      replaceEnd: character,
+      replaceEnd: character + 1,
     })
   })
 })

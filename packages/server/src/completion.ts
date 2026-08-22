@@ -17,27 +17,31 @@ export interface CompletionDetection {
   readonly replaceEnd: number
 }
 
-// Scans backward from the cursor for an unclosed `[`. Hitting `]` first means the bracket
-// pair is already closed (cursor sits after it) -> not a completion context. A `[` that is
-// itself the second half of `[[` belongs to `[[...]]` (bold/large-image), not a link.
+// Link completion fires only when the cursor sits inside a *closed* bracket pair
+// `[...|...]` (Cosense behavior — autopairs/the web editor close the bracket the moment
+// it's typed). Backward scan: hitting `]` first means the cursor is past a pair; a `[`
+// that is the second half of `[[` belongs to `[[...]]` (bold/large-image), not a link.
+// Forward scan: the closing `]` must exist ahead on the same line; accepting a candidate
+// replaces the whole pair.
 const detectLink = (lineText: string, character: number): CompletionDetection | null => {
   for (let i = character - 1; i >= 0; i--) {
     const ch = lineText[i]
     if (ch === ']') return null
     if (ch === '[') {
       if (lineText[i - 1] === '[') return null
-      // Accepting a candidate replaces the whole bracket pair (like Cosense):
-      // extend through the closing ']' when the cursor sits inside one.
-      let replaceEnd = character
       for (let j = character; j < lineText.length; j++) {
         const cj = lineText[j]
-        if (cj === '[') break
+        if (cj === '[') return null
         if (cj === ']') {
-          replaceEnd = j + 1
-          break
+          return {
+            kind: 'link',
+            query: lineText.slice(i + 1, character),
+            replaceStart: i,
+            replaceEnd: j + 1,
+          }
         }
       }
-      return { kind: 'link', query: lineText.slice(i + 1, character), replaceStart: i, replaceEnd }
+      return null
     }
   }
   return null
