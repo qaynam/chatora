@@ -27,8 +27,11 @@ local function specs()
     formula = { fg = fg_of('Special'), italic = true },
     icon = { fg = fg_of('Identifier') },
     quote = { fg = fg_of('Comment'), italic = true },
-    bold = { bold = true },
-    italic = { italic = true },
+    -- Bold/italic alone are invisible when the (CJK fallback) font has no
+    -- bold/italic variant — pair them with an accent color so the emphasis
+    -- reads regardless of font support.
+    bold = { bold = true, fg = fg_of('Title') },
+    italic = { italic = true, fg = fg_of('Comment') },
     strike = { strikethrough = true },
     underline = { underline = true },
     image = { fg = fg_of('Directory'), underline = true },
