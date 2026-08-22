@@ -14,8 +14,11 @@ local defaults = {
   autosave = false,
   -- Cosense-style bullet pads on indented lines (guides + a bullet at the
   -- deepest level, plus inline spacing so it reads as a list). false disables;
-  -- a table customizes: { bullet = '●', guide = '│', spacing = true }.
+  -- a table customizes: { bullet = '⬤', guide = '│', spacing = true }.
   pads = true,
+  -- Conceal notation markup ([* ], link brackets, backticks) except on the
+  -- cursor line (render-markdown.nvim style). false disables.
+  conceal = true,
 }
 
 M.options = vim.deepcopy(defaults)

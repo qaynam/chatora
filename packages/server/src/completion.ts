@@ -26,7 +26,17 @@ const detectLink = (lineText: string, character: number): CompletionDetection | 
     if (ch === ']') return null
     if (ch === '[') {
       if (lineText[i - 1] === '[') return null
-      const replaceEnd = lineText[character] === ']' ? character + 1 : character
+      // Accepting a candidate replaces the whole bracket pair (like Cosense):
+      // extend through the closing ']' when the cursor sits inside one.
+      let replaceEnd = character
+      for (let j = character; j < lineText.length; j++) {
+        const cj = lineText[j]
+        if (cj === '[') break
+        if (cj === ']') {
+          replaceEnd = j + 1
+          break
+        }
+      }
       return { kind: 'link', query: lineText.slice(i + 1, character), replaceStart: i, replaceEnd }
     }
   }

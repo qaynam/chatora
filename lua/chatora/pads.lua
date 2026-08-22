@@ -16,7 +16,9 @@ end
 
 local function pad_opts()
   local opts = config.options.pads
-  local bullet, guide, spacing = '•', '│', true
+  -- '●' over '•': the inline spacing gives each level 2 display cells, so a
+  -- fat (even ambiguous-width) glyph has room without clobbering the text.
+  local bullet, guide, spacing = '●', '│', true
   if type(opts) == 'table' then
     bullet = opts.bullet or bullet
     guide = opts.guide or guide

@@ -12,6 +12,7 @@ import {
 } from 'vscode-languageserver/node'
 import { TextDocument } from 'vscode-languageserver-textdocument'
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
+import { computeConcealRanges } from './decorations'
 import { definitionLocation, findDefinitionTarget } from './definition'
 import * as handlers from './pages'
 import { ServerState } from './state'
@@ -58,7 +59,10 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
         full: true,
         range: true,
       },
-      completionProvider: { triggerCharacters: ['[', '#'] },
+      // ' ' keeps multi-word link queries alive: clients dismiss the menu on
+      // space (end of keyword), and the trigger reopens it; outside an
+      // unclosed [ / # context the server returns null so it is a no-op.
+      completionProvider: { triggerCharacters: ['[', '#', ' '] },
       definitionProvider: true,
     },
   }
@@ -123,6 +127,17 @@ connection.onRequest('chatora/savePage', (params: { uri: string }) =>
 )
 connection.onRequest('chatora/relatedPages', (params: { project: string; title: string }) =>
   handlers.relatedPages(state, params),
+)
+type DecorationsResult =
+  | { ok: true; conceal: ReturnType<typeof computeConcealRanges> }
+  | { ok: false; code: string; message: string }
+connection.onRequest(
+  'chatora/decorations',
+  async (params: { uri: string }): Promise<DecorationsResult> => {
+    const doc = documents.get(params.uri)
+    if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
+    return { ok: true, conceal: computeConcealRanges(doc.getText()) }
+  },
 )
 connection.onRequest(
   'chatora/search',

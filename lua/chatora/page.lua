@@ -102,6 +102,7 @@ local function finalize_buffer(bufnr, project, title)
   codeblock.attach(bufnr)
   images.attach(bufnr, project)
   pads.attach(bufnr)
+  require('chatora.render').attach(bufnr)
 end
 
 local function handle_read(ev)

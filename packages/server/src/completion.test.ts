@@ -20,6 +20,32 @@ const cand = (title: string, exists = true): Candidate => ({
   updated: undefined,
 })
 
+describe('detectCompletion — multi-word and re-entry', () => {
+  test('space inside an unclosed [ keeps the whole query', () => {
+    const line = '[sakura プロモーション'
+    const d = detectCompletion(line, line.length)
+    expect(d).not.toBeNull()
+    expect(d?.kind).toBe('link')
+    expect(d?.query).toBe('sakura プロモーション')
+  })
+
+  test('cursor inside an existing [..] replaces through the closing bracket', () => {
+    const line = 'see [foo] here'
+    const d = detectCompletion(line, 7) // between 'fo|o'... cursor after 'fo' -> inside brackets
+    expect(d).not.toBeNull()
+    expect(d?.replaceStart).toBe(4)
+    expect(d?.replaceEnd).toBe(9) // through ']'
+    expect(d?.query).toBe('fo')
+  })
+
+  test('a following [ stops the forward bracket extension', () => {
+    const line = '[ab [cd]'
+    const d = detectCompletion(line, 3) // inside first, unclosed [ab
+    expect(d).not.toBeNull()
+    expect(d?.replaceEnd).toBe(3)
+  })
+})
+
 describe('vectorCandidates', () => {
   test('preserves score order and maps exists', () => {
     const out = vectorCandidates([
@@ -66,14 +92,15 @@ describe('detectCompletion — link', () => {
     expect(detectCompletion(line, 'see [done]'.length)).toBeNull()
   })
 
-  test('cursor before the closing ] still triggers (only backward scan matters)', () => {
-    // "[do|ne]" — no ] appears between the opening [ and the cursor, so this is a live query.
+  test('cursor before the closing ] still triggers and replaces the whole bracket', () => {
+    // "[do|ne]" — no ] between the opening [ and the cursor => live query; accepting a
+    // candidate swaps the entire [done] link (Cosense re-entry behavior).
     const line = '[done] more'
     expect(detectCompletion(line, 3)).toEqual({
       kind: 'link',
       query: 'do',
       replaceStart: 0,
-      replaceEnd: 3,
+      replaceEnd: 6,
     })
   })
 
