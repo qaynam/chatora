@@ -1,0 +1,140 @@
+import type { AnyNode, AnyNodeType, Decoration, Position } from '@cosense-toolbox/parser'
+import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
+import { visit } from '@cosense-toolbox/parser/utils'
+
+/**
+ * Legend order is a contract with the Lua side (nvim/lua/chatora/highlight.lua defines
+ * `@lsp.type.<name>.cosense` for each of these, in this exact order).
+ */
+export const TOKEN_TYPES = [
+  'title',
+  'link',
+  'projectLink',
+  'externalLink',
+  'hashtag',
+  'code',
+  'codeBlock',
+  'formula',
+  'icon',
+  'quote',
+  'bold',
+  'italic',
+  'strike',
+  'underline',
+  'image',
+  'table',
+] as const
+
+export type TokenType = (typeof TOKEN_TYPES)[number]
+
+export interface RawToken {
+  readonly line: number
+  readonly char: number
+  readonly length: number
+  readonly type: TokenType
+}
+
+const TOKEN_TYPE_INDEX: ReadonlyMap<TokenType, number> = new Map(
+  TOKEN_TYPES.map((type, index) => [type, index]),
+)
+
+// Leaf inline node types that map 1:1 to a token type. Their position is always a single
+// line (tokenize runs per physical line), so no per-line splitting is needed here.
+const INLINE_TOKEN_TYPE: Partial<Record<AnyNodeType, TokenType>> = {
+  internalLink: 'link',
+  externalLink: 'externalLink',
+  projectLink: 'projectLink',
+  hashtag: 'hashtag',
+  inlineCode: 'code',
+  image: 'image',
+  icon: 'icon',
+  formula: 'formula',
+}
+
+// Mirrors parser src/block/classify.ts QUOTE_RE (`/^>\s?/`) — the AST's LineBlock doesn't
+// expose the marker's own length, only `quote: boolean`, so we re-derive it from the raw
+// line text (indent already known from LineBlock.indent).
+const QUOTE_MARKER_RE = /^>\s?/
+
+const quoteMarkerLength = (lineText: string, indent: number): number =>
+  QUOTE_MARKER_RE.exec(lineText.slice(indent))?.[0].length ?? 0
+
+const spanToken = (type: TokenType, position: Position): RawToken => ({
+  line: position.start.line,
+  char: position.start.column,
+  length: position.end.column - position.start.column,
+  type,
+})
+
+const decorationTokenType = (node: Decoration): TokenType | null => {
+  if (node.bold) return 'bold'
+  if (node.italic) return 'italic'
+  if (node.strike) return 'strike'
+  if (node.underline) return 'underline'
+  return null
+}
+
+/** Pure AST -> tokens. No LSP delta-encoding here (see encodeTokens) so this stays unit-testable. */
+export const computeTokens = (text: string): RawToken[] => {
+  const normalized = normalizeLineEndings(text)
+  const docLines = normalized.split('\n')
+  const page = parse(normalized)
+  const tokens: RawToken[] = []
+
+  const pushLineSpan = (type: TokenType, startLine: number, endLine: number): void => {
+    for (let line = startLine; line <= endLine; line++) {
+      const lineText = docLines[line] ?? ''
+      if (lineText.length > 0) tokens.push({ line, char: 0, length: lineText.length, type })
+    }
+  }
+
+  visit(page, (node: AnyNode) => {
+    switch (node.type) {
+      case 'title':
+        tokens.push(spanToken('title', node.position))
+        return 'skip'
+      case 'codeBlock':
+        pushLineSpan('codeBlock', node.position.start.line, node.position.end.line)
+        return 'skip'
+      case 'table':
+        pushLineSpan('table', node.position.start.line, node.position.end.line)
+        return 'skip'
+      case 'line':
+        if (node.quote) {
+          const line = node.position.start.line
+          const marker = quoteMarkerLength(docLines[line] ?? '', node.indent)
+          if (marker > 0) tokens.push({ line, char: node.indent, length: marker, type: 'quote' })
+        }
+        return undefined
+      case 'decoration': {
+        const type = decorationTokenType(node)
+        if (type) tokens.push(spanToken(type, node.position))
+        return 'skip'
+      }
+      default: {
+        const mapped = INLINE_TOKEN_TYPE[node.type]
+        if (mapped) tokens.push(spanToken(mapped, node.position))
+        return undefined
+      }
+    }
+  })
+
+  return tokens.filter((t) => t.length > 0).sort((a, b) => a.line - b.line || a.char - b.char)
+}
+
+/** LSP relative encoding: [deltaLine, deltaStartChar, length, tokenType, tokenModifiers]*. */
+export const encodeTokens = (tokens: readonly RawToken[]): number[] => {
+  const sorted = [...tokens].sort((a, b) => a.line - b.line || a.char - b.char)
+  const data: number[] = []
+  let prevLine = 0
+  let prevChar = 0
+  for (const token of sorted) {
+    const typeIndex = TOKEN_TYPE_INDEX.get(token.type) ?? 0
+    const deltaLine = token.line - prevLine
+    const deltaStartChar = deltaLine === 0 ? token.char - prevChar : token.char
+    data.push(deltaLine, deltaStartChar, token.length, typeIndex, 0)
+    prevLine = token.line
+    prevChar = token.char
+  }
+  return data
+}

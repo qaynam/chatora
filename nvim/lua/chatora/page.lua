@@ -86,17 +86,29 @@ local function handle_write(ev)
       end
     end
 
+    vim.bo[bufnr].modified = false
+
     if result.titleChanged then
+      -- Renaming the buffer in place would desync the LSP client (didOpen was sent for the
+      -- old URI), so reopen the page under its new URI instead.
       local project = uri.parse(uri_str)
       local new_uri = uri.format(project, result.titleChanged.to)
-      pcall(vim.api.nvim_buf_set_name, bufnr, new_uri)
       vim.notify(
         '[chatora] title changed: ' .. result.titleChanged.from .. ' -> ' .. result.titleChanged.to,
         vim.log.levels.INFO
       )
+      local winid = vim.fn.bufwinid(bufnr)
+      if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
+        vim.api.nvim_win_call(winid, function()
+          vim.cmd({ cmd = 'edit', args = { new_uri } })
+        end)
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+        end
+      end
+      return
     end
 
-    vim.bo[bufnr].modified = false
     vim.notify('[chatora] saved', vim.log.levels.INFO)
   end)
 end

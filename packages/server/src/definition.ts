@@ -1,0 +1,34 @@
+import { parseLine } from '@cosense-toolbox/parser'
+import { visit } from '@cosense-toolbox/parser/utils'
+import { formatUri } from './uriScheme'
+
+/**
+ * Cursor -> target page, for internalLink/hashtag/projectLink under the cursor on one line.
+ * externalLink is deliberately not matched here — the Lua side opens those with `gx`.
+ */
+export const findDefinitionTarget = (
+  lineText: string,
+  character: number,
+  currentProject: string,
+): { project: string; title: string } | null => {
+  const line = parseLine(lineText)
+  let target: { project: string; title: string } | null = null
+
+  visit(line, (node) => {
+    const inRange = character >= node.position.start.column && character < node.position.end.column
+    if (!inRange) return undefined
+
+    if (node.type === 'internalLink') target = { project: currentProject, title: node.target }
+    else if (node.type === 'hashtag') target = { project: currentProject, title: node.value }
+    else if (node.type === 'projectLink') target = { project: node.project, title: node.title }
+    return target ? 'exit' : undefined
+  })
+
+  return target
+}
+
+/** Builds the LSP Location for a definition target: the top of the target page. */
+export const definitionLocation = (target: { project: string; title: string }) => ({
+  uri: formatUri(target.project, target.title),
+  range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+})

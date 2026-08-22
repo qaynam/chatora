@@ -2,7 +2,9 @@
   "name": "chatora",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "bun run --filter '@chatora/*' build",
     "test": "bun test",

@@ -1,0 +1,23 @@
+{
+  "name": "@chatora/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "bun test",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@chatora/core": "workspace:*",
+    "@cosense-toolbox/parser": "beta",
+    "vscode-languageserver": "^10.1.0",
+    "vscode-languageserver-textdocument": "^1.0.12"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.9.0"
+  }
+}
