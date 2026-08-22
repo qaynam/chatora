@@ -122,6 +122,8 @@ function M.open()
   vim.wo[win].relativenumber = false
   vim.wo[win].cursorline = true
   vim.wo[win].winfixheight = true
+  -- Same as the sidebar: never let another buffer take over this window.
+  vim.wo[win].winfixbuf = true
 
   if vim.api.nvim_win_is_valid(parent_win) then
     vim.api.nvim_set_current_win(parent_win)

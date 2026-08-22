@@ -3,7 +3,7 @@ import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
 
 /**
- * Legend order is a contract with the Lua side (nvim/lua/chatora/highlight.lua defines
+ * Legend order is a contract with the Lua side (lua/chatora/highlight.lua defines
  * `@lsp.type.<name>.cosense` for each of these, in this exact order).
  */
 export const TOKEN_TYPES = [

@@ -10,26 +10,28 @@ Cosense（旧 Scrapbox）の Neovim クライアント。
 
 設計は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を参照。
 
-## セットアップ
+## インストール
 
-```sh
-bun install
-bun run build   # packages/server/dist/main.js を生成（node で実行される）
-```
+必要なもの: Neovim >= 0.11、node >= 20（LSP サーバーの実行）、bun（ビルド）。
 
-Neovim 側（lazy.nvim の例）:
+lazy.nvim（GitHub から直接）:
 
 ```lua
 {
-  dir = '/path/to/chatora/nvim',
-  config = function()
-    require('chatora').setup({
-      -- origin = 'https://scrapbox.io',  -- 既定値
-      -- project = 'your-project',        -- 固定したい場合。未指定なら起動時に選択
-    })
-  end,
+  'qaynam/chatora',
+  build = 'bun install && bun run build',
+  cmd = 'Chatora',
+  opts = {
+    -- origin = 'https://scrapbox.io',  -- 既定値
+    -- project = 'your-project',        -- 固定したい場合。未指定なら起動時に選択
+    -- autosave = 3,                    -- 編集停止 n 秒後に自動保存（既定 false）
+    -- pads = { bullet = '•' },         -- 箇条書き表示のカスタマイズ / false で無効
+  },
 }
 ```
+
+ローカル開発中のリポジトリを使う場合は `'qaynam/chatora'` の代わりに
+`dir = '/path/to/chatora'` を指定（`build` は同じ）。
 
 ## 使い方
 
@@ -45,5 +47,5 @@ Neovim 側（lazy.nvim の例）:
 ```sh
 bun test                 # core + server の単体テスト
 bun tests/e2e/run.ts     # 偽 Cosense サーバー + headless nvim の E2E
-nvim --headless --clean -u NORC -c "luafile nvim/tests/smoke.lua"
+nvim --headless --clean -u NORC -c "luafile tests/smoke.lua"
 ```

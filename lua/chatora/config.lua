@@ -27,8 +27,9 @@ local function file_exists(path)
   return stat ~= nil and stat.type == 'file'
 end
 
--- Absolute path of the nvim/ plugin root, derived from this file's location:
--- nvim/lua/chatora/config.lua -> nvim/
+-- Absolute path of the repo/plugin root, derived from this file's location:
+-- lua/chatora/config.lua -> repo root. The repo root doubles as the plugin's
+-- runtimepath root so plugin managers can install it straight from GitHub.
 local function plugin_root()
   local source = debug.getinfo(1, 'S').source:sub(2)
   return vim.fn.fnamemodify(source, ':p:h:h:h')
@@ -38,9 +39,9 @@ function M.setup(opts)
   M.options = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
 end
 
---- Repo root: the parent directory of nvim/, used as LSP root_dir.
+--- Repo root (= plugin root), used as LSP root_dir and for locating the server.
 function M.get_repo_root()
-  return vim.fn.fnamemodify(plugin_root(), ':h')
+  return plugin_root()
 end
 
 --- Resolve the server command to launch.

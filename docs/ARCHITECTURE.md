@@ -31,11 +31,12 @@ API クライアント・認証・diff などの純ロジックは `packages/cor
 package.json            # bun workspaces ["packages/*"]
 biome.json
 tsconfig.base.json
+lua/chatora/*.lua       # Neovim プラグイン本体（リポジトリルート = runtimepath ルート、
+plugin/chatora.lua      #   プラグインマネージャで GitHub から直接インストール可能）
 packages/core/          # @chatora/core  — 純ロジック（UI/LSP 非依存、Node API 最小限）
 packages/server/        # @chatora/server — LSP サーバー本体（stdio）
-nvim/                   # Neovim プラグイン（runtimepath ルート）
-  plugin/chatora.lua
-  lua/chatora/*.lua
+tests/smoke.lua         # headless スモークテスト
+tests/e2e/              # 偽 Cosense サーバー + headless nvim の E2E
 docs/ARCHITECTURE.md    # 本ドキュメント
 ```
 

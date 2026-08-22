@@ -1,6 +1,6 @@
 /**
  * Internal `cosense://<project>/<title>` URI scheme shared with the Lua client
- * (nvim/lua/chatora/uri.lua). The URI doubles as the Neovim buffer name, which the user sees
+ * (lua/chatora/uri.lua). The URI doubles as the Neovim buffer name, which the user sees
  * in tablines/statuslines — so unicode (Japanese titles) stays raw and only characters that
  * would break the URI structure (`%`, `/`, `?`, `#`, controls) are percent-encoded. Both
  * sides must produce byte-identical URIs for the same title. This is unrelated to

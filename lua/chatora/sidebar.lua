@@ -203,6 +203,9 @@ function M.open(proj)
   vim.wo[win].relativenumber = false
   vim.wo[win].cursorline = true
   vim.wo[win].winfixwidth = true
+  -- Pin the window to its buffer: opening a file while the sidebar is
+  -- focused must not hijack this window (E1513 instead).
+  vim.wo[win].winfixbuf = true
   vim.wo[win].statusline = 'chatora: ' .. project
 
   lsp.ensure_start(buf)

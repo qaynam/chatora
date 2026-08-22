@@ -1,15 +1,15 @@
--- Headless smoke test: `nvim --headless --clean -u NORC -c "luafile nvim/tests/smoke.lua"`
+-- Headless smoke test: `nvim --headless --clean -u NORC -c "luafile tests/smoke.lua"`
 -- Does NOT require the LSP server to be running.
 local ok, err = pcall(function()
   local this_file = debug.getinfo(1, 'S').source:sub(2)
   local tests_dir = vim.fn.fnamemodify(this_file, ':p:h')
-  local nvim_root = vim.fn.fnamemodify(tests_dir, ':h')
+  local repo_root = vim.fn.fnamemodify(tests_dir, ':h')
 
-  vim.opt.rtp:prepend(nvim_root)
+  vim.opt.rtp:prepend(repo_root)
 
-  -- plugin/*.lua is normally auto-sourced at startup; since we add nvim_root
-  -- to rtp only after startup, source it manually here.
-  dofile(nvim_root .. '/plugin/chatora.lua')
+  -- plugin/*.lua is normally auto-sourced at startup; since we add the repo
+  -- root to rtp only after startup, source it manually here.
+  dofile(repo_root .. '/plugin/chatora.lua')
 
   local chatora = require('chatora')
   chatora.setup({})
