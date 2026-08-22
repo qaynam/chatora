@@ -78,15 +78,16 @@ origin は既定 `https://scrapbox.io`（設定で変更可能に）。
 
 1. `POST /api/pages/v2/:project/page-edit-for-ai/preview`
    - body: `{ pageId?, changes: RawChange[] }`（新規ページは pageId なし）
-   - RawChange: `{_insert: <anchorLineId|'_end'>, lines: {id, text}}` | `{_update: <lineId>, lines: {text}}` | `{_delete: <lineId>}`
+   - RawChange: `{_insert: <anchorLineId|'_end'>, lines: {id, text}}` | `{_update: <lineId>, lines: {text}}` | `{_delete: <lineId>}`（`_delete` に `lines` フィールドは**ない**。cosense-cli `previewEdit.ts` で実測確認済み）
    - `_insert` のアンカー = 「この行 ID の**前**に挿入」、`'_end'` = 末尾追加
    - res: `{ previewId, expireAt, pagePreview }`
 2. `POST /api/pages/v2/:project/page-edit-for-ai/submit`
    - body: `{ previewId }`（**使い捨て・5 分で失効**）
    - res: `{ commitId, page: {title}|null, titleChanged?: {from,to} }`
 - エラー: `409 {"error":"NotFastForward"}`（楽観ロック競合 → 再取得して再 preview）、`409 DuplicateTitle`、`422`（不正な lineId 等）
-- 新規挿入行の `id` はクライアント生成。**cosense-cli の `previewEdit.ts` の生成方式を必ず確認して同じにする**（参考: cosense-app-client では 24 hex = 8hex unixtime + userId 末尾 6hex + random 10hex）
-- 実装前に `gh api` / raw.githubusercontent.com で cosense-cli の該当ソースを読んで型を照合すること。
+- 新規挿入行の `id` はクライアント生成の 24 桁 lowercase hex。cosense-cli 実装は `randomBytes(12).toString('hex')`（unixtime や userId は**含まない**）。`@chatora/core` の `createNewLineId()` が実装済み。
+- **存在しないページは 404 にならない**: `GET /api/pages/v2/...` は HTTP 200 + `persistent: false` + 偽の id/commitId/行 id を返す。偽 id をアンカーに使うと事故るため、`CosenseApi.getPage()` は `persistent:false` を `null` に畳み込み済み。
+- HTTP パス上のタイトルエンコードは encodeURIComponent ではなく cosense-cli の `encodeTitleForUrl` 方式（`% / ? #` のみ encode、空白→`_`、unicode は生）。これは `CosenseApi` 内部に実装済みで、呼び出し側は生タイトルを渡すだけでよい。**cosense:// URI スキームは従来どおり encodeURIComponent** であり別物（HTTP パスとは無関係）。
 
 ## @chatora/core 公開 API（サーバーが依存する契約）
 
@@ -205,7 +206,7 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 
 ## テスト戦略
 
-- core: fetch をモック注入して API クライアント・credentials（settings.json 読み取りは tmp dir + `COSENSE_SETTINGS_PATH` 環境変数で差し替え可能にする。Keychain は `security` コマンドを exec ラッパー経由にしてモック）・computeChanges を `bun test` で。
+- core: fetch をモック注入して API クライアント・credentials（settings.json パスは `CHATORA_SETTINGS_PATH` 環境変数で差し替え、`COSENSE_SETTINGS_PATH` もエイリアスとして有効。Keychain は `security` コマンドを exec ラッパー経由にしてモック）・computeChanges を `bun test` で。
 - server: semantic tokens 変換・補完検出・URI 変換を純関数として切り出して `bun test`。
 - e2e: `nvim --headless` でプラグイン読込 + `:Chatora` コマンド存在確認のスモークテスト（`nvim/tests/smoke.lua`）。実 API を叩くテストは書かない（ユーザーが実 PAT で手動確認）。
 
