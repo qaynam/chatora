@@ -1,87 +1,62 @@
-import type { ExecFileFn } from './keychain'
-import {
-  addGenericPassword,
-  deleteGenericPassword,
-  execFileAsync,
-  findGenericPassword,
-} from './keychain'
-import {
-  findProjectServiceAccount,
-  findUserToken,
-  readSettings,
-  resolveSettingsPath,
-} from './settingsFile'
+import { Context, Effect, Layer, Option } from 'effect'
+import { CommandExecutor } from './commandExecutor'
+import type { KeychainError } from './errors'
+import { addGenericPassword, deleteGenericPassword, findGenericPassword } from './keychain'
 
-export type CredentialSource = 'env' | 'keychain' | 'settingsJson'
+export type CredentialSource = 'env' | 'keychain'
+// 'serviceAccount' has no resolver in this package right now — cosense-cli's
+// settings.json (the only source that ever produced one) was dropped in favor of
+// chatora managing credentials itself. The variant stays so header-building
+// (x-service-account-access-key vs x-personal-access-token) and any future source can
+// keep using one `Credential` shape without a breaking change.
 export type CredentialType = 'pat' | 'serviceAccount'
 
 export interface Credential {
-  type: CredentialType
-  value: string
-  source: CredentialSource
+  readonly type: CredentialType
+  readonly value: string
+  readonly source: CredentialSource
 }
 
-/** Extra seam for tests only — @chatora/server always calls resolveCredential(origin, project). */
-export interface ResolveCredentialDeps {
-  execFile?: ExecFileFn
-  settingsPath?: string
-}
-
-const readEnvCredential = (): Credential | null => {
+const readEnvCredential = (): Option.Option<Credential> => {
   const raw = process.env.COSENSE_PAT
-  if (typeof raw !== 'string') return null
+  if (typeof raw !== 'string') return Option.none()
   const value = raw.trim()
-  if (value === '') return null
-  return { type: 'pat', value, source: 'env' }
+  return value === '' ? Option.none() : Option.some({ type: 'pat', value, source: 'env' })
 }
 
-/**
- * Resolution order (architecture doc / cosense-cli src/lib/settings.ts resolveCredential):
- *   1. env COSENSE_PAT
- *   2. macOS Keychain (service "chatora", account = origin)
- *   3. ~/.cosense/settings.json — projects[] (by origin+project, -> serviceAccount) checked
- *      before users[] (by origin, -> PAT), matching cosense-cli's own precedence when a
- *      project name is available.
- * `project` is optional: without it, only settings.json's users[] is consulted (like
- * cosense-cli's resolveUserCredential, used for origin-only calls such as listProjects/me).
- */
-export const resolveCredential = async (
-  origin: string,
-  project?: string,
-  deps: ResolveCredentialDeps = {},
-): Promise<Credential | null> => {
-  const env = readEnvCredential()
-  if (env) return env
-
-  const keychainValue = await findGenericPassword(origin, deps.execFile ?? execFileAsync)
-  if (keychainValue) return { type: 'pat', value: keychainValue, source: 'keychain' }
-
-  const settings = readSettings(deps.settingsPath ?? resolveSettingsPath())
-  if (settings) {
-    if (project) {
-      const serviceAccount = findProjectServiceAccount(settings, origin, project)
-      if (serviceAccount)
-        return { type: 'serviceAccount', value: serviceAccount, source: 'settingsJson' }
-    }
-    const token = findUserToken(settings, origin)
-    if (token) return { type: 'pat', value: token, source: 'settingsJson' }
-  }
-
-  return null
+export interface CredentialStoreShape {
+  /** Resolution order: env `COSENSE_PAT`, then macOS Keychain (service "chatora", account = origin). */
+  readonly resolve: (origin: string) => Effect.Effect<Option.Option<Credential>>
+  /** Login storage is Keychain-only. */
+  readonly store: (origin: string, pat: string) => Effect.Effect<void, KeychainError>
+  readonly remove: (origin: string) => Effect.Effect<void, KeychainError>
 }
 
-/** Login storage is Keychain-only — never written to settings.json. */
-export const storeCredential = async (
-  origin: string,
-  pat: string,
-  execFileFn: ExecFileFn = execFileAsync,
-): Promise<void> => {
-  await addGenericPassword(origin, pat, execFileFn)
-}
+export class CredentialStore extends Context.Tag('@chatora/core/CredentialStore')<
+  CredentialStore,
+  CredentialStoreShape
+>() {}
 
-export const deleteCredential = async (
-  origin: string,
-  execFileFn: ExecFileFn = execFileAsync,
-): Promise<void> => {
-  await deleteGenericPassword(origin, execFileFn)
-}
+export const CredentialStoreLive: Layer.Layer<CredentialStore, never, CommandExecutor> =
+  Layer.effect(
+    CredentialStore,
+    Effect.gen(function* () {
+      const executor = yield* CommandExecutor
+
+      const resolve: CredentialStoreShape['resolve'] = (origin) => {
+        const env = readEnvCredential()
+        if (Option.isSome(env)) return Effect.succeed(env)
+        return findGenericPassword(origin, executor).pipe(
+          Effect.map(
+            Option.map((value): Credential => ({ type: 'pat', value, source: 'keychain' })),
+          ),
+        )
+      }
+
+      return CredentialStore.of({
+        resolve,
+        store: (origin, pat) => addGenericPassword(origin, pat, executor),
+        remove: (origin) => deleteGenericPassword(origin, executor),
+      })
+    }),
+  )

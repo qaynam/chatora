@@ -1,8 +1,8 @@
 import type { RawChange } from './types'
 
 export interface BaseLine {
-  id: string
-  text: string
+  readonly id: string
+  readonly text: string
 }
 
 type Op =
@@ -65,7 +65,7 @@ export const computeChanges = (
   base: readonly BaseLine[],
   next: readonly string[],
   newLineId: () => string,
-): RawChange[] => {
+): readonly RawChange[] => {
   const ops = buildOps(base, next)
   const changes: RawChange[] = []
   let idx = 0

@@ -1,11 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import type { ExecFileFn } from './keychain'
-import {
-  addGenericPassword,
-  deleteGenericPassword,
-  findGenericPassword,
-  KeychainUnavailableError,
-} from './keychain'
+import { Effect, Option } from 'effect'
+import type { CommandExecutorShape } from './commandExecutor'
+import { CommandExecutorError } from './errors'
+import { addGenericPassword, deleteGenericPassword, findGenericPassword } from './keychain'
 
 const withPlatform = async <T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> => {
   const original = process.platform
@@ -17,17 +14,28 @@ const withPlatform = async <T>(platform: NodeJS.Platform, fn: () => Promise<T>):
   }
 }
 
+const recordingExecutor = (
+  handler: (file: string, args: readonly string[]) => { stdout: string; stderr: string },
+): { executor: CommandExecutorShape; calls: { file: string; args: readonly string[] }[] } => {
+  const calls: { file: string; args: readonly string[] }[] = []
+  return {
+    calls,
+    executor: {
+      execFile: (file, args) => {
+        calls.push({ file, args })
+        return Effect.succeed(handler(file, args))
+      },
+    },
+  }
+}
+
 describe('keychain (darwin)', () => {
   test('findGenericPassword calls security with the expected arg array and trims stdout', async () => {
-    const calls: { file: string; args: string[] }[] = []
-    const exec: ExecFileFn = async (file, args) => {
-      calls.push({ file, args })
-      return { stdout: 'my-pat-value\n', stderr: '' }
-    }
+    const { executor, calls } = recordingExecutor(() => ({ stdout: 'my-pat-value\n', stderr: '' }))
     const value = await withPlatform('darwin', () =>
-      findGenericPassword('https://scrapbox.io', exec),
+      Effect.runPromise(findGenericPassword('https://scrapbox.io', executor)),
     )
-    expect(value).toBe('my-pat-value')
+    expect(value).toEqual(Option.some('my-pat-value'))
     expect(calls).toEqual([
       {
         file: 'security',
@@ -36,24 +44,31 @@ describe('keychain (darwin)', () => {
     ])
   })
 
-  test('findGenericPassword returns null when the item is not found', async () => {
-    const exec: ExecFileFn = async () => {
-      throw new Error('security: SecKeychainSearchCopyNext: The specified item could not be found')
+  test('findGenericPassword returns Option.none when the item is not found', async () => {
+    const executor: CommandExecutorShape = {
+      execFile: (file, args) =>
+        Effect.fail(
+          new CommandExecutorError({
+            command: file,
+            args,
+            cause: new Error(
+              'security: SecKeychainSearchCopyNext: The specified item could not be found',
+            ),
+          }),
+        ),
     }
     const value = await withPlatform('darwin', () =>
-      findGenericPassword('https://scrapbox.io', exec),
+      Effect.runPromise(findGenericPassword('https://scrapbox.io', executor)),
     )
-    expect(value).toBeNull()
+    expect(value).toEqual(Option.none())
   })
 
   test('addGenericPassword passes the PAT as a single argv element, never a shell string', async () => {
-    const calls: { file: string; args: string[] }[] = []
     const pat = 'sneaky-value; rm -rf /'
-    const exec: ExecFileFn = async (file, args) => {
-      calls.push({ file, args })
-      return { stdout: '', stderr: '' }
-    }
-    await withPlatform('darwin', () => addGenericPassword('https://scrapbox.io', pat, exec))
+    const { executor, calls } = recordingExecutor(() => ({ stdout: '', stderr: '' }))
+    await withPlatform('darwin', () =>
+      Effect.runPromise(addGenericPassword('https://scrapbox.io', pat, executor)),
+    )
     expect(calls).toEqual([
       {
         file: 'security',
@@ -74,12 +89,10 @@ describe('keychain (darwin)', () => {
   })
 
   test('deleteGenericPassword calls security with the expected arg array', async () => {
-    const calls: { file: string; args: string[] }[] = []
-    const exec: ExecFileFn = async (file, args) => {
-      calls.push({ file, args })
-      return { stdout: '', stderr: '' }
-    }
-    await withPlatform('darwin', () => deleteGenericPassword('https://scrapbox.io', exec))
+    const { executor, calls } = recordingExecutor(() => ({ stdout: '', stderr: '' }))
+    await withPlatform('darwin', () =>
+      Effect.runPromise(deleteGenericPassword('https://scrapbox.io', executor)),
+    )
     expect(calls).toEqual([
       {
         file: 'security',
@@ -90,40 +103,48 @@ describe('keychain (darwin)', () => {
 })
 
 describe('keychain (non-darwin soft-fail)', () => {
-  test('findGenericPassword returns null without invoking exec', async () => {
+  test('findGenericPassword returns Option.none without invoking the executor', async () => {
     let called = false
-    const exec: ExecFileFn = async () => {
-      called = true
-      return { stdout: '', stderr: '' }
+    const executor: CommandExecutorShape = {
+      execFile: () => {
+        called = true
+        return Effect.succeed({ stdout: '', stderr: '' })
+      },
     }
     const value = await withPlatform('linux', () =>
-      findGenericPassword('https://scrapbox.io', exec),
+      Effect.runPromise(findGenericPassword('https://scrapbox.io', executor)),
     )
-    expect(value).toBeNull()
+    expect(value).toEqual(Option.none())
     expect(called).toBe(false)
   })
 
-  test('addGenericPassword throws KeychainUnavailableError without invoking exec', async () => {
+  test('addGenericPassword fails with KeychainError without invoking the executor', async () => {
     let called = false
-    const exec: ExecFileFn = async () => {
-      called = true
-      return { stdout: '', stderr: '' }
+    const executor: CommandExecutorShape = {
+      execFile: () => {
+        called = true
+        return Effect.succeed({ stdout: '', stderr: '' })
+      },
     }
-    await expect(
-      withPlatform('linux', () => addGenericPassword('https://scrapbox.io', 'pat', exec)),
-    ).rejects.toThrow(KeychainUnavailableError)
+    const exit = await withPlatform('linux', () =>
+      Effect.runPromiseExit(addGenericPassword('https://scrapbox.io', 'pat', executor)),
+    )
+    expect(exit._tag).toBe('Failure')
     expect(called).toBe(false)
   })
 
-  test('deleteGenericPassword throws KeychainUnavailableError without invoking exec', async () => {
+  test('deleteGenericPassword fails with KeychainError without invoking the executor', async () => {
     let called = false
-    const exec: ExecFileFn = async () => {
-      called = true
-      return { stdout: '', stderr: '' }
+    const executor: CommandExecutorShape = {
+      execFile: () => {
+        called = true
+        return Effect.succeed({ stdout: '', stderr: '' })
+      },
     }
-    await expect(
-      withPlatform('linux', () => deleteGenericPassword('https://scrapbox.io', exec)),
-    ).rejects.toThrow(KeychainUnavailableError)
+    const exit = await withPlatform('linux', () =>
+      Effect.runPromiseExit(deleteGenericPassword('https://scrapbox.io', executor)),
+    )
+    expect(exit._tag).toBe('Failure')
     expect(called).toBe(false)
   })
 })

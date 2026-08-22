@@ -1,9 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { resolveCredential } from './credentials'
-import type { ExecFileFn } from './keychain'
+import { Effect, Layer, Option } from 'effect'
+import { CommandExecutor } from './commandExecutor'
+import { CredentialStore, CredentialStoreLive } from './credentials'
+import { CommandExecutorError } from './errors'
 
 const ORIGIN = 'https://scrapbox.io'
 
@@ -19,100 +18,52 @@ const withEnvPat = async <T>(value: string | undefined, fn: () => Promise<T>): P
   }
 }
 
-const notFoundExec: ExecFileFn = async () => {
-  throw new Error('security: item not found')
-}
+const testCommandExecutor = (stdout: string | undefined): Layer.Layer<CommandExecutor> =>
+  Layer.succeed(
+    CommandExecutor,
+    CommandExecutor.of({
+      execFile: (file, args) =>
+        stdout === undefined
+          ? Effect.fail(new CommandExecutorError({ command: file, args, cause: 'not found' }))
+          : Effect.succeed({ stdout, stderr: '' }),
+    }),
+  )
 
-describe('resolveCredential precedence: env > keychain > settingsJson', () => {
-  let dir: string
-  let settingsPath: string
+const resolveWith = (stdout: string | undefined, origin = ORIGIN) =>
+  Effect.gen(function* () {
+    const store = yield* CredentialStore
+    return yield* store.resolve(origin)
+  }).pipe(Effect.provide(CredentialStoreLive.pipe(Layer.provide(testCommandExecutor(stdout)))))
 
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'chatora-creds-'))
-    settingsPath = join(dir, 'settings.json')
+describe('CredentialStore.resolve precedence: env > keychain', () => {
+  const originalPlatform = process.platform
+
+  beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
   })
 
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true })
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform })
   })
 
-  test('env COSENSE_PAT wins even when keychain and settings.json also have entries', async () => {
-    await writeFile(
-      settingsPath,
-      JSON.stringify({ users: [{ url: ORIGIN, token: 'settings-pat' }], projects: [] }),
-    )
-    const exec: ExecFileFn = async () => ({ stdout: 'keychain-pat', stderr: '' })
-
+  test('env COSENSE_PAT wins even when keychain also has an entry', async () => {
     const credential = await withEnvPat('env-pat', () =>
-      resolveCredential(ORIGIN, undefined, { execFile: exec, settingsPath }),
+      Effect.runPromise(resolveWith('keychain-pat')),
     )
-    expect(credential).toEqual({ type: 'pat', value: 'env-pat', source: 'env' })
+    expect(credential).toEqual(Option.some({ type: 'pat', value: 'env-pat', source: 'env' }))
   })
 
-  test('keychain wins over settings.json when env is unset', async () => {
-    await writeFile(
-      settingsPath,
-      JSON.stringify({ users: [{ url: ORIGIN, token: 'settings-pat' }], projects: [] }),
-    )
-    const exec: ExecFileFn = async () => ({ stdout: 'keychain-pat\n', stderr: '' })
-
+  test('falls back to keychain when env is unset', async () => {
     const credential = await withEnvPat(undefined, () =>
-      resolveCredential(ORIGIN, undefined, { execFile: exec, settingsPath }),
+      Effect.runPromise(resolveWith('keychain-pat\n')),
     )
-    expect(credential).toEqual({ type: 'pat', value: 'keychain-pat', source: 'keychain' })
+    expect(credential).toEqual(
+      Option.some({ type: 'pat', value: 'keychain-pat', source: 'keychain' }),
+    )
   })
 
-  test('falls back to settings.json users[] (PAT) when keychain has no entry', async () => {
-    await writeFile(
-      settingsPath,
-      JSON.stringify({ users: [{ url: ORIGIN, token: 'settings-pat' }], projects: [] }),
-    )
-    const credential = await withEnvPat(undefined, () =>
-      resolveCredential(ORIGIN, undefined, { execFile: notFoundExec, settingsPath }),
-    )
-    expect(credential).toEqual({ type: 'pat', value: 'settings-pat', source: 'settingsJson' })
-  })
-
-  test('settings.json projects[] (serviceAccount) takes priority over users[] when project is given', async () => {
-    await writeFile(
-      settingsPath,
-      JSON.stringify({
-        users: [{ url: ORIGIN, token: 'settings-pat' }],
-        projects: [{ url: `${ORIGIN}/myproject`, serviceAccount: 'cs_abc' }],
-      }),
-    )
-    const credential = await withEnvPat(undefined, () =>
-      resolveCredential(ORIGIN, 'myproject', { execFile: notFoundExec, settingsPath }),
-    )
-    expect(credential).toEqual({ type: 'serviceAccount', value: 'cs_abc', source: 'settingsJson' })
-  })
-
-  test('falls back to users[] PAT when project is given but has no serviceAccount entry', async () => {
-    await writeFile(
-      settingsPath,
-      JSON.stringify({ users: [{ url: ORIGIN, token: 'settings-pat' }], projects: [] }),
-    )
-    const credential = await withEnvPat(undefined, () =>
-      resolveCredential(ORIGIN, 'myproject', { execFile: notFoundExec, settingsPath }),
-    )
-    expect(credential).toEqual({ type: 'pat', value: 'settings-pat', source: 'settingsJson' })
-  })
-
-  test('returns null when no source has a matching entry', async () => {
-    await writeFile(settingsPath, JSON.stringify({ users: [], projects: [] }))
-    const credential = await withEnvPat(undefined, () =>
-      resolveCredential(ORIGIN, undefined, { execFile: notFoundExec, settingsPath }),
-    )
-    expect(credential).toBeNull()
-  })
-
-  test('returns null when settings.json does not exist and nothing else matches', async () => {
-    const credential = await withEnvPat(undefined, () =>
-      resolveCredential(ORIGIN, undefined, {
-        execFile: notFoundExec,
-        settingsPath: join(dir, 'missing.json'),
-      }),
-    )
-    expect(credential).toBeNull()
+  test('returns Option.none when neither env nor keychain has a matching entry', async () => {
+    const credential = await withEnvPat(undefined, () => Effect.runPromise(resolveWith(undefined)))
+    expect(credential).toEqual(Option.none())
   })
 })

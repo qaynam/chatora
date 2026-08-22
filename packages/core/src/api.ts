@@ -1,4 +1,21 @@
+import { Effect, Option, Schema } from 'effect'
 import type { Credential } from './credentials'
+import { CosenseApiError } from './errors'
+import { HttpClient } from './httpClient'
+import {
+  Links1HopResponseSchema,
+  Links2HopResponseSchema,
+  ListPagesResponseSchema,
+  MeSchema,
+  PageV2ResponseSchema,
+  PreviewResponseSchema,
+  ProjectsResponseSchema,
+  SearchFullTextResponseSchema,
+  SearchVectorResponseSchema,
+  SubmitResponseSchema,
+  TitleEntryArraySchema,
+  TitleEntryEnvelopeSchema,
+} from './schemas'
 import type {
   Me,
   PageDetail,
@@ -6,25 +23,12 @@ import type {
   PreviewEditBody,
   PreviewResponse,
   ProjectSummary,
-  RelatedPage,
   RelatedPages,
   SearchResult,
   SubmitResponse,
   TitleEntry,
   VectorResult,
 } from './types'
-
-export class CosenseApiError extends Error {
-  readonly status: number
-  readonly code?: string
-
-  constructor(params: { status: number; code?: string; message: string }) {
-    super(params.message)
-    this.name = 'CosenseApiError'
-    this.status = params.status
-    if (params.code !== undefined) this.code = params.code
-  }
-}
 
 // Human-readable-URL title encoder, ported from cosense-cli src/lib/encodeTitle.ts
 // (encodeTitleForUrl). Deliberately NOT encodeURIComponent, despite the architecture doc
@@ -40,6 +44,8 @@ const encodeTitleForUrl = (title: string): string =>
 
 const REDIRECT_STATUS_MIN = 300
 const REDIRECT_STATUS_MAX = 400
+const VECTOR_SEARCH_DISABLED_STATUS = 490
+const NOT_FOUND_STATUS = 404
 
 const parseErrorCode = (bodyText: string): string | undefined => {
   try {
@@ -56,170 +62,256 @@ const parseErrorCode = (bodyText: string): string | undefined => {
 
 type Method = 'GET' | 'POST'
 
-export interface CosenseApiOptions {
-  origin: string
-  credential: Credential
-  fetch?: typeof fetch
+export interface CosenseApiConfig {
+  readonly origin: string
+  readonly credential: Credential
 }
 
-export class CosenseApi {
-  private readonly origin: string
-  private readonly credential: Credential
-  private readonly fetchImpl: typeof fetch
+// Headers per cosense-cli src/lib/request.ts buildCredentialHeaders.
+const buildHeaders = (credential: Credential, hasBody: boolean): Record<string, string> => {
+  const headers: Record<string, string> =
+    credential.type === 'serviceAccount'
+      ? { 'x-service-account-access-key': credential.value }
+      : { 'x-personal-access-token': credential.value }
+  if (hasBody) headers['Content-Type'] = 'application/json'
+  return headers
+}
 
-  constructor(opts: CosenseApiOptions) {
-    this.origin = opts.origin
-    this.credential = opts.credential
-    this.fetchImpl = opts.fetch ?? fetch
-  }
+interface RawResponse {
+  readonly status: number
+  readonly body: unknown
+}
 
-  // Headers per cosense-cli src/lib/request.ts buildCredentialHeaders.
-  private buildHeaders(hasBody: boolean): Record<string, string> {
-    const headers: Record<string, string> =
-      this.credential.type === 'serviceAccount'
-        ? { 'x-service-account-access-key': this.credential.value }
-        : { 'x-personal-access-token': this.credential.value }
-    if (hasBody) headers['Content-Type'] = 'application/json'
-    return headers
-  }
-
-  // redirect: 'manual' + treat any 3xx as an error so credential headers never travel to a
-  // redirect target on a different origin (architecture doc "セキュリティ / 作法"; cosense-cli
-  // applies the same policy for file downloads in src/lib/request.ts downloadToFile).
-  private async requestJson(
-    path: string,
-    init?: { method?: Method; body?: unknown },
-  ): Promise<unknown> {
-    const url = `${this.origin}${path}`
+// redirect: 'manual' + treat any 3xx as an error so credential headers never travel to a
+// redirect target on a different origin (architecture doc "セキュリティ / 作法"; cosense-cli
+// applies the same policy for file downloads in src/lib/request.ts downloadToFile).
+const requestJson = (
+  origin: string,
+  credential: Credential,
+  path: string,
+  init?: { method?: Method; body?: unknown },
+): Effect.Effect<RawResponse, CosenseApiError, HttpClient> =>
+  Effect.gen(function* () {
+    const client = yield* HttpClient
     const hasBody = init?.body !== undefined
-    const res = await this.fetchImpl(url, {
-      method: init?.method ?? 'GET',
-      headers: this.buildHeaders(hasBody),
-      body: hasBody ? JSON.stringify(init?.body) : undefined,
-      redirect: 'manual',
-    })
-    if (res.status >= REDIRECT_STATUS_MIN && res.status < REDIRECT_STATUS_MAX) {
-      throw new CosenseApiError({
-        status: res.status,
-        message: `Unexpected redirect (HTTP ${res.status})`,
+    const res = yield* client
+      .fetch(`${origin}${path}`, {
+        method: init?.method ?? 'GET',
+        headers: buildHeaders(credential, hasBody),
+        body: hasBody ? JSON.stringify(init?.body) : undefined,
+        redirect: 'manual',
       })
+      .pipe(
+        Effect.mapError(
+          (httpClientError) =>
+            new CosenseApiError({
+              status: 0,
+              message: `Request failed: ${String(httpClientError.cause)}`,
+            }),
+        ),
+      )
+
+    if (res.status >= REDIRECT_STATUS_MIN && res.status < REDIRECT_STATUS_MAX) {
+      return yield* Effect.fail(
+        new CosenseApiError({
+          status: res.status,
+          message: `Unexpected redirect (HTTP ${res.status})`,
+        }),
+      )
     }
     if (!res.ok) {
-      const bodyText = await res.text().catch(() => '')
+      const bodyText = yield* Effect.tryPromise(() => res.text()).pipe(
+        Effect.orElseSucceed(() => ''),
+      )
       const code = parseErrorCode(bodyText)
-      const error: { status: number; code?: string; message: string } = {
-        status: res.status,
-        message: `HTTP ${res.status} ${res.statusText}`.trim(),
-      }
-      if (code !== undefined) error.code = code
-      throw new CosenseApiError(error)
+      return yield* Effect.fail(
+        new CosenseApiError({
+          status: res.status,
+          message: `HTTP ${res.status} ${res.statusText}`.trim(),
+          ...(code !== undefined ? { code } : {}),
+        }),
+      )
     }
-    return res.json()
-  }
+    const body = yield* Effect.tryPromise({
+      try: () => res.json(),
+      catch: (cause) =>
+        new CosenseApiError({
+          status: res.status,
+          code: 'DecodeError',
+          message: `Response body was not valid JSON: ${String(cause)}`,
+        }),
+    })
+    return { status: res.status, body }
+  })
 
-  async me(): Promise<Me> {
-    return (await this.requestJson('/api/users/me')) as Me
-  }
+const decode = <A, I>(
+  schema: Schema.Schema<A, I>,
+  response: RawResponse,
+): Effect.Effect<A, CosenseApiError> =>
+  Schema.decodeUnknown(schema)(response.body).pipe(
+    Effect.mapError(
+      (parseError) =>
+        new CosenseApiError({
+          status: response.status,
+          code: 'DecodeError',
+          message: parseError.message,
+        }),
+    ),
+  )
 
-  async projects(): Promise<ProjectSummary[]> {
-    const data = (await this.requestJson('/api/projects')) as { projects?: ProjectSummary[] }
-    return data.projects ?? []
-  }
-
-  async listPages(
+export interface CosenseApiShape {
+  readonly me: () => Effect.Effect<Me, CosenseApiError, HttpClient>
+  readonly projects: () => Effect.Effect<readonly ProjectSummary[], CosenseApiError, HttpClient>
+  readonly listPages: (
     project: string,
-    opts: { skip?: number; limit?: number; sort?: string } = {},
-  ): Promise<{ count: number; pages: PageSummary[] }> {
+    opts?: { readonly skip?: number; readonly limit?: number; readonly sort?: string },
+  ) => Effect.Effect<
+    { readonly count: number; readonly pages: readonly PageSummary[] },
+    CosenseApiError,
+    HttpClient
+  >
+  /** `Option.none` for both a real HTTP 404 and a `persistent: false` template response — see `PageDetail`'s doc. */
+  readonly getPage: (
+    project: string,
+    title: string,
+  ) => Effect.Effect<Option.Option<PageDetail>, CosenseApiError, HttpClient>
+  /** Issues links1hop and links2hop concurrently. */
+  readonly relatedPages: (
+    project: string,
+    title: string,
+  ) => Effect.Effect<RelatedPages, CosenseApiError, HttpClient>
+  readonly searchFullText: (
+    project: string,
+    query: string,
+  ) => Effect.Effect<SearchResult, CosenseApiError, HttpClient>
+  /** HTTP 490 (vector search disabled for this project) folds into `{ pages: [] }` instead of failing. */
+  readonly searchVector: (
+    project: string,
+    query: string,
+  ) => Effect.Effect<VectorResult, CosenseApiError, HttpClient>
+  readonly searchTitles: (
+    project: string,
+  ) => Effect.Effect<readonly TitleEntry[], CosenseApiError, HttpClient>
+  readonly previewEdit: (
+    project: string,
+    body: PreviewEditBody,
+  ) => Effect.Effect<PreviewResponse, CosenseApiError, HttpClient>
+  readonly submitEdit: (
+    project: string,
+    previewId: string,
+  ) => Effect.Effect<SubmitResponse, CosenseApiError, HttpClient>
+}
+
+/** Builds a `CosenseApi` bound to one origin + credential. Every operation requires `HttpClient` in scope. */
+export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
+  const { origin, credential } = config
+  const request = (path: string, init?: { method?: Method; body?: unknown }) =>
+    requestJson(origin, credential, path, init)
+
+  const me: CosenseApiShape['me'] = () =>
+    request('/api/users/me').pipe(Effect.flatMap((res) => decode(MeSchema, res)))
+
+  const projects: CosenseApiShape['projects'] = () =>
+    request('/api/projects').pipe(
+      Effect.flatMap((res) => decode(ProjectsResponseSchema, res)),
+      Effect.map((data) => data.projects),
+    )
+
+  const listPages: CosenseApiShape['listPages'] = (project, opts = {}) => {
     const params = new URLSearchParams()
     if (opts.sort !== undefined) params.set('sort', opts.sort)
     if (opts.limit !== undefined) params.set('limit', String(opts.limit))
     if (opts.skip !== undefined) params.set('skip', String(opts.skip))
     const query = params.toString()
-    const data = (await this.requestJson(`/api/pages/${project}/${query ? `?${query}` : ''}`)) as {
-      count?: number
-      pages?: PageSummary[]
-    }
-    return { count: data.count ?? 0, pages: data.pages ?? [] }
+    return request(`/api/pages/${project}/${query ? `?${query}` : ''}`).pipe(
+      Effect.flatMap((res) => decode(ListPagesResponseSchema, res)),
+    )
   }
 
-  async getPage(project: string, title: string): Promise<PageDetail | null> {
+  const getPage: CosenseApiShape['getPage'] = (project, title) => {
     const path = `/api/pages/v2/${project}/${encodeTitleForUrl(title)}`
-    let data: {
-      id?: string
-      title?: string
-      commitId?: string
-      persistent?: boolean
-      lines?: PageDetail['lines']
-    }
-    try {
-      data = (await this.requestJson(path)) as typeof data
-    } catch (err) {
-      if (err instanceof CosenseApiError && err.status === 404) return null
-      throw err
-    }
-    // persistent: false => template response for a not-yet-created page; treat as absent.
-    if (data.persistent === false) return null
-    return {
-      id: data.id ?? '',
-      title: data.title ?? title,
-      commitId: data.commitId ?? '',
-      lines: data.lines ?? [],
-    }
+    return request(path).pipe(
+      Effect.flatMap((res) => decode(PageV2ResponseSchema, res)),
+      Effect.map(
+        (data): Option.Option<PageDetail> =>
+          data.persistent === false
+            ? Option.none()
+            : Option.some({
+                id: data.id,
+                title: data.title ?? title,
+                commitId: data.commitId,
+                lines: data.lines,
+              }),
+      ),
+      Effect.catchAll((err) =>
+        err.status === NOT_FOUND_STATUS
+          ? Effect.succeed(Option.none<PageDetail>())
+          : Effect.fail(err),
+      ),
+    )
   }
 
-  async relatedPages(project: string, title: string): Promise<RelatedPages> {
+  const relatedPages: CosenseApiShape['relatedPages'] = (project, title) => {
     const base = `/api/pages/v2/${project}/${encodeTitleForUrl(title)}`
-    const [hop1, hop2] = await Promise.all([
-      this.requestJson(`${base}/links1hop`) as Promise<{ links1hop?: RelatedPage[] }>,
-      this.requestJson(`${base}/links2hop`) as Promise<{ links2hop?: RelatedPage[] }>,
-    ])
-    return { links1hop: hop1.links1hop ?? [], links2hop: hop2.links2hop ?? [] }
+    return Effect.all(
+      [
+        request(`${base}/links1hop`).pipe(
+          Effect.flatMap((res) => decode(Links1HopResponseSchema, res)),
+        ),
+        request(`${base}/links2hop`).pipe(
+          Effect.flatMap((res) => decode(Links2HopResponseSchema, res)),
+        ),
+      ],
+      { concurrency: 'unbounded' },
+    ).pipe(Effect.map(([hop1, hop2]) => ({ links1hop: hop1.links1hop, links2hop: hop2.links2hop })))
   }
 
-  async searchFullText(project: string, query: string): Promise<SearchResult> {
-    const path = `/api/pages/${project}/search/query?q=${encodeURIComponent(query)}`
-    const data = (await this.requestJson(path)) as {
-      count?: number
-      existsExactTitleMatch?: boolean
-      pages?: SearchResult['pages']
-    }
-    return {
-      count: data.count ?? 0,
-      existsExactTitleMatch: data.existsExactTitleMatch ?? false,
-      pages: data.pages ?? [],
-    }
-  }
+  const searchFullText: CosenseApiShape['searchFullText'] = (project, query) =>
+    request(`/api/pages/${project}/search/query?q=${encodeURIComponent(query)}`).pipe(
+      Effect.flatMap((res) => decode(SearchFullTextResponseSchema, res)),
+    )
 
-  async searchVector(project: string, query: string): Promise<VectorResult> {
-    const path = `/api/pages/${project}/search/vector/titles?q=${encodeURIComponent(query)}`
-    try {
-      const data = (await this.requestJson(path)) as { pages?: VectorResult['pages'] }
-      return { pages: data.pages ?? [] }
-    } catch (err) {
+  const searchVector: CosenseApiShape['searchVector'] = (project, query) =>
+    request(`/api/pages/${project}/search/vector/titles?q=${encodeURIComponent(query)}`).pipe(
+      Effect.flatMap((res) => decode(SearchVectorResponseSchema, res)),
       // HTTP 490 = vector search disabled for this project (architecture doc).
-      if (err instanceof CosenseApiError && err.status === 490) return { pages: [] }
-      throw err
-    }
-  }
+      Effect.catchAll((err) =>
+        err.status === VECTOR_SEARCH_DISABLED_STATUS
+          ? Effect.succeed<VectorResult>({ pages: [] })
+          : Effect.fail(err),
+      ),
+    )
 
-  async searchTitles(project: string): Promise<TitleEntry[]> {
-    const data = (await this.requestJson(`/api/pages/${project}/search/titles`)) as
-      | TitleEntry[]
-      | { pages?: TitleEntry[] }
-    return Array.isArray(data) ? data : (data.pages ?? [])
-  }
+  const searchTitles: CosenseApiShape['searchTitles'] = (project) =>
+    request(`/api/pages/${project}/search/titles`).pipe(
+      Effect.flatMap((res) =>
+        Array.isArray(res.body)
+          ? decode(TitleEntryArraySchema, res)
+          : decode(TitleEntryEnvelopeSchema, res).pipe(Effect.map((data) => data.pages)),
+      ),
+    )
 
-  async previewEdit(project: string, body: PreviewEditBody): Promise<PreviewResponse> {
-    return (await this.requestJson(`/api/pages/v2/${project}/page-edit-for-ai/preview`, {
-      method: 'POST',
-      body,
-    })) as PreviewResponse
-  }
+  const previewEdit: CosenseApiShape['previewEdit'] = (project, body) =>
+    request(`/api/pages/v2/${project}/page-edit-for-ai/preview`, { method: 'POST', body }).pipe(
+      Effect.flatMap((res) => decode(PreviewResponseSchema, res)),
+    )
 
-  async submitEdit(project: string, previewId: string): Promise<SubmitResponse> {
-    return (await this.requestJson(`/api/pages/v2/${project}/page-edit-for-ai/submit`, {
+  const submitEdit: CosenseApiShape['submitEdit'] = (project, previewId) =>
+    request(`/api/pages/v2/${project}/page-edit-for-ai/submit`, {
       method: 'POST',
       body: { previewId },
-    })) as SubmitResponse
+    }).pipe(Effect.flatMap((res) => decode(SubmitResponseSchema, res)))
+
+  return {
+    me,
+    projects,
+    listPages,
+    getPage,
+    relatedPages,
+    searchFullText,
+    searchVector,
+    searchTitles,
+    previewEdit,
+    submitEdit,
   }
 }

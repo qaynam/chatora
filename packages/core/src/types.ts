@@ -1,47 +1,48 @@
-// Response shapes are parsed leniently (narrow hand-written checks, unknown fields ignored)
-// rather than with a schema library — see docs/ARCHITECTURE.md "Read エンドポイント".
+// Response shapes are parsed leniently by CosenseApi (effect Schema with every field
+// optional-with-default, see schemas.ts): unknown fields are ignored, missing fields fall
+// back to a zero value — see docs/ARCHITECTURE.md "Read エンドポイント".
 
 export interface Me {
-  id: string
-  name: string
-  displayName: string
-  email?: string
+  readonly id: string
+  readonly name: string
+  readonly displayName: string
+  readonly email?: string
 }
 
 export interface ProjectSummary {
-  id: string
-  name: string
-  displayName: string
-  publicVisible: boolean
-  isMember: boolean
-  usersCount: number
-  created: number
-  updated: number
+  readonly id: string
+  readonly name: string
+  readonly displayName: string
+  readonly publicVisible: boolean
+  readonly isMember: boolean
+  readonly usersCount: number
+  readonly created: number
+  readonly updated: number
 }
 
 export interface UserRef {
-  id: string
-  name?: string
-  displayName?: string
+  readonly id: string
+  readonly name?: string
+  readonly displayName?: string
 }
 
 export interface PageSummary {
-  id: string
-  title: string
-  image: string | null
-  descriptions: string[]
-  user?: UserRef | null
-  linked: number
-  views: number
-  linesCount: number
-  charsCount: number
-  created: number
-  updated: number
+  readonly id: string
+  readonly title: string
+  readonly image: string | null
+  readonly descriptions: readonly string[]
+  readonly user?: UserRef | null
+  readonly linked: number
+  readonly views: number
+  readonly linesCount: number
+  readonly charsCount: number
+  readonly created: number
+  readonly updated: number
 }
 
 export interface PageDetailLine {
-  id: string
-  text: string
+  readonly id: string
+  readonly text: string
 }
 
 /**
@@ -49,110 +50,110 @@ export interface PageDetailLine {
  * server returns HTTP 200 with `persistent: false` for a title that has no real page yet
  * (a template response whose id/commitId/lines[].id are fake and unsafe to use as preview
  * anchors — cosense-cli strips them client-side for exactly this reason). @chatora/core's
- * getPage() folds that case into `null` too, so callers get one non-existent-page signal
- * (matching the architecture doc's "404 → null") without ever seeing a fake anchor id.
+ * getPage() folds that case into `Option.none()` too, alongside a real HTTP 404, so callers
+ * get one non-existent-page signal without ever seeing a fake anchor id.
  */
 export interface PageDetail {
-  id: string
-  title: string
-  commitId: string
-  lines: PageDetailLine[]
+  readonly id: string
+  readonly title: string
+  readonly commitId: string
+  readonly lines: readonly PageDetailLine[]
 }
 
 export interface RelatedPage {
-  id: string
-  title: string
-  titleLc: string
-  image: string | null
-  descriptions: string[]
-  linksLc: string[]
-  linked: number
-  pageRank: number
-  updated: number
-  relation?: 'outgoing' | 'incoming' | 'bidirectional'
+  readonly id: string
+  readonly title: string
+  readonly titleLc: string
+  readonly image: string | null
+  readonly descriptions: readonly string[]
+  readonly linksLc: readonly string[]
+  readonly linked: number
+  readonly pageRank: number
+  readonly updated: number
+  readonly relation?: 'outgoing' | 'incoming' | 'bidirectional'
 }
 
 export interface RelatedPages {
-  links1hop: RelatedPage[]
-  links2hop: RelatedPage[]
+  readonly links1hop: readonly RelatedPage[]
+  readonly links2hop: readonly RelatedPage[]
 }
 
 export interface SearchResultPage {
-  id: string
-  title: string
-  words: string[]
-  lines: string[]
-  views: number
-  linked: number
-  updated: number
+  readonly id: string
+  readonly title: string
+  readonly words: readonly string[]
+  readonly lines: readonly string[]
+  readonly views: number
+  readonly linked: number
+  readonly updated: number
 }
 
 export interface SearchResult {
-  count: number
-  existsExactTitleMatch: boolean
-  pages: SearchResultPage[]
+  readonly count: number
+  readonly existsExactTitleMatch: boolean
+  readonly pages: readonly SearchResultPage[]
 }
 
 export interface VectorResultPage {
-  title: string
-  image: string | null
-  score: number
-  exists: boolean
-  id?: string
-  linked?: number
+  readonly title: string
+  readonly image: string | null
+  readonly score: number
+  readonly exists: boolean
+  readonly id?: string
+  readonly linked?: number
 }
 
 export interface VectorResult {
-  pages: VectorResultPage[]
+  readonly pages: readonly VectorResultPage[]
 }
 
 export interface TitleEntry {
-  id: string
-  title: string
-  titleLc: string
-  updated: number
-  image: string | null
+  readonly id: string
+  readonly title: string
+  readonly titleLc: string
+  readonly updated: number
+  readonly image: string | null
 }
 
 // RawChange / preview / submit shapes verified against cosense-cli
 // src/commands/previewEdit.ts and src/commands/submitEdit.ts.
 
 export interface RawInsertChange {
-  _insert: string // anchor lineId, or '_end' to append
-  lines: { id: string; text: string }
+  readonly _insert: string // anchor lineId, or '_end' to append
+  readonly lines: { readonly id: string; readonly text: string }
 }
 
 export interface RawUpdateChange {
-  _update: string // lineId
-  lines: { text: string }
+  readonly _update: string // lineId
+  readonly lines: { readonly text: string }
 }
 
 export interface RawDeleteChange {
   // No `lines` field at all — cosense-cli's RawDeleteChange is exactly `{_delete: string}`.
-  _delete: string // lineId
+  readonly _delete: string // lineId
 }
 
 export type RawChange = RawInsertChange | RawUpdateChange | RawDeleteChange
 
 export interface PreviewEditBody {
-  pageId?: string
-  changes: RawChange[]
+  readonly pageId?: string
+  readonly changes: readonly RawChange[]
 }
 
 export interface PagePreview {
-  title?: string
-  persistent?: boolean
-  lines?: PageDetailLine[]
+  readonly title?: string
+  readonly persistent?: boolean
+  readonly lines?: readonly PageDetailLine[]
 }
 
 export interface PreviewResponse {
-  previewId: string
-  expireAt: string
-  pagePreview: PagePreview | null
+  readonly previewId: string
+  readonly expireAt: string
+  readonly pagePreview: PagePreview | null
 }
 
 export interface SubmitResponse {
-  commitId: string
-  page: { title: string } | null
-  titleChanged?: { from: string; to: string }
+  readonly commitId: string
+  readonly page: { readonly title: string } | null
+  readonly titleChanged?: { readonly from: string; readonly to: string }
 }
