@@ -80,6 +80,13 @@ describe('computeTokens', () => {
     })
   })
 
+  test('bold emphasis levels: * -> bold, ** -> bold2, *** and up -> bold3', () => {
+    expect(findAll(computeTokens('Title\n[* one]'), 'bold')).toHaveLength(1)
+    expect(findAll(computeTokens('Title\n[** two]'), 'bold2')).toHaveLength(1)
+    expect(findAll(computeTokens('Title\n[*** three]'), 'bold3')).toHaveLength(1)
+    expect(findAll(computeTokens('Title\n[***** five]'), 'bold3')).toHaveLength(1)
+  })
+
   test('decoration priority: bold > italic > strike > underline, no separate child tokens', () => {
     const bold = computeTokens('Title\n[* bold text]')
     expect(findAll(bold, 'bold')).toHaveLength(1)

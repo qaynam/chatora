@@ -21,6 +21,8 @@ local defaults = {
   -- Conceal notation markup ([* ], link brackets, backticks) except on the
   -- cursor line (render-markdown.nvim style). false disables.
   conceal = true,
+  -- Blank virtual lines shown below the page title. 0 disables.
+  title_margin = 1,
 }
 
 M.options = vim.deepcopy(defaults)

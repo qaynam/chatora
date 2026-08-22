@@ -53,11 +53,10 @@ origin は既定 `https://scrapbox.io`（設定で変更可能に）。
 
 - ヘッダー: PAT は `x-personal-access-token: <token>`、Service Account は `x-service-account-access-key: cs_...`
 - PAT 発行ページ: `<origin>/settings/personal-access-tokens`
-- **資格情報の解決順**（`packages/core/src/credentials.ts`）:
+- **資格情報の解決順**（chatora 独自管理。cosense-cli の settings.json は読まない）:
   1. 環境変数 `COSENSE_PAT`
   2. macOS Keychain: `security find-generic-password -s chatora -a <origin> -w`
-  3. 公式 CLI 互換 `~/.cosense/settings.json`: `users[].url` が origin に一致 → `token`（PAT）。`projects[].url` 一致 → `serviceAccount`
-- ログイン保存は Keychain のみ: `security add-generic-password -U -s chatora -a <origin> -w <pat>`（`settings.json` へは書かない）
+- ログイン保存は Keychain のみ: `security add-generic-password -U -s chatora -a <origin> -w <pat>`
 - PAT は絶対にログ・エラーメッセージ・LSP レスポンスに含めない。
 
 ### Read エンドポイント
@@ -134,9 +133,9 @@ createNewLineId(userId: string): string
 
 ### semantic token 型（legend の順序も contract）
 
-`title, link, projectLink, externalLink, hashtag, code, codeBlock, formula, icon, quote, bold, italic, strike, underline, image, table`
+`title, link, projectLink, externalLink, hashtag, code, codeBlock, formula, icon, quote, bold, italic, strike, underline, image, table, bold2, bold3`
 
-decoration ノードは bold/italic/strike/underline のうち該当するもの 1 つを優先順 bold > italic > strike > underline で出す（MVP）。Neovim 側は `@lsp.type.<name>.cosense` に対して既定ハイライトを定義する。
+decoration ノードは bold/italic/strike/underline のうち該当するもの 1 つを優先順 bold > italic > strike > underline で出す。bold は sizeLevel で段階分け: `[*]`=bold、`[**]`=bold2、`[***]` 以上=bold3（ターミナルは太さ 1 段階しかないため色で強調を段階化する）。Neovim 側は `@lsp.type.<name>.cosense` に対して既定ハイライトを定義する。
 
 ### カスタムリクエスト（`chatora/*`）
 

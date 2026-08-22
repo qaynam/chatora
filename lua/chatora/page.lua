@@ -62,11 +62,29 @@ local function refresh_sidebar_marks()
   require('chatora.sidebar').refresh_marks()
 end
 
+local title_margin_ns = vim.api.nvim_create_namespace('chatora_title_margin')
+
+-- Visual breathing room below the title line without touching buffer content
+-- (the buffer must stay byte-identical to what gets saved to Cosense).
+local function apply_title_margin(bufnr)
+  vim.api.nvim_buf_clear_namespace(bufnr, title_margin_ns, 0, -1)
+  local margin = config.options.title_margin
+  if type(margin) ~= 'number' or margin < 1 or vim.api.nvim_buf_line_count(bufnr) == 0 then
+    return
+  end
+  local blank_lines = {}
+  for i = 1, math.floor(margin) do
+    blank_lines[i] = { { '', 'Normal' } }
+  end
+  vim.api.nvim_buf_set_extmark(bufnr, title_margin_ns, 0, 0, { virt_lines = blank_lines })
+end
+
 local function finalize_buffer(bufnr, project, title)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
   vim.bo[bufnr].modified = false
+  apply_title_margin(bufnr)
   lsp.ensure_start(bufnr)
   related.on_page_opened(project, title)
   refresh_sidebar_marks()

@@ -23,6 +23,9 @@ export const TOKEN_TYPES = [
   'underline',
   'image',
   'table',
+  // Appended after the initial legend so earlier indices stay stable.
+  'bold2',
+  'bold3',
 ] as const
 
 export type TokenType = (typeof TOKEN_TYPES)[number]
@@ -67,7 +70,14 @@ const spanToken = (type: TokenType, position: Position): RawToken => ({
 })
 
 const decorationTokenType = (node: Decoration): TokenType | null => {
-  if (node.bold) return 'bold'
+  if (node.bold) {
+    // Cosense sizes emphasis by asterisk count ([*]..[*****], sizeLevel 1..5);
+    // a terminal has one cell size, so weight is graded via color instead:
+    // bold < bold2 (**) < bold3 (*** and up).
+    if (node.sizeLevel >= 3) return 'bold3'
+    if (node.sizeLevel === 2) return 'bold2'
+    return 'bold'
+  }
   if (node.italic) return 'italic'
   if (node.strike) return 'strike'
   if (node.underline) return 'underline'

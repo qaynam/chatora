@@ -27,10 +27,13 @@ local function specs()
     formula = { fg = fg_of('Special'), italic = true },
     icon = { fg = fg_of('Identifier') },
     quote = { fg = fg_of('Comment'), italic = true },
-    -- Bold/italic alone are invisible when the (CJK fallback) font has no
-    -- bold/italic variant — pair them with an accent color so the emphasis
-    -- reads regardless of font support.
-    bold = { bold = true, fg = fg_of('Title') },
+    -- Emphasis levels ([*]=bold, [**]=bold2, [***+]=bold3): terminals have a
+    -- single bold weight, so the levels are graded with color on top of bold
+    -- (think font-weight 500/600/800). Colors also keep the emphasis visible
+    -- when the CJK fallback font lacks a bold variant.
+    bold = { bold = true },
+    bold2 = { bold = true, fg = fg_of('Constant') },
+    bold3 = { bold = true, fg = fg_of('Title'), underline = true },
     italic = { italic = true, fg = fg_of('Comment') },
     strike = { strikethrough = true },
     underline = { underline = true },

@@ -53,7 +53,7 @@ local ok, err = pcall(function()
   local legend = {
     'title', 'link', 'projectLink', 'externalLink', 'hashtag', 'code',
     'codeBlock', 'formula', 'icon', 'quote', 'bold', 'italic', 'strike',
-    'underline', 'image', 'table',
+    'underline', 'image', 'table', 'bold2', 'bold3',
   }
   for _, token in ipairs(legend) do
     local name = '@lsp.type.' .. token .. '.cosense'
