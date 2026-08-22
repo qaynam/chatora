@@ -143,7 +143,9 @@ export const buildCompletionItems = async (
     const item: CompletionItem = {
       label: entry.title,
       kind: CompletionItemKind.Reference,
-      filterText: entry.title,
+      // Must cover the typed text from textEdit.range.start (which includes the leading
+      // bracket/hash), or clients that filter against that span drop every item.
+      filterText: detection.kind === 'link' ? `[${entry.title}` : `#${entry.title}`,
       sortText: String(index).padStart(4, '0'),
       textEdit: edit as TextEdit,
     }
