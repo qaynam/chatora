@@ -15,6 +15,14 @@ local function fg_of(name)
   return nil
 end
 
+local function bg_of(name)
+  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
+  if ok and hl and hl.bg then
+    return hl.bg
+  end
+  return nil
+end
+
 local function specs()
   return {
     title = { fg = fg_of('Title'), bold = true },
@@ -30,10 +38,11 @@ local function specs()
     -- Emphasis levels ([*]=bold, [**]=bold2, [***+]=bold3): terminals have a
     -- single bold weight, so the levels are graded with color on top of bold
     -- (think font-weight 500/600/800). Colors also keep the emphasis visible
-    -- when the CJK fallback font lacks a bold variant.
+    -- when the CJK fallback font lacks a bold variant. bold3 uses a soft
+    -- background block instead of underline — underline reads as a link.
     bold = { bold = true },
     bold2 = { bold = true, fg = fg_of('Constant') },
-    bold3 = { bold = true, fg = fg_of('Title'), underline = true },
+    bold3 = { bold = true, fg = fg_of('Title'), bg = bg_of('CursorLine') },
     italic = { italic = true, fg = fg_of('Comment') },
     strike = { strikethrough = true },
     underline = { underline = true },
