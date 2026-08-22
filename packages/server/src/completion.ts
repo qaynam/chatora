@@ -35,7 +35,10 @@ const detectLink = (lineText: string, character: number): CompletionDetection | 
         if (cj === ']') {
           return {
             kind: 'link',
-            query: lineText.slice(i + 1, character),
+            // The whole bracket content, not just up to the cursor: Cosense
+            // treats the link text as one unit, so the candidates are the
+            // same wherever the cursor sits inside the pair.
+            query: lineText.slice(i + 1, j),
             replaceStart: i,
             replaceEnd: j + 1,
           }

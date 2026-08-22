@@ -30,13 +30,13 @@ describe('detectCompletion — multi-word and re-entry', () => {
     expect(d?.replaceEnd).toBe(line.length)
   })
 
-  test('cursor inside an existing [..] replaces through the closing bracket', () => {
+  test('cursor inside an existing [..] uses the whole content and replaces the pair', () => {
     const line = 'see [foo] here'
-    const d = detectCompletion(line, 7) // between 'fo|o'... cursor after 'fo' -> inside brackets
+    const d = detectCompletion(line, 7) // "[fo|o]" — cursor mid-content
     expect(d).not.toBeNull()
     expect(d?.replaceStart).toBe(4)
     expect(d?.replaceEnd).toBe(9) // through ']'
-    expect(d?.query).toBe('fo')
+    expect(d?.query).toBe('foo') // full bracket content, cursor-position independent
   })
 
   test('a following [ before any ] -> null (not a closed pair)', () => {
@@ -96,12 +96,12 @@ describe('detectCompletion — link', () => {
   })
 
   test('cursor before the closing ] still triggers and replaces the whole bracket', () => {
-    // "[do|ne]" — no ] between the opening [ and the cursor => live query; accepting a
-    // candidate swaps the entire [done] link (Cosense re-entry behavior).
+    // "[do|ne]" — the query is the whole content regardless of cursor position, and
+    // accepting a candidate swaps the entire [done] link (Cosense re-entry behavior).
     const line = '[done] more'
     expect(detectCompletion(line, 3)).toEqual({
       kind: 'link',
-      query: 'do',
+      query: 'done',
       replaceStart: 0,
       replaceEnd: 6,
     })
