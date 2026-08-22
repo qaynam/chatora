@@ -11,20 +11,9 @@ local function is_open()
   return win ~= nil and vim.api.nvim_win_is_valid(win)
 end
 
-local function is_plugin_win(w)
-  local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
-  return name:match('^chatora://') ~= nil
-end
-
---- A non-floating window that isn't a chatora UI window, if any.
-local function find_editor_win()
-  for _, w in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_config(w).relative == '' and not is_plugin_win(w) then
-      return w
-    end
-  end
-  return nil
-end
+local winutil = require('chatora.winutil')
+local is_plugin_win = winutil.is_plugin_win
+local find_editor_win = winutil.find_editor_win
 
 local function ensure_buf()
   if buf and vim.api.nvim_buf_is_valid(buf) then

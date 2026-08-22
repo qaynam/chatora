@@ -67,6 +67,30 @@ function M.search(query)
   end)
 end
 
+--- Create (open) a new page. Prompts for the title when not given.
+function M.new(title)
+  auth.ensure_auth(function()
+    M.resolve_project(function(project)
+      local function open_new(t)
+        if not t or t == '' then
+          return
+        end
+        local target = require('chatora.winutil').ensure_editor_win()
+        require('chatora.page').open(project, t, target)
+      end
+      if title and title ~= '' then
+        open_new(title)
+      else
+        vim.ui.input({ prompt = 'New page title: ' }, open_new)
+      end
+    end)
+  end)
+end
+
+function M.help()
+  require('chatora.help').open()
+end
+
 function M.related()
   related.toggle()
 end
@@ -79,12 +103,16 @@ end
 function M.dispatch(subcmd, args)
   if subcmd == '' or subcmd == 'open' then
     M.open()
+  elseif subcmd == 'new' then
+    M.new(args ~= '' and args or nil)
   elseif subcmd == 'search' then
     M.search(args ~= '' and args or nil)
   elseif subcmd == 'related' then
     M.related()
   elseif subcmd == 'logout' then
     M.logout()
+  elseif subcmd == 'help' then
+    M.help()
   else
     vim.notify('[chatora] unknown subcommand: ' .. subcmd, vim.log.levels.ERROR)
   end

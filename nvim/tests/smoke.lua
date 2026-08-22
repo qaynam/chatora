@@ -37,6 +37,18 @@ local ok, err = pcall(function()
   assert(project == 'myproject', 'parse() project mismatch: ' .. tostring(project))
   assert(title == tricky_title, 'parse() title mismatch: ' .. tostring(title))
 
+  -- Subcommand entry points must exist.
+  for _, fn in ipairs({ 'open', 'new', 'search', 'related', 'logout', 'help' }) do
+    assert(type(chatora[fn]) == 'function', 'expected chatora.' .. fn .. ' to be a function')
+  end
+
+  -- The help float must open and render.
+  require('chatora.help').open()
+  local help_buf = vim.api.nvim_get_current_buf()
+  assert(vim.bo[help_buf].filetype == 'chatora_help', 'expected help float to be focused')
+  assert(vim.api.nvim_buf_get_lines(help_buf, 0, 1, false)[1]:find('chatora'), 'help content missing')
+  vim.api.nvim_win_close(0, true)
+
   -- Highlight groups from the semantic token legend must be defined.
   local legend = {
     'title', 'link', 'projectLink', 'externalLink', 'hashtag', 'code',

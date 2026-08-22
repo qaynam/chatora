@@ -9,35 +9,13 @@ local buf, win
 local project
 local line_pages = {}
 
-local function is_plugin_win(w)
-  local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
-  return name:match('^chatora://') ~= nil
-end
-
---- The rightmost non-floating window that isn't a chatora UI window.
-local function editor_win()
-  local best, best_col = nil, nil
-  for _, w in ipairs(vim.api.nvim_list_wins()) do
-    if w ~= win and vim.api.nvim_win_get_config(w).relative == '' and not is_plugin_win(w) then
-      local col = vim.fn.win_screenpos(w)[2]
-      if not best_col or col > best_col then
-        best_col, best = col, w
-      end
-    end
-  end
-  return best
-end
+local winutil = require('chatora.winutil')
 
 local function ensure_editor_win()
-  local w = editor_win()
-  if w then
-    return w
-  end
   if win and vim.api.nvim_win_is_valid(win) then
     vim.api.nvim_set_current_win(win)
   end
-  vim.cmd('rightbelow vsplit')
-  return vim.api.nvim_get_current_win()
+  return winutil.ensure_editor_win({ exclude = win })
 end
 
 local function render(pages)

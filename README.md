@@ -36,7 +36,9 @@ Neovim 側（lazy.nvim の例）:
 1. `:Chatora` — 初回は PAT の入力を求められる（発行: https://scrapbox.io/settings/personal-access-tokens ）。検証後 macOS Keychain に保存される。`COSENSE_PAT` 環境変数や公式 cosense-cli の `~/.cosense/settings.json` があればそれも使われる。
 2. 左サイドバー: `<CR>` 開く / `R` 再読込 / `s` 検索 / `n` 新規ページ / `q` 閉じる
 3. ページバッファ: 普通に編集して `:w` で保存（preview → submit の公式 API）。`gR` で関連ページパネル（1-hop / 2-hop）をトグル。`[` や `#` でリンク補完、`gd` でリンク先へジャンプ。
-4. `:Chatora search [query]` / `:Chatora related` / `:Chatora logout`
+4. `:Chatora new [title]` — 新規ページ作成（title 省略時は入力プロンプト）
+5. `:Chatora search [query]` / `:Chatora related` / `:Chatora logout`
+6. `:Chatora help` — コマンド・キーマップのチートシート
 
 ## 開発
 
