@@ -18,9 +18,6 @@ local function finalize_buffer(bufnr, project, title)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  vim.bo[bufnr].filetype = 'cosense'
-  vim.bo[bufnr].buftype = 'acwrite'
-  vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].modified = false
   lsp.ensure_start(bufnr)
   related.on_page_opened(project, title)
@@ -37,6 +34,14 @@ local function handle_read(ev)
   end
 
   local bufnr = ev.buf
+  -- Set buffer options synchronously, before the async fetch: UI plugins
+  -- (winbar/statusline/icon providers) react to the buffer as soon as
+  -- BufReadCmd returns, and must see a typed special buffer, not a normal
+  -- file buffer with a percent-encoded name.
+  vim.bo[bufnr].buftype = 'acwrite'
+  vim.bo[bufnr].swapfile = false
+  vim.bo[bufnr].filetype = 'cosense'
+
   lsp.request_ok('chatora/openPage', { project = project, title = title }, function(result)
     if not vim.api.nvim_buf_is_valid(bufnr) then
       return
