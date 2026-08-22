@@ -13,6 +13,11 @@ local defaults = {
   -- Render backend: 'auto' prefers 3rd/image.nvim, falling back to
   -- folke/snacks.nvim's image module. 'image_nvim' / 'snacks' force one.
   image_backend = 'auto',
+  -- Completion UI in page buffers: 'auto' enables Neovim's native LSP
+  -- completion (autotrigger) when blink.cmp is absent or disabled for the
+  -- buffer; 'native' always enables it; false leaves completion entirely to
+  -- an external engine.
+  completion = 'auto',
   -- Seconds of idle time after an edit before the page is saved automatically;
   -- false disables autosave.
   autosave = false,

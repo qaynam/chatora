@@ -37,7 +37,11 @@ local function in_link_context(line, col)
   return false
 end
 
-local function show_menu()
+local function show_menu(bufnr)
+  if vim.b[bufnr].chatora_native_completion then
+    pcall(vim.lsp.completion.get)
+    return
+  end
   local ok_blink, blink = pcall(require, 'blink.cmp')
   if ok_blink and type(blink.show) == 'function' then
     blink.show()
@@ -53,7 +57,56 @@ local function show_menu()
   end
 end
 
+--- True when blink.cmp exists and its `enabled` predicate allows this buffer
+--- (evaluated with bufnr current — users disable blink per-filetype via
+--- `enabled = function() return vim.bo.filetype ~= ... end`).
+local function blink_active_for(bufnr)
+  local ok, bcfg = pcall(require, 'blink.cmp.config')
+  if not ok then
+    return false
+  end
+  local enabled = bcfg.enabled
+  if type(enabled) ~= 'function' then
+    return enabled ~= false
+  end
+  local ok_call, res = pcall(function()
+    return vim.api.nvim_buf_call(bufnr, enabled)
+  end)
+  return ok_call and res ~= false
+end
+
+--- Enable Neovim's native LSP completion (autotrigger) when no external
+--- engine will serve this buffer, so link completion works even where the
+--- user disabled blink.cmp for the cosense filetype.
+local function enable_native_if_needed(bufnr)
+  local mode = require('chatora.config').options.completion
+  if mode == false then
+    return
+  end
+  if mode ~= 'native' then
+    if blink_active_for(bufnr) then
+      return
+    end
+    -- blink absent/disabled; nvim-cmp's per-buffer state isn't cheaply
+    -- readable, so its mere presence defers to it (force with 'native').
+    local has_cmp = pcall(require, 'cmp')
+    if has_cmp then
+      return
+    end
+  end
+  if not (vim.lsp.completion and vim.lsp.completion.enable) then
+    return
+  end
+  local client = vim.lsp.get_clients({ name = 'chatora', bufnr = bufnr })[1]
+  if not client then
+    return
+  end
+  pcall(vim.lsp.completion.enable, true, client.id, bufnr, { autotrigger = true })
+  vim.b[bufnr].chatora_native_completion = true
+end
+
 function M.attach(bufnr)
+  enable_native_if_needed(bufnr)
   if vim.b[bufnr].chatora_completion_attached then
     return
   end
@@ -67,7 +120,7 @@ function M.attach(bufnr)
       end
       local line = vim.api.nvim_get_current_line()
       if line:sub(col, col) == ' ' and in_link_context(line, col) then
-        show_menu()
+        show_menu(bufnr)
       end
     end,
   })
