@@ -316,12 +316,14 @@ local ok, err = pcall(function()
     if b == -1 then
       return false
     end
+    -- Sidebar lines carry a 2-cell status prefix: '● ' (unsaved) or '  '.
     local has_home, has_memo = false, false
     for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
-      if l == 'ホーム' then
+      local title = (l:gsub('^● ', ''):gsub('^  ', ''))
+      if title == 'ホーム' then
         has_home = true
       end
-      if l == 'メモ' then
+      if title == 'メモ' then
         has_memo = true
       end
     end
@@ -336,6 +338,49 @@ local ok, err = pcall(function()
     fail('timed out waiting for sidebar to list both pages; lines=' .. vim.inspect(lines))
   end
   log('sidebar OK (buf ' .. sidebar_buf .. ' lists ホーム and メモ)')
+
+  -- ===================================================================================
+  -- STEP: sidebar unsaved (●) mark appears while the page buffer is modified, and clears
+  -- ===================================================================================
+  step('sidebar-mark')
+
+  local function sidebar_has_line(wanted)
+    local b = vim.fn.bufnr('chatora://sidebar')
+    if b == -1 then
+      return false
+    end
+    for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
+      if l == wanted then
+        return true
+      end
+    end
+    return false
+  end
+
+  -- Type into the page buffer the way a user would (focused window + feedkeys),
+  -- so the TextChanged/BufModifiedSet autocmds fire for real.
+  local page_win = vim.fn.bufwinid(page_buf)
+  if page_win == -1 then
+    fail('page buffer has no window for the mark step')
+  end
+  vim.api.nvim_set_current_win(page_win)
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('Goマークテスト<Esc>', true, false, true), 'x', false)
+  if not wait_for(10000, function()
+    return sidebar_has_line('● ホーム')
+  end) then
+    fail('timed out waiting for the ● unsaved mark on ホーム')
+  end
+
+  -- Clearing modified via the API fires no autocmd; the plugin's save path
+  -- calls refresh_marks explicitly, which is what we emulate here.
+  vim.bo[page_buf].modified = false
+  require('chatora.sidebar').refresh_marks()
+  if not wait_for(10000, function()
+    return sidebar_has_line('  ホーム')
+  end) then
+    fail('timed out waiting for the ● unsaved mark to clear')
+  end
+  log('sidebar unsaved mark OK (appears and clears)')
 
   -- ===================================================================================
   -- STEP: final-checks

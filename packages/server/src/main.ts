@@ -79,14 +79,18 @@ connection.languages.semanticTokens.onRange((params: SemanticTokensRangeParams):
 
 connection.onCompletion(async (params: CompletionParams) => {
   const doc = documents.get(params.textDocument.uri)
-  if (!doc) return []
+  if (!doc) return null
   const parsed = parseUri(params.textDocument.uri)
-  if (!parsed) return []
+  if (!parsed) return null
 
   const detection = detectCompletionInDocument(doc.getText(), params.position)
-  if (!detection) return []
+  if (!detection) return null
 
-  return buildCompletionItems(state, parsed.project, params.position.line, detection)
+  const items = await buildCompletionItems(state, parsed.project, params.position.line, detection)
+  // isIncomplete keeps clients re-querying on every keystroke so the server-side
+  // filtering (capped at 50 items) stays authoritative instead of client-side
+  // narrowing of a stale first batch.
+  return { isIncomplete: true, items }
 })
 
 connection.onDefinition((params: DefinitionParams) => {

@@ -14,6 +14,12 @@ local function set_content(bufnr, text)
   vim.bo[bufnr].undolevels = ul
 end
 
+local function refresh_sidebar_marks()
+  -- Lazy require: sidebar requires page at load time, so requiring it at the
+  -- top here would be circular.
+  require('chatora.sidebar').refresh_marks()
+end
+
 local function finalize_buffer(bufnr, project, title)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -21,8 +27,30 @@ local function finalize_buffer(bufnr, project, title)
   vim.bo[bufnr].modified = false
   lsp.ensure_start(bufnr)
   related.on_page_opened(project, title)
+  refresh_sidebar_marks()
+  -- on_lines is the only change notification that fires for every kind of
+  -- edit (typing, API, :normal); TextChanged/BufModifiedSet miss scripted
+  -- changes. Drives the sidebar's unsaved (●) marks.
+  if not vim.b[bufnr].chatora_attached then
+    vim.b[bufnr].chatora_attached = true
+    vim.api.nvim_buf_attach(bufnr, false, {
+      on_lines = function()
+        vim.schedule(refresh_sidebar_marks)
+      end,
+      on_detach = function()
+        vim.schedule(function()
+          pcall(vim.api.nvim_buf_set_var, bufnr, 'chatora_attached', false)
+          refresh_sidebar_marks()
+        end)
+      end,
+    })
+  end
   vim.keymap.set('n', 'gR', function()
     related.toggle()
+  end, { buffer = bufnr, nowait = true, silent = true })
+  vim.keymap.set('n', 'gd', vim.lsp.buf.definition, { buffer = bufnr, nowait = true, silent = true })
+  vim.keymap.set('n', 'gs', function()
+    require('chatora').search()
   end, { buffer = bufnr, nowait = true, silent = true })
 end
 
@@ -120,9 +148,53 @@ local function handle_write(ev)
   end)
 end
 
+--- Titles of loaded cosense buffers with unsaved changes.
+local function unsaved_titles()
+  local titles = {}
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].modified then
+      local name = vim.api.nvim_buf_get_name(b)
+      if name:match('^cosense://') then
+        local _, title = uri.parse(name)
+        titles[#titles + 1] = title or name
+      end
+    end
+  end
+  return titles
+end
+
 local augroup = vim.api.nvim_create_augroup('ChatoraPage', { clear = true })
 vim.api.nvim_create_autocmd('BufReadCmd', { group = augroup, pattern = 'cosense://*', callback = handle_read })
 vim.api.nvim_create_autocmd('BufWriteCmd', { group = augroup, pattern = 'cosense://*', callback = handle_write })
+
+-- :q on a window showing an unsaved page just hides the buffer ('hidden'):
+-- warn so the change isn't forgotten. Neovim itself still hard-blocks
+-- non-bang :qa/:q while any modified buffer exists.
+vim.api.nvim_create_autocmd('QuitPre', {
+  group = augroup,
+  pattern = 'cosense://*',
+  callback = function(ev)
+    if vim.bo[ev.buf].modified then
+      local _, title = uri.parse(vim.api.nvim_buf_get_name(ev.buf))
+      vim.notify(
+        '[chatora] 未保存の変更があります: ' .. (title or '?') .. '（バッファは残っています。:w で保存できます）',
+        vim.log.levels.WARN
+      )
+    end
+  end,
+})
+
+-- On exit, list every unsaved page in one place (Neovim's own E162 names
+-- only the first offending buffer).
+vim.api.nvim_create_autocmd('ExitPre', {
+  group = augroup,
+  callback = function()
+    local titles = unsaved_titles()
+    if #titles > 0 then
+      vim.notify('[chatora] 未保存のページ: ' .. table.concat(titles, ', '), vim.log.levels.WARN)
+    end
+  end,
+})
 
 --- Open project/title (edits the cosense:// URI), optionally in target_win.
 function M.open(project, title, target_win)
