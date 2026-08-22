@@ -215,20 +215,77 @@ export const candidateItemFields = (
     ? { kind: CompletionItemKind.Reference }
     : { kind: CompletionItemKind.Text, detail: '(new)' }
 
-/** Fetches the title index (via state's cache) and builds LSP CompletionItems. Impure — not unit tested. */
+/** The fields of a vector-search result page that completion consumes. */
+export interface VectorPageLike {
+  readonly title: string
+  readonly exists?: boolean
+}
+
+/** Vector results → candidates, preserving the server's score order. */
+export const vectorCandidates = (pages: readonly VectorPageLike[]): Candidate[] => {
+  const out: Candidate[] = []
+  for (const p of pages) {
+    if (typeof p.title === 'string' && p.title !== '') {
+      out.push({
+        title: p.title,
+        key: normalizeForMatch(p.title),
+        exists: p.exists !== false,
+        updated: undefined,
+      })
+    }
+  }
+  return out
+}
+
+/** primary first (its order kept), then fallback entries not already present, capped. */
+export const mergeCandidates = (
+  primary: readonly Candidate[],
+  fallback: readonly Candidate[],
+  cap: number = MAX_COMPLETION_ITEMS,
+): Candidate[] => {
+  const seen = new Set<string>()
+  const out: Candidate[] = []
+  for (const list of [primary, fallback]) {
+    for (const c of list) {
+      if (out.length >= cap) return out
+      if (seen.has(c.key)) continue
+      seen.add(c.key)
+      out.push(c)
+    }
+  }
+  return out
+}
+
+/**
+ * Fetches candidates and builds LSP CompletionItems. Impure — not unit tested.
+ * Primary source is Cosense's vector (semantic) title search — the same endpoint the real
+ * web editor queries on every keystroke (verified via a HAR capture of scrapbox.io) — with
+ * the local title index (exact/prefix/substring/asearch tiers) merged in behind it, and as
+ * the sole source when vector search is unavailable (HTTP 490/404) or the query is empty.
+ */
 export const buildCompletionItems = async (
   state: ServerState,
   project: string,
   line: number,
   detection: CompletionDetection,
 ): Promise<CompletionItem[]> => {
+  const noSpaces = detection.kind === 'hashtag'
   const titles = await state.getTitles(project)
   const candidates = buildCandidateIndex(titles)
-  const matches = rankCandidates(candidates, detection.query, {
-    noSpaces: detection.kind === 'hashtag',
-  })
+  const local = rankCandidates(candidates, detection.query, { noSpaces })
 
-  return matches.map((entry, index) => {
+  let matches = local
+  if (detection.query !== '') {
+    try {
+      let vector = vectorCandidates(await state.searchVectorCached(project, detection.query))
+      if (noSpaces) vector = vector.filter((c) => !/\s/.test(c.title))
+      if (vector.length > 0) matches = mergeCandidates(vector, local)
+    } catch {
+      // vector search unavailable for this project — local tiers already cover it
+    }
+  }
+
+  return matches.map((entry: Candidate, index: number) => {
     const edit = buildTextEdit(line, detection, entry.title)
     const { kind, detail } = candidateItemFields(entry.exists)
     const item: CompletionItem = {

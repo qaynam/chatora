@@ -1,4 +1,4 @@
-import type { Credential, Me, TitleEntry } from '@chatora/core'
+import type { Credential, Me, TitleEntry, VectorResultPage } from '@chatora/core'
 import { CosenseApi, resolveCredential } from '@chatora/core'
 
 export interface BasePageState {
@@ -16,6 +16,8 @@ interface TitlesCacheEntry {
 }
 
 const TITLES_CACHE_TTL_MS = 60_000
+const VECTOR_CACHE_TTL_MS = 30_000
+const VECTOR_CACHE_MAX = 200
 // Credential resolution has no project scope for these calls (see docs/ARCHITECTURE.md
 // resolveCredential(origin, project?)) — a distinct key from any real project name.
 const NO_PROJECT_KEY = '\0no-project'
@@ -31,6 +33,10 @@ export class ServerState {
   private credentialCache = new Map<string, Credential | null>()
   private apiCache = new Map<string, CosenseApi>()
   private titlesCache = new Map<string, TitlesCacheEntry>()
+  private vectorCache = new Map<
+    string,
+    { readonly at: number; readonly pages: VectorResultPage[] }
+  >()
   private pages = new Map<string, BasePageState>()
   verifiedUser: Me | undefined
   private verifyFailed = false
@@ -73,6 +79,7 @@ export class ServerState {
     this.credentialCache.clear()
     this.apiCache.clear()
     this.titlesCache.clear()
+    this.vectorCache.clear()
     this.verifiedUser = undefined
     this.verifyFailed = false
   }
@@ -88,6 +95,27 @@ export class ServerState {
       this.verifyFailed = true
     }
     return this.verifiedUser
+  }
+
+  /**
+   * Vector (semantic) title search, cached briefly per (project, query) — completion
+   * re-queries on every keystroke, and backspacing replays recent queries. Throws on
+   * failure (490 = disabled returns [] from the API layer); callers fall back to the
+   * local title index.
+   */
+  async searchVectorCached(project: string, query: string): Promise<VectorResultPage[]> {
+    const key = `${project}\0${query}`
+    const cached = this.vectorCache.get(key)
+    if (cached && Date.now() - cached.at < VECTOR_CACHE_TTL_MS) return cached.pages
+    const api = await this.getApi(project)
+    if (!api) return []
+    const result = await api.searchVector(project, query)
+    if (this.vectorCache.size >= VECTOR_CACHE_MAX) {
+      const oldest = this.vectorCache.keys().next().value
+      if (oldest !== undefined) this.vectorCache.delete(oldest)
+    }
+    this.vectorCache.set(key, { at: Date.now(), pages: result.pages })
+    return result.pages
   }
 
   async getTitles(project: string): Promise<readonly TitleEntry[]> {

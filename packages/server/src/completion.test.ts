@@ -6,10 +6,49 @@ import {
   candidateItemFields,
   detectCompletion,
   detectCompletionInDocument,
+  mergeCandidates,
   normalizeForMatch,
   rankCandidates,
   type TitleEntryLike,
+  vectorCandidates,
 } from './completion'
+
+const cand = (title: string, exists = true): Candidate => ({
+  title,
+  key: normalizeForMatch(title),
+  exists,
+  updated: undefined,
+})
+
+describe('vectorCandidates', () => {
+  test('preserves score order and maps exists', () => {
+    const out = vectorCandidates([
+      { title: 'Sakura', exists: true },
+      { title: 'sakura施策' },
+      { title: '未作成ページ', exists: false },
+    ])
+    expect(out.map((c) => c.title)).toEqual(['Sakura', 'sakura施策', '未作成ページ'])
+    expect(out.map((c) => c.exists)).toEqual([true, true, false])
+  })
+
+  test('drops entries without a usable title', () => {
+    expect(vectorCandidates([{ title: '' }, { title: 'ok' }])).toHaveLength(1)
+  })
+})
+
+describe('mergeCandidates', () => {
+  test('primary order first, fallback fills without duplicates, capped', () => {
+    const primary = [cand('A'), cand('B')]
+    const fallback = [cand('b'), cand('C'), cand('D')] // 'b' dedupes against 'B'
+    const out = mergeCandidates(primary, fallback, 3)
+    expect(out.map((c) => c.title)).toEqual(['A', 'B', 'C'])
+  })
+
+  test('empty primary falls through to fallback', () => {
+    const out = mergeCandidates([], [cand('X')])
+    expect(out.map((c) => c.title)).toEqual(['X'])
+  })
+})
 
 describe('detectCompletion — link', () => {
   test('unclosed [ mid-line', () => {

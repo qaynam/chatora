@@ -128,7 +128,7 @@ createNewLineId(userId: string): string
 ### 標準機能
 
 - `textDocument/semanticTokens/full`（+ range）: parser AST → トークン。**トークンは行をまたげない**ので複数行ノード（codeBlock 等）は行ごとに分割して出す。
-- `textDocument/completion`: trigger characters `[` `#`。行テキストとカーソル位置から未クローズの `[query` / `#query` を検出し、タイトルインデックスから候補を返す（NFKC + lowercase + 空白/`_` 同一視で部分一致）。textEdit で `[title]` / `#title` 全体を置換。コードブロック内・inlineCode 内では発火しない。
+- `textDocument/completion`: trigger characters `[` `#`。行テキストとカーソル位置から未クローズの `[query` / `#query` を検出。候補の第一ソースは **vector（意味）検索** `GET /api/pages/:project/search/vector/titles?q=`（本家 Web エディタがキーストロークごとに叩いているのを HAR で実測確認。score 順・`exists:false` = 赤リンク）。ローカルのタイトルインデックス（exact > prefix > substring > asearch ファジー階層）を後段にマージし、vector が使えないプロジェクト（490/404）ではローカルのみで動く。textEdit で `[title]` / `#title` 全体を置換。コードブロック内・inlineCode 内では発火しない。`isIncomplete: true` で毎キーストローク再クエリ。
 - `textDocument/definition`: カーソル下の internalLink / hashtag / projectLink → `cosense://<project>/<title>` の Location。
 - sync: `TextDocuments` ヘルパー（incremental）。
 
