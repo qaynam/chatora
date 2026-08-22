@@ -15,13 +15,14 @@ local M = {}
 local config = require('chatora.config')
 local lsp = require('chatora.lsp')
 
-local DEBOUNCE_MS = 150
+local DEBOUNCE_MS = 300
 local uv = vim.uv or vim.loop
 local timers_by_bufnr = {}
 local placements_by_bufnr = {} -- values are lists of { close = fn } wrappers
 local project_by_bufnr = {}
 local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async fetchAsset replies
 local path_by_url = {} -- url -> local file path, resolved once via fetchAsset and reused
+local signature_by_bufnr = {} -- target multiset of the last applied refresh (flicker guard)
 
 local IMAGE_EXTENSIONS = { png = true, jpg = true, jpeg = true, gif = true, webp = true }
 
@@ -214,6 +215,45 @@ function M.refresh(bufnr)
     return
   end
 
+  -- Collect targets first and compare against the last applied set:
+  -- placements are extmark-bound and follow ordinary edits by themselves, so
+  -- when the target multiset is unchanged, tearing everything down and
+  -- re-placing it would only make the images flash. Rows are deliberately
+  -- NOT part of the signature (they shift on every line inserted above).
+  local origin = config.options.origin
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local targets = {}
+  local counts = {}
+  for i, line in ipairs(lines) do
+    for _, target in ipairs(icon_targets(line)) do
+      local url = origin
+        .. '/api/pages/'
+        .. project
+        .. '/'
+        .. encode_path_segment(target.name)
+        .. '/icon'
+      targets[#targets + 1] = { url = url, row = i, col = target.col, opts = { height = 1 } }
+      counts[url] = (counts[url] or 0) + 1
+    end
+    local standalone_src = standalone_image_src(line)
+    if standalone_src then
+      targets[#targets + 1] = { url = standalone_src, row = i, col = 0, opts = { max_height = 20 } }
+      counts[standalone_src] = (counts[standalone_src] or 0) + 1
+    end
+  end
+
+  local parts = {}
+  for url, n in pairs(counts) do
+    parts[#parts + 1] = url .. '\0' .. n
+  end
+  table.sort(parts)
+  local signature = table.concat(parts, '\1')
+
+  if signature_by_bufnr[bufnr] == signature and placements_by_bufnr[bufnr] then
+    return
+  end
+  signature_by_bufnr[bufnr] = signature
+
   clear_placements(bufnr)
 
   -- Bumped so a fetchAsset reply for a target this refresh no longer has
@@ -254,19 +294,8 @@ function M.refresh(bufnr)
     end)
   end
 
-  local origin = config.options.origin
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-
-  for i, line in ipairs(lines) do
-    for _, target in ipairs(icon_targets(line)) do
-      local url = origin .. '/api/pages/' .. project .. '/' .. encode_path_segment(target.name) .. '/icon'
-      place_url(url, i, target.col, { height = 1 })
-    end
-
-    local standalone_src = standalone_image_src(line)
-    if standalone_src then
-      place_url(standalone_src, i, 0, { max_height = 20 })
-    end
+  for _, target in ipairs(targets) do
+    place_url(target.url, target.row, target.col, target.opts)
   end
 end
 
@@ -310,6 +339,9 @@ function M.attach(bufnr, project)
     return
   end
   project_by_bufnr[bufnr] = project
+  -- An explicit attach follows a full buffer (re)load, which invalidates the
+  -- extmarks existing placements ride on — force the next refresh to re-place.
+  signature_by_bufnr[bufnr] = nil
 
   if vim.b[bufnr].chatora_images_attached then
     schedule_refresh(bufnr)
@@ -327,6 +359,7 @@ function M.attach(bufnr, project)
         pcall(vim.api.nvim_buf_set_var, bufnr, 'chatora_images_attached', false)
         clear_placements(bufnr)
         project_by_bufnr[bufnr] = nil
+        signature_by_bufnr[bufnr] = nil
         epoch_by_bufnr[bufnr] = nil
       end)
     end,
