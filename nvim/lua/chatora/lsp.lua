@@ -40,6 +40,7 @@ function M.ensure_start(bufnr)
     name = 'chatora',
     cmd = cmd,
     root_dir = config.get_repo_root(),
+    init_options = { origin = config.options.origin },
   }, { bufnr = bufnr })
 
   if not id then
