@@ -100,7 +100,9 @@ local function handle_write(ev)
       local winid = vim.fn.bufwinid(bufnr)
       if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
         vim.api.nvim_win_call(winid, function()
-          vim.cmd({ cmd = 'edit', args = { new_uri } })
+          -- magic.file=false: the URI contains %XX escapes that :edit would
+          -- otherwise expand as the "current file" special character.
+          vim.cmd({ cmd = 'edit', args = { new_uri }, magic = { file = false } })
         end)
         if vim.api.nvim_buf_is_valid(bufnr) then
           pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
@@ -123,7 +125,9 @@ function M.open(project, title, target_win)
     vim.api.nvim_set_current_win(target_win)
   end
   local uri_str = uri.format(project, title)
-  vim.cmd({ cmd = 'edit', args = { uri_str } })
+  -- magic.file=false: the URI contains %XX escapes that :edit would otherwise
+  -- expand as the "current file" special character (E499 on Japanese titles).
+  vim.cmd({ cmd = 'edit', args = { uri_str }, magic = { file = false } })
 end
 
 return M
