@@ -45,7 +45,7 @@ describe('findDefinitionTarget', () => {
 describe('definitionLocation', () => {
   test('builds a cosense:// uri pointing at the top of the target page', () => {
     expect(definitionLocation({ project: 'myproject', title: 'Some Page' })).toEqual({
-      uri: 'cosense://myproject/Some%20Page',
+      uri: 'cosense://myproject/Some Page',
       range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
     })
   })

@@ -2,17 +2,24 @@ import { describe, expect, test } from 'bun:test'
 import { formatUri, parseUri } from './uriScheme'
 
 describe('uriScheme', () => {
-  test('round-trips an ascii title', () => {
+  test('round-trips an ascii title, keeping spaces raw', () => {
     const uri = formatUri('myproject', 'Hello World')
-    expect(uri).toBe('cosense://myproject/Hello%20World')
+    expect(uri).toBe('cosense://myproject/Hello World')
     expect(parseUri(uri)).toEqual({ project: 'myproject', title: 'Hello World' })
   })
 
-  test('round-trips a Japanese title', () => {
+  test('keeps a Japanese title raw (readable as a buffer name) and round-trips', () => {
     const title = '日本語のタイトル'
     const uri = formatUri('myproject', title)
-    expect(uri).toContain('%')
+    expect(uri).toBe(`cosense://myproject/${title}`)
     expect(parseUri(uri)).toEqual({ project: 'myproject', title })
+  })
+
+  test('still parses a fully percent-encoded title (older buffers, hand-typed uris)', () => {
+    expect(parseUri('cosense://myproject/%E3%83%A1%E3%83%A2')).toEqual({
+      project: 'myproject',
+      title: 'メモ',
+    })
   })
 
   test('round-trips a title containing reserved uri characters', () => {

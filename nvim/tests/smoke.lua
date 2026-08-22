@@ -16,20 +16,26 @@ local ok, err = pcall(function()
 
   assert(vim.fn.exists(':Chatora') == 2, 'expected :Chatora user command to exist')
 
-  -- Multibyte (Japanese) title round-trip through the pure-lua uri module.
+  -- Japanese titles stay raw in the URI (readable buffer names); only
+  -- structure-breaking chars are percent-encoded. Must round-trip.
   local uri = require('chatora.uri')
   local japanese_title = '日本語のタイトル'
 
   local encoded = uri.encode_title(japanese_title)
-  assert(encoded:find('%%') ~= nil, 'expected japanese title to be percent-encoded')
+  assert(encoded == japanese_title, 'expected japanese title to stay raw, got: ' .. encoded)
   assert(uri.decode_title(encoded) == japanese_title, 'title did not round-trip through encode/decode')
 
-  local formatted = uri.format('myproject', japanese_title)
-  assert(formatted == ('cosense://myproject/' .. encoded), 'format() did not match encode_title()')
+  local tricky_title = 'a/b?c#d%e 日本語'
+  local tricky_encoded = uri.encode_title(tricky_title)
+  assert(tricky_encoded == 'a%2Fb%3Fc%23d%25e 日本語', 'unexpected encoding: ' .. tricky_encoded)
+  assert(uri.decode_title(tricky_encoded) == tricky_title, 'tricky title did not round-trip')
+
+  local formatted = uri.format('myproject', tricky_title)
+  assert(formatted == ('cosense://myproject/' .. tricky_encoded), 'format() did not match encode_title()')
 
   local project, title = uri.parse(formatted)
   assert(project == 'myproject', 'parse() project mismatch: ' .. tostring(project))
-  assert(title == japanese_title, 'parse() title mismatch: ' .. tostring(title))
+  assert(title == tricky_title, 'parse() title mismatch: ' .. tostring(title))
 
   -- Highlight groups from the semantic token legend must be defined.
   local legend = {
