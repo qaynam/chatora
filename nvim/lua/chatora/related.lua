@@ -36,6 +36,7 @@ local function ensure_buf()
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
   vim.bo[buf].modifiable = false
+  vim.bo[buf].filetype = 'chatora_related'
 
   local opts = { buffer = buf, nowait = true, silent = true }
   vim.keymap.set('n', '<CR>', function() M.open_current() end, opts)

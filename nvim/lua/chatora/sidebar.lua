@@ -122,6 +122,7 @@ function M.open(proj)
     vim.bo[buf].bufhidden = 'hide'
     vim.bo[buf].swapfile = false
     vim.bo[buf].modifiable = false
+    vim.bo[buf].filetype = 'chatora_sidebar'
     setup_keymaps()
   end
 
