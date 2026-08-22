@@ -1,9 +1,14 @@
 import { describe, expect, test } from 'bun:test'
+import { CompletionItemKind } from 'vscode-languageserver/node'
 import {
+  buildCandidateIndex,
+  type Candidate,
+  candidateItemFields,
   detectCompletion,
   detectCompletionInDocument,
-  filterAndSortTitles,
   normalizeForMatch,
+  rankCandidates,
+  type TitleEntryLike,
 } from './completion'
 
 describe('detectCompletion — link', () => {
@@ -133,20 +138,28 @@ describe('normalizeForMatch', () => {
   })
 })
 
-describe('filterAndSortTitles', () => {
+describe('rankCandidates', () => {
+  const c = (title: string, opts: Partial<Candidate> = {}): Candidate => ({
+    title,
+    key: normalizeForMatch(title),
+    exists: true,
+    updated: undefined,
+    ...opts,
+  })
+
   // 'pineapple' contains 'app' but does not start with it, and sits ahead of the startsWith
-  // matches here on purpose — proves the bucket sort actually reorders, not just filters.
+  // matches here on purpose — proves the tiering actually reorders, not just filters.
   const titles = [
-    { title: 'Zebra' },
-    { title: 'pineapple' },
-    { title: 'apple pie' },
-    { title: 'Application' },
-    { title: 'banana' },
-    { title: 'app_store' },
+    c('Zebra'),
+    c('pineapple'),
+    c('apple pie'),
+    c('Application'),
+    c('banana'),
+    c('app_store'),
   ]
 
-  test('substring matches, startsWith bucket first, stable within buckets', () => {
-    const result = filterAndSortTitles(titles, 'app')
+  test('substring matches, startsWith tier first, stable within tiers', () => {
+    const result = rankCandidates(titles, 'app')
     expect(result.map((t) => t.title)).toEqual([
       'apple pie',
       'Application',
@@ -156,22 +169,134 @@ describe('filterAndSortTitles', () => {
   })
 
   test('space/underscore equivalence applies to the query too', () => {
-    const result = filterAndSortTitles(titles, 'app_store')
+    const result = rankCandidates(titles, 'app_store')
     expect(result.map((t) => t.title)).toEqual(['app_store'])
   })
 
   test('hashtag mode excludes titles containing spaces', () => {
-    const result = filterAndSortTitles(titles, 'app', { noSpaces: true })
+    const result = rankCandidates(titles, 'app', { noSpaces: true })
     expect(result.map((t) => t.title)).toEqual(['Application', 'app_store', 'pineapple'])
   })
 
   test('caps results at 50', () => {
-    const many = Array.from({ length: 80 }, (_, i) => ({ title: `item${i}` }))
-    expect(filterAndSortTitles(many, 'item')).toHaveLength(50)
+    const many = Array.from({ length: 80 }, (_, i) => c(`item${i}`))
+    expect(rankCandidates(many, 'item')).toHaveLength(50)
   })
 
-  test('empty query returns everything (capped), preserving order', () => {
-    const result = filterAndSortTitles(titles, '')
+  test('empty query returns everything (capped), preserving API order when no updated data', () => {
+    const result = rankCandidates(titles, '')
     expect(result.map((t) => t.title)).toEqual(titles.map((t) => t.title))
+  })
+
+  test('empty query sorts by updated desc when the pool has updated data', () => {
+    const withDates = [
+      c('old', { updated: 100 }),
+      c('new', { updated: 300 }),
+      c('mid', { updated: 200 }),
+    ]
+    expect(rankCandidates(withDates, '').map((t) => t.title)).toEqual(['new', 'mid', 'old'])
+  })
+
+  test('tiers: exact beats prefix beats substring beats fuzzy', () => {
+    // 'apq' does not start with or contain 'app' — it only surfaces via Asearch fuzzy
+    // matching (1-char substitution against the whole query, verified empirically).
+    const candidates = [c('pineapple'), c('apq'), c('App Store'), c('app')]
+    const result = rankCandidates(candidates, 'app')
+    expect(result.map((t) => t.title)).toEqual(['app', 'App Store', 'pineapple', 'apq'])
+  })
+
+  test('fuzzy tier: 1-error matches rank before 2-error-only matches', () => {
+    // 'apq' matches Asearch('app') at ambig=1; 'apxy' only at ambig=2 (verified empirically).
+    // Neither is a prefix or substring match, so both only surface via the fuzzy tier.
+    const candidates = [c('apxy'), c('apq')]
+    const result = rankCandidates(candidates, 'app')
+    expect(result.map((t) => t.title)).toEqual(['apq', 'apxy'])
+  })
+
+  test('fuzzy tier: candidates beyond 2 errors are excluded entirely', () => {
+    const candidates = [c('app'), c('xyz')]
+    const result = rankCandidates(candidates, 'app')
+    expect(result.map((t) => t.title)).toEqual(['app'])
+  })
+
+  test('fuzzy tiers are skipped once the stricter tiers already fill the cap', () => {
+    const substringFill = Array.from({ length: 50 }, (_, i) => c(`xapp${i}`))
+    const fuzzyOnly = c('apq')
+    const result = rankCandidates([...substringFill, fuzzyOnly], 'app')
+    expect(result).toHaveLength(50)
+    expect(result.some((t) => t.title === 'apq')).toBe(false)
+  })
+
+  test('recency (updated desc) orders results within a tier', () => {
+    const candidates = [
+      c('appA', { updated: 10 }),
+      c('appB', { updated: 30 }),
+      c('appC', { updated: 20 }),
+    ]
+    const result = rankCandidates(candidates, 'app')
+    expect(result.map((t) => t.title)).toEqual(['appB', 'appC', 'appA'])
+  })
+
+  test('dedupe: a candidate matching a stricter tier is not repeated in a looser one', () => {
+    // 'app' qualifies for exact; without dedupe it would also satisfy prefix/substring.
+    const result = rankCandidates([c('app')], 'app')
+    expect(result).toHaveLength(1)
+  })
+})
+
+describe('candidateItemFields', () => {
+  test('an existing page is a plain Reference with no detail', () => {
+    const fields = candidateItemFields(true)
+    expect(fields.kind).toBe(CompletionItemKind.Reference)
+    expect(fields.detail).toBeUndefined()
+  })
+
+  test('a red-link candidate is a subtly-marked Text item', () => {
+    const fields = candidateItemFields(false)
+    expect(fields.kind).toBe(CompletionItemKind.Text)
+    expect(fields.detail).toBe('(new)')
+  })
+})
+
+describe('buildCandidateIndex', () => {
+  test('candidate set is page titles ∪ outgoing link targets', () => {
+    const titles: TitleEntryLike[] = [
+      { title: 'Alpha', links: ['Beta', 'Gamma'] },
+      { title: 'Beta', links: [] },
+    ]
+    const index = buildCandidateIndex(titles)
+    const byTitle = new Map(index.map((c) => [c.title, c]))
+    expect(byTitle.get('Alpha')?.exists).toBe(true)
+    expect(byTitle.get('Beta')?.exists).toBe(true)
+    expect(byTitle.get('Gamma')?.exists).toBe(false) // red link: no page named Gamma
+    expect(index).toHaveLength(3)
+  })
+
+  test('a link target is deduped when a real page has the same normalized title', () => {
+    const titles: TitleEntryLike[] = [
+      { title: 'CamelCase Page' },
+      { title: 'Other', links: ['camelcase_page'] },
+    ]
+    const index = buildCandidateIndex(titles)
+    const matches = index.filter((c) => c.key === normalizeForMatch('CamelCase Page'))
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.title).toBe('CamelCase Page') // real page's casing wins
+    expect(matches[0]?.exists).toBe(true)
+  })
+
+  test('the same red-link target from multiple pages is deduped to one candidate', () => {
+    const titles: TitleEntryLike[] = [
+      { title: 'A', links: ['Missing'] },
+      { title: 'B', links: ['Missing'] },
+    ]
+    const index = buildCandidateIndex(titles)
+    expect(index.filter((c) => c.title === 'Missing')).toHaveLength(1)
+  })
+
+  test('tolerant of minimal entries with no links/updated field at all', () => {
+    const titles: TitleEntryLike[] = [{ title: 'ホーム' }, { title: 'メモ' }]
+    const index = buildCandidateIndex(titles)
+    expect(index.map((c) => c.title).sort()).toEqual(['ホーム', 'メモ'])
+    expect(index.every((c) => c.exists)).toBe(true)
   })
 })

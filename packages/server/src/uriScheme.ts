@@ -12,7 +12,7 @@ const URI_PATTERN = /^cosense:\/\/([^/]+)\/(.*)$/
 
 // %, /, ?, # plus control chars (matching Lua's %c class: 0x00-0x1F and 0x7F).
 // biome-ignore lint/suspicious/noControlCharactersInRegex: control chars must be encoded
-const ENCODE_PATTERN = /[%\/?#\u0000-\u001f\u007f]/g
+const ENCODE_PATTERN = /[%/?#\u0000-\u001f\u007f]/g
 
 export interface ParsedUri {
   readonly project: string

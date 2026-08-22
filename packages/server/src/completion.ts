@@ -7,6 +7,7 @@ import {
   type Range,
   type TextEdit,
 } from 'vscode-languageserver/node'
+import { Asearch } from './asearch'
 import type { ServerState } from './state'
 
 export interface CompletionDetection {
@@ -98,20 +99,96 @@ export const normalizeForMatch = (s: string): string =>
 const MAX_COMPLETION_ITEMS = 50
 
 /**
- * Substring-filters and sorts titles for a completion query: startsWith matches first, then
- * the rest, each bucket keeping stable relative order; capped at MAX_COMPLETION_ITEMS.
+ * Permissive shape for what `/search/titles` actually sends. @chatora/core's `TitleEntry`
+ * declares `id`/`titleLc`/`updated`/`image` as required, but the real payload is parsed with
+ * a bare `as` cast (no runtime validation — see CosenseApi.searchTitles) and the e2e fake
+ * server's fixture omits everything but `title`, so treat every field but `title` as
+ * possibly absent here. `links` is each page's outgoing link targets (verified against
+ * cosense-app-client's TitleEntrySchema — see the response shape note in the task report).
  */
-export const filterAndSortTitles = <T extends { title: string }>(
-  titles: readonly T[],
+export interface TitleEntryLike {
+  readonly title: string
+  readonly updated?: number
+  readonly links?: readonly string[]
+}
+
+/** One completion candidate: an existing page, or a link target with no page yet ("red link"). */
+export interface Candidate {
+  readonly title: string
+  /** normalizeForMatch(title) — the dedupe/match key. */
+  readonly key: string
+  readonly exists: boolean
+  readonly updated: number | undefined
+}
+
+/**
+ * Candidate set = page titles ∪ outgoing link targets, deduped by normalizeForMatch key.
+ * Pages are indexed first so a link target sharing a page's normalized title keeps the
+ * page's real casing and `exists: true` (link entries never overwrite an existing key).
+ */
+export const buildCandidateIndex = (titles: readonly TitleEntryLike[]): Candidate[] => {
+  const byKey = new Map<string, Candidate>()
+  for (const entry of titles) {
+    const key = normalizeForMatch(entry.title)
+    byKey.set(key, { title: entry.title, key, exists: true, updated: entry.updated })
+  }
+  for (const entry of titles) {
+    for (const link of entry.links ?? []) {
+      const key = normalizeForMatch(link)
+      if (byKey.has(key)) continue
+      byKey.set(key, { title: link, key, exists: false, updated: undefined })
+    }
+  }
+  return [...byKey.values()]
+}
+
+/**
+ * Tiered ranking for a completion query: exact, then prefix, then substring, then
+ * Asearch-fuzzy (1 error, then 2 errors) — each tier only run once the stricter ones leave
+ * room under the cap, deduped across tiers by key. Within a tier, sort by `updated` desc
+ * when the pool has updated data at all; otherwise keep API/insertion order (stable sort).
+ * An empty query returns the pool itself in that same recency-or-API order, capped.
+ */
+export const rankCandidates = (
+  candidates: readonly Candidate[],
   query: string,
   options: { noSpaces?: boolean } = {},
-): T[] => {
+): Candidate[] => {
+  const pool = options.noSpaces ? candidates.filter((c) => !/\s/.test(c.title)) : candidates
+  const hasUpdated = pool.some((c) => c.updated !== undefined)
+  const byRecency = (a: Candidate, b: Candidate): number =>
+    hasUpdated ? (b.updated ?? 0) - (a.updated ?? 0) : 0
+
   const q = normalizeForMatch(query)
-  const pool = options.noSpaces ? titles.filter((t) => !/\s/.test(t.title)) : titles
-  const matched = pool.filter((t) => normalizeForMatch(t.title).includes(q))
-  const withStarts = matched.map((t) => ({ t, starts: normalizeForMatch(t.title).startsWith(q) }))
-  withStarts.sort((a, b) => Number(b.starts) - Number(a.starts))
-  return withStarts.slice(0, MAX_COMPLETION_ITEMS).map((x) => x.t)
+  if (q.length === 0) return [...pool].sort(byRecency).slice(0, MAX_COMPLETION_ITEMS)
+
+  const seen = new Set<string>()
+  const result: Candidate[] = []
+  const take = (matched: readonly Candidate[]): void => {
+    for (const c of [...matched].sort(byRecency)) {
+      if (result.length >= MAX_COMPLETION_ITEMS) return
+      if (seen.has(c.key)) continue
+      seen.add(c.key)
+      result.push(c)
+    }
+  }
+
+  take(pool.filter((c) => c.key === q))
+  if (result.length < MAX_COMPLETION_ITEMS) {
+    take(pool.filter((c) => c.key !== q && c.key.startsWith(q)))
+  }
+  if (result.length < MAX_COMPLETION_ITEMS) {
+    take(pool.filter((c) => !c.key.startsWith(q) && c.key.includes(q)))
+  }
+  if (result.length < MAX_COMPLETION_ITEMS) {
+    const matcher = Asearch(q)
+    take(pool.filter((c) => !seen.has(c.key) && matcher(c.key, 1)))
+    if (result.length < MAX_COMPLETION_ITEMS) {
+      take(pool.filter((c) => !seen.has(c.key) && matcher(c.key, 2)))
+    }
+  }
+
+  return result
 }
 
 const buildTextEdit = (
@@ -126,6 +203,18 @@ const buildTextEdit = (
   newText: detection.kind === 'link' ? `[${title}]` : `#${title}`,
 })
 
+/**
+ * Maps a candidate's existence to its LSP presentation: an existing page is a plain
+ * Reference; a link target with no page yet ("red link" in Cosense) is a subtly-marked
+ * Text item, so the client can still show it differently without shouting about it.
+ */
+export const candidateItemFields = (
+  exists: boolean,
+): { kind: CompletionItemKind; detail?: string } =>
+  exists
+    ? { kind: CompletionItemKind.Reference }
+    : { kind: CompletionItemKind.Text, detail: '(new)' }
+
 /** Fetches the title index (via state's cache) and builds LSP CompletionItems. Impure — not unit tested. */
 export const buildCompletionItems = async (
   state: ServerState,
@@ -134,21 +223,24 @@ export const buildCompletionItems = async (
   detection: CompletionDetection,
 ): Promise<CompletionItem[]> => {
   const titles = await state.getTitles(project)
-  const matches = filterAndSortTitles(titles, detection.query, {
+  const candidates = buildCandidateIndex(titles)
+  const matches = rankCandidates(candidates, detection.query, {
     noSpaces: detection.kind === 'hashtag',
   })
 
   return matches.map((entry, index) => {
     const edit = buildTextEdit(line, detection, entry.title)
+    const { kind, detail } = candidateItemFields(entry.exists)
     const item: CompletionItem = {
       label: entry.title,
-      kind: CompletionItemKind.Reference,
+      kind,
       // Must cover the typed text from textEdit.range.start (which includes the leading
       // bracket/hash), or clients that filter against that span drop every item.
       filterText: detection.kind === 'link' ? `[${entry.title}` : `#${entry.title}`,
       sortText: String(index).padStart(4, '0'),
       textEdit: edit as TextEdit,
     }
+    if (detail !== undefined) item.detail = detail
     return item
   })
 }
