@@ -33,6 +33,20 @@ lazy.nvim（GitHub から直接）:
 ローカル開発中のリポジトリを使う場合は `'qaynam/chatora'` の代わりに
 `dir = '/path/to/chatora'` を指定（`build` は同じ）。
 
+### 画像のインライン表示（任意）
+
+アイコン記法や Gyazo 画像をバッファ内に描画するには、対応ターミナル
+（kitty / Ghostty）+ ImageMagick（`brew install imagemagick`）+ 描画プラグインが必要:
+
+```lua
+-- 推奨: image.nvim（magick_cli プロセッサなら luarocks 不要）
+{ "3rd/image.nvim", opts = { processor = "magick_cli" } },
+-- 代替: snacks.nvim の image モジュールでも可（両方あれば image.nvim 優先）
+```
+
+画像の取得は chatora の LSP サーバーが PAT 付きで行いローカルにキャッシュするため、
+プライベートプロジェクトのアイコンも表示できる。
+
 ## 使い方
 
 1. `:Chatora` — 初回は PAT の入力を求められる（発行: https://scrapbox.io/settings/personal-access-tokens ）。検証後 macOS Keychain に保存される。`COSENSE_PAT` 環境変数があればそちらが優先される。

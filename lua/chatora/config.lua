@@ -8,9 +8,11 @@ local defaults = {
   server_cmd = nil,
   sidebar_width = 32,
   related_height = 8,
-  -- 'auto' = render inline images when snacks.nvim's image module is
-  -- installed and the terminal supports it; false = never.
+  -- 'auto' = render inline images when a backend is usable; false = never.
   images = 'auto',
+  -- Render backend: 'auto' prefers 3rd/image.nvim, falling back to
+  -- folke/snacks.nvim's image module. 'image_nvim' / 'snacks' force one.
+  image_backend = 'auto',
   -- Seconds of idle time after an edit before the page is saved automatically;
   -- false disables autosave.
   autosave = false,

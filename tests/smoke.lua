@@ -166,9 +166,10 @@ local ok, err = pcall(function()
     pads.render(buf)
     local marks = vim.api.nvim_buf_get_extmarks(buf, pads.ns, 0, -1, {})
     -- ' レベル1' -> bullet + spacing (2), '  レベル2' -> guide + bullet + 2
-    -- spacings (4), ' code:y.lua' marker keeps pads (2), code interior and
-    -- title/plain/whitespace-only lines -> none.
-    assert(#marks == 8, 'expected 8 pad extmarks, got ' .. #marks)
+    -- spacings (4), '   ' indent-only -> 2 guides + bullet + 3 spacings (6,
+    -- Cosense shows the bullet on empty list items too), ' code:y.lua'
+    -- marker keeps pads (2), code interior and title/plain lines -> none.
+    assert(#marks == 14, 'expected 14 pad extmarks, got ' .. #marks)
 
     require('chatora.config').options.pads = false
     pads.render(buf)

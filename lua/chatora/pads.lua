@@ -49,10 +49,11 @@ function M.render(bufnr)
     end
   end
   for lnum, line in ipairs(lines) do
-    -- Line 1 is the page title; whitespace-only lines get no pads.
+    -- Line 1 is the page title. Indent-only lines DO get pads — Cosense
+    -- shows the bullet on an empty list item too.
     if lnum > 1 and not in_code[lnum - 1] then
       local ws = line:match('^([ \t]+)')
-      if ws and #ws < #line then
+      if ws then
         local n = #ws
         for i = 0, n - 1 do
           local last = i == n - 1

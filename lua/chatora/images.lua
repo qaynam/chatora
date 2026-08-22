@@ -1,27 +1,15 @@
 -- Best-effort inline image rendering for Cosense icon notation and image
--- links, via folke/snacks.nvim's image module (Kitty graphics protocol).
--- A no-op whenever snacks isn't installed, config.images == false, or the
--- terminal can't render images -- every snacks call here is pcall-guarded.
+-- links. Two interchangeable render backends (Kitty graphics protocol
+-- terminals): 3rd/image.nvim (preferred when installed) and
+-- folke/snacks.nvim's image module. A no-op whenever no backend is usable
+-- or config.images == false -- every backend call is pcall-guarded.
 --
--- API coded against (verified from github.com/folke/snacks.nvim, main
--- branch: lua/snacks/image/{init,placement,image,convert}.lua -- snacks is
--- not installed on this machine, so there is no local lazy-installed copy
--- to read):
---   Snacks.image.supports_terminal() -> boolean
---   Snacks.image.placement.new(bufnr, src, opts) -> Placement
---     opts.pos    = { row, col }  -- (1,0)-indexed
---     opts.inline = true          -- rendered as virtual text (extmarks
---                                  -- only; never edits buffer text, so
---                                  -- it's safe on our acwrite buffers)
---     opts.height = <cells>
---   placement:close()             -- removes its extmarks + augroup
--- `src` is always a *local* file path here, never a remote URL: every
--- target is resolved through the `chatora/fetchAsset` LSP request first
--- (see lua/chatora/lsp.lua), which the server fetches with session
--- credential headers when (and only when) the URL is same-origin, so
--- private-project icons work instead of 404ing the way a bare unauthenticated
--- `curl` would. See docs/ARCHITECTURE.md's chatora/* request list and
--- packages/server/src/assets.ts.
+-- The rendered src is always a *local* file path, never a remote URL: every
+-- target is resolved through the `chatora/fetchAsset` LSP request first,
+-- which the server fetches with session credential headers when (and only
+-- when) the URL is same-origin, so private-project icons work instead of
+-- 404ing the way an unauthenticated curl would. See docs/ARCHITECTURE.md's
+-- chatora/* request list and packages/server/src/assets.ts.
 local M = {}
 
 local config = require('chatora.config')
@@ -30,7 +18,7 @@ local lsp = require('chatora.lsp')
 local DEBOUNCE_MS = 150
 local uv = vim.uv or vim.loop
 local timers_by_bufnr = {}
-local placements_by_bufnr = {} -- values are lists of snacks placement objects
+local placements_by_bufnr = {} -- values are lists of { close = fn } wrappers
 local project_by_bufnr = {}
 local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async fetchAsset replies
 local path_by_url = {} -- url -> local file path, resolved once via fetchAsset and reused
@@ -51,12 +39,86 @@ local function snacks_image()
   return snacks.image
 end
 
+-- Backend contract: place(bufnr, path, row, col, opts) -> { close = fn } | nil
+-- with row 1-based, col 0-based (byte), opts.height / opts.max_height in cells.
+
+--- 3rd/image.nvim: from_file API verified against its README/init.lua —
+--- geometry x/y are 0-based, window+buffer binding required for inline
+--- extmark-following placements, img:render()/img:clear().
+local function image_nvim_backend()
+  local ok, img = pcall(require, 'image')
+  if not ok or type(img) ~= 'table' or type(img.from_file) ~= 'function' then
+    return nil
+  end
+  return {
+    place = function(bufnr, path, row, col, opts)
+      local win = vim.fn.bufwinid(bufnr)
+      if win == -1 then
+        return nil
+      end
+      local ok_new, o = pcall(img.from_file, path, {
+        window = win,
+        buffer = bufnr,
+        inline = true,
+        with_virtual_padding = true,
+        x = col,
+        y = row - 1,
+        height = opts and (opts.height or opts.max_height) or nil,
+      })
+      if not ok_new or not o then
+        return nil
+      end
+      pcall(o.render, o)
+      return {
+        close = function()
+          pcall(o.clear, o)
+        end,
+      }
+    end,
+  }
+end
+
+local function snacks_backend()
+  local image = snacks_image()
+  if not image then
+    return nil
+  end
+  return {
+    place = function(bufnr, path, row, col, opts)
+      local placement_opts =
+        vim.tbl_extend('force', { pos = { row, col }, inline = true }, opts or {})
+      local ok, p = pcall(image.placement.new, bufnr, path, placement_opts)
+      if not ok or not p then
+        return nil
+      end
+      return {
+        close = function()
+          pcall(p.close, p)
+        end,
+      }
+    end,
+  }
+end
+
+--- The active render backend per config.image_backend
+--- ('auto' prefers image.nvim), or nil when none is usable.
+local function backend()
+  local pref = config.options.image_backend
+  if pref == 'snacks' then
+    return snacks_backend()
+  end
+  if pref == 'image_nvim' then
+    return image_nvim_backend()
+  end
+  return image_nvim_backend() or snacks_backend()
+end
+
 local function images_enabled()
   local opt = config.options.images
   if opt == false then
     return false
   end
-  return snacks_image() ~= nil
+  return backend() ~= nil
 end
 
 --- Percent-encode a page title for an HTTP path segment: same rule as the
@@ -130,9 +192,7 @@ local function clear_placements(bufnr)
     return
   end
   for _, p in ipairs(list) do
-    pcall(function()
-      p:close()
-    end)
+    p.close()
   end
   placements_by_bufnr[bufnr] = nil
 end
@@ -145,8 +205,8 @@ function M.refresh(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  local image = snacks_image()
-  if not image then
+  local active = backend()
+  if not active then
     return
   end
   local project = project_by_bufnr[bufnr]
@@ -170,9 +230,8 @@ function M.refresh(bufnr)
     if epoch_by_bufnr[bufnr] ~= epoch or not vim.api.nvim_buf_is_valid(bufnr) then
       return
     end
-    local placement_opts = vim.tbl_extend('force', { pos = { row, col }, inline = true }, opts or {})
-    local ok, p = pcall(image.placement.new, bufnr, path, placement_opts)
-    if ok and p then
+    local p = active.place(bufnr, path, row, col, opts)
+    if p then
       new_placements[#new_placements + 1] = p
     end
   end
