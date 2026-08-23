@@ -5,7 +5,7 @@ if vim.g.loaded_chatora then
 end
 vim.g.loaded_chatora = true
 
-local subcommands = { 'open', 'new', 'search', 'related', 'logout', 'help' }
+local subcommands = { 'open', 'new', 'search', 'related', 'project', 'logout', 'help' }
 
 vim.api.nvim_create_user_command('Chatora', function(opts)
   local raw = opts.args or ''

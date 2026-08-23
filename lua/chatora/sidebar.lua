@@ -163,6 +163,7 @@ local function setup_keymaps()
   vim.keymap.set('n', 'R', function() M.reload() end, opts)
   vim.keymap.set('n', 's', function() M.search() end, opts)
   vim.keymap.set('n', 'n', function() M.new_page() end, opts)
+  vim.keymap.set('n', 'P', function() require('chatora').switch_project() end, opts)
   vim.keymap.set('n', 'q', function() M.close() end, opts)
 end
 

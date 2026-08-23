@@ -94,6 +94,34 @@ function M.help()
   require('chatora.help').open()
 end
 
+--- Pick a different project and reopen the sidebar on it. Overrides both the
+--- session's remembered choice and a setup({ project = ... }) fixation until
+--- the next switch (resolve_project reads the session first).
+function M.switch_project()
+  auth.ensure_auth(function()
+    lsp.request_ok('chatora/projects', {}, function(result)
+      local projects = result.projects or {}
+      if #projects == 0 then
+        vim.notify('[chatora] no projects available', vim.log.levels.ERROR)
+        return
+      end
+      vim.ui.select(projects, {
+        prompt = 'Switch chatora project',
+        format_item = function(p)
+          return p.name or p.displayName or tostring(p)
+        end,
+      }, function(choice)
+        if not choice then
+          return
+        end
+        local name = choice.name or choice.displayName
+        M.session.project = name
+        sidebar.open(name)
+      end)
+    end)
+  end)
+end
+
 function M.related()
   related.toggle()
 end
@@ -112,6 +140,8 @@ function M.dispatch(subcmd, args)
     M.search(args ~= '' and args or nil)
   elseif subcmd == 'related' then
     M.related()
+  elseif subcmd == 'project' then
+    M.switch_project()
   elseif subcmd == 'logout' then
     M.logout()
   elseif subcmd == 'help' then

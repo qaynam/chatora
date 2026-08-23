@@ -38,7 +38,7 @@ local ok, err = pcall(function()
   assert(title == tricky_title, 'parse() title mismatch: ' .. tostring(title))
 
   -- Subcommand entry points must exist.
-  for _, fn in ipairs({ 'open', 'new', 'search', 'related', 'logout', 'help' }) do
+  for _, fn in ipairs({ 'open', 'new', 'search', 'related', 'switch_project', 'logout', 'help' }) do
     assert(type(chatora[fn]) == 'function', 'expected chatora.' .. fn .. ' to be a function')
   end
 
