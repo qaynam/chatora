@@ -190,6 +190,10 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 'chatora/relatedPages' { project, title }         → { ok, links1hop: RelatedPage[], links2hop: RelatedPage[] }
 'chatora/search'      { project, query, mode? }   → { ok, pages: { title, lines?: string[] }[] }  // mode: 'fulltext'(既定)|'vector'
 'chatora/newPage'     { project, title }          → { ok, uri, text }  // 空ページとして open（保存時に新規 preview/submit）
+'chatora/urlAt'       { uri, line, character } → { ok, url: string|null }
+   // カーソル位置がブラウザで開くべき URL の上にあるか。`[<画像url> <リンクurl>]` は
+   // リンク側を返す（画像はレンダリング対象でしかない）。ページに解決するもの（内部リンク・
+   // ハッシュタグ）と何でもない位置は null で、Lua 側は通常の定義ジャンプに落とす。
 'chatora/decorations' { uri }                     → { ok, conceal: { line, startChar, endChar }[] }
    // 記法マークアップの conceal 範囲（UTF-16 列）。カーソル行の解除は Neovim の
    // conceallevel/concealcursor に任せる。外部リンクは `[label url]` / `[url label]` の

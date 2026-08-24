@@ -299,19 +299,33 @@ vim.api.nvim_create_autocmd('BufWriteCmd', {
   end,
 })
 
--- :q on a window showing an unsaved page just hides the buffer ('hidden'):
--- warn so the change isn't forgotten. Neovim itself still hard-blocks
--- non-bang :qa/:q while any modified buffer exists.
+-- Under 'hidden', :q on an unsaved page closes the window and leaves the buffer
+-- modified in the background, with no prompt of any kind — so ask here. An
+-- error thrown from QuitPre aborts the quit, which is what makes "cancel" work.
 vim.api.nvim_create_autocmd('QuitPre', {
   group = augroup,
   pattern = 'cosense://*',
   callback = function(ev)
-    if vim.bo[ev.buf].modified then
-      local _, title = uri.parse(vim.api.nvim_buf_get_name(ev.buf))
-      vim.notify(
-        '[chatora] 未保存の変更があります: ' .. (title or '?') .. '（バッファは残っています。:w で保存できます）',
-        vim.log.levels.WARN
-      )
+    if not vim.bo[ev.buf].modified or vim.v.exiting ~= vim.NIL then
+      return
+    end
+    local _, title = uri.parse(vim.api.nvim_buf_get_name(ev.buf))
+    local choice = vim.fn.confirm(
+      '未保存の変更があります: ' .. (title or '?'),
+      '保存して閉じる(&W)\n保存せず閉じる(&D)\nキャンセル(&C)',
+      1
+    )
+    if choice == 1 then
+      vim.api.nvim_buf_call(ev.buf, function()
+        vim.cmd('write')
+      end)
+      -- A failed save leaves the buffer modified; closing anyway would be the
+      -- one outcome the user did not pick.
+      if vim.bo[ev.buf].modified then
+        error('chatora: 保存に失敗したため閉じません')
+      end
+    elseif choice ~= 2 then
+      error('chatora: 閉じるのをキャンセルしました')
     end
   end,
 })

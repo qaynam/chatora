@@ -23,7 +23,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument'
 import { type AssetCache, AssetCacheLive, type BorderParams, fetchAsset } from './assets'
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
-import { definitionLocation, findDefinitionTarget } from './definition'
+import { definitionLocation, findDefinitionTarget, findUrlTarget } from './definition'
 import { computeImageTargets } from './images'
 import * as handlers from './pages'
 import { makeSessionStateLayer, type SessionState } from './state'
@@ -150,6 +150,17 @@ connection.onDefinition((params: DefinitionParams) => {
   const target = findDefinitionTarget(lineText, params.position.character, parsed.project)
   return target ? definitionLocation(target) : null
 })
+
+type UrlAtResult = { ok: true; url: string | null } | { ok: false; code: string; message: string }
+connection.onRequest(
+  'chatora/urlAt',
+  (params: { uri: string; line: number; character: number }): UrlAtResult => {
+    const doc = documents.get(params.uri)
+    if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
+    const lineText = normalizeCrLf(doc.getText()).split('\n')[params.line] ?? ''
+    return { ok: true, url: findUrlTarget(lineText, params.character) }
+  },
+)
 
 connection.onRequest('chatora/authStatus', () => runtime.runPromise(handlers.authStatus()))
 connection.onRequest('chatora/login', (params: { pat: string }) =>

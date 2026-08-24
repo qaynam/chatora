@@ -170,11 +170,46 @@ local function highlight_block(bufnr, lines, block)
   end)
 end
 
---- Clear and re-highlight every code block in bufnr, synchronously.
+local function ensure_hl()
+  local normal = vim.api.nvim_get_hl(0, { name = 'Normal', link = false })
+  local cursorline = vim.api.nvim_get_hl(0, { name = 'CursorLine', link = false })
+  vim.api.nvim_set_hl(0, 'ChatoraCodeBlock', {
+    bg = cursorline and cursorline.bg or (normal and normal.bg) or nil,
+    default = true,
+  })
+  vim.api.nvim_set_hl(0, 'ChatoraCodeLabel', { link = 'Label', default = true })
+end
+
+--- Tint the block's interior and turn its `code:` marker into a bare filename
+--- label. The `code:` prefix is concealed like any other notation, so the
+--- cursor line still shows what is really in the buffer.
+local function decorate_block(bufnr, lines, block)
+  for lnum = block.start_line, block.end_line - 1 do
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, lnum, 0, {
+      line_hl_group = 'ChatoraCodeBlock',
+    })
+  end
+
+  local marker = lines[block.marker_line + 1] or ''
+  local prefix_start = indent_of(marker)
+  local prefix_end = prefix_start + #'code:'
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, block.marker_line, prefix_start, {
+    end_col = prefix_end,
+    conceal = '',
+  })
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, block.marker_line, prefix_end, {
+    end_col = #marker,
+    hl_group = 'ChatoraCodeLabel',
+    priority = PRIORITY,
+  })
+end
+
+--- Clear and re-decorate every code block in bufnr, synchronously.
 function M.refresh(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
+  ensure_hl()
   pcall(vim.api.nvim_buf_clear_namespace, bufnr, M.ns, 0, -1)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local ok, blocks = pcall(M.find_blocks, lines)
@@ -182,6 +217,7 @@ function M.refresh(bufnr)
     return
   end
   for _, block in ipairs(blocks) do
+    pcall(decorate_block, bufnr, lines, block)
     pcall(highlight_block, bufnr, lines, block)
   end
 end

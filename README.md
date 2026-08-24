@@ -23,21 +23,42 @@ lazy.nvim（GitHub から直接）:
   'qaynam/chatora',
   build = 'bun install && bun run build',
   cmd = 'Chatora',
-  opts = {
-    -- origin = 'https://scrapbox.io',  -- 既定値
-    -- project = 'your-project',        -- 固定したい場合。未指定なら起動時に選択
-    -- autosave = 3,                    -- 編集停止 n 秒後に自動保存（既定 false）
-    -- pads = { bullet = '•', gap = 1 },-- 箇条書き表示のカスタマイズ / false で無効
-    -- tables = false,                  -- table: ブロックの罫線描画を無効化（既定 true）
-    -- related_auto_open = false,       -- 関連ページパネルの自動表示を止める（既定 true）
-    -- external_link = 'open',          -- gd で確認なしにブラウザを開く（既定 'confirm'）
-    -- status = false,                  -- 保存状態アイコン（✓/●/◍/✗）を無効化（既定 true）
-    -- keymaps = false,                 -- <C-t>/<C-i>/[ 自動ペアを無効化（既定 true）
-    -- image_border = false,            -- 画像上下の罫線を消す（既定 true）
-    -- spacing = { line = 1, code = 0 },-- 行間（仮想空行）。既定はどちらも 0
-  },
+  opts = { project = 'your-project' },  -- 全オプションは下表
 }
 ```
+
+### 設定オプション
+
+`setup()` / lazy.nvim の `opts` に渡す。既定値は `lua/chatora/config.lua`。
+
+| オプション | 既定 | 意味 |
+|---|---|---|
+| `origin` | `https://scrapbox.io` | Cosense の origin |
+| `project` | なし | 固定するプロジェクト。未指定なら起動時に選択 |
+| `server_cmd` | 自動検出 | LSP サーバーの起動コマンド |
+| `sidebar_width` | `32` | サイドバーの幅 |
+| `sidebar_tabs` | すべて / 未読 | サイドバー上部のタブ。各要素は `{ label, filter?, unread_only? }`。`filter` は `'me'`（自分の保存済み Cosense フィルタ、無ければ自分の名前の icon フィルタ）か `{ type = 'icon', value = 'name' }`。`false` でタブなしの単一リスト |
+| `sidebar_separator` | `true` | 行ごとの区切り下線。未読バーが一本線に見えるのを防ぐ |
+| `related_height` | `8` | 関連ページパネルの高さ |
+| `related_auto_open` | `true` | ページを開いたら関連パネルも開く。`q` で閉じると次の `gR` まで抑制 |
+| `status` | `true` | 保存状態アイコン。`{ icons = { clean='✓', dirty='●', error='✗' }, echo = false }` で調整、`false` で無効 |
+| `autosave` | `false` | 編集停止から n 秒後に自動保存 |
+| `completion` | `'auto'` | `'auto'` は blink.cmp が無い/無効なときだけ Neovim 内蔵補完を有効化。`'native'` は常に有効、`false` は外部エンジンに任せる |
+| `external_link` | `'confirm'` | 外部 URL 上の `gd`。`'open'` は確認なし、`'ignore'` は何もしない |
+| `keymaps` | `true` | insert モードの Cosense ショートカット。`{ insert_date = '<C-t>', insert_icon = '<C-i>', date_format = '%Y-%m-%d %H:%M:%S', autopair = true, table_tab = true }`。**`<C-i>` は kitty keyboard protocol 対応端末（kitty / Ghostty / WezTerm）以外では `<Tab>` と同一** |
+| `images` | `'auto'` | 描画バックエンドが使えるときだけ画像を描く。`false` で無効 |
+| `image_backend` | `'auto'` | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック。`'image_nvim'` / `'snacks'` で固定 |
+| `image_height` | `20` | 単独行の画像の高さ（行数）。文中のインライン画像は常に 1 行 |
+| `image_border` | `true` | 画像自体に合成する枠（ImageMagick）。`{ width = 1, color = '#8888', padding = 12 }`（px、color は ImageMagick の色リテラル） |
+| `pads` | `true` | 箇条書きの中点とガイド線。`{ bullet = '●', guide = '┃', spacing = true, gap = 1 }`。`gap` は中点と本文の間の余白セル数 |
+| `conceal` | `true` | 記法マークアップをカーソル行以外で隠す（render-markdown.nvim 方式） |
+| `tables` | `true` | `table:` ブロックの罫線描画。`{ border = false, header = false }` で個別に無効化 |
+| `title_margin` | `1` | タイトル行の下に入れる仮想空行の数 |
+| `spacing` | `{ line = 0, code = 0 }` | 行間として挿入する仮想空行。ターミナルはセル高が固定なので、本当の行高は端末/GUI 側の設定（`linespace` 等） |
+
+`gap = 0` にすると中点が本文に密着するが、中点は overlay で描くため、端末が
+East Asian Ambiguous 幅の文字を 2 セルで描く設定だと次の 1 文字を潰す。
+その場合は `ambiwidth` を端末に合わせるか `gap` を 1 以上にする。
 
 ローカル開発中のリポジトリを使う場合は `'qaynam/chatora'` の代わりに
 `dir = '/path/to/chatora'` を指定（`build` は同じ）。

@@ -82,6 +82,23 @@ local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraTableBorder', { link = 'Comment', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraTableHeader', { bold = true, default = true })
   vim.api.nvim_set_hl(0, 'ChatoraTableSeparator', { link = 'Comment', default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraTableLabel', { link = 'Label', default = true })
+end
+
+--- Turn the `table:` marker into a bare name label. The prefix is concealed
+--- like any other notation, so the cursor line still shows the real text.
+local function render_marker(bufnr, lines, block)
+  local marker = lines[block.marker_line + 1] or ''
+  local prefix_start = indent_of(marker)
+  local prefix_end = prefix_start + #'table:'
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, block.marker_line, prefix_start, {
+    end_col = prefix_end,
+    conceal = '',
+  })
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, block.marker_line, prefix_end, {
+    end_col = #marker,
+    hl_group = 'ChatoraTableLabel',
+  })
 end
 
 local function set_win_opts(bufnr)
@@ -214,6 +231,9 @@ local function render_borders(bufnr, lines, block, widths, header_enabled)
 end
 
 local function render_block(bufnr, lines, block, border_enabled, header_enabled, active_line)
+  if active_line ~= block.marker_line then
+    render_marker(bufnr, lines, block)
+  end
   local rows = block.rows
   if #rows == 0 then
     return

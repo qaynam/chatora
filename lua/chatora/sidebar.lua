@@ -1,7 +1,6 @@
--- Left sidebar listing a project's pages (infinite-scroll via
--- chatora/listPages), split into neo-tree-style sources shown as tabs in the
--- winbar. Each tab keeps its own page list and paging cursor; save-state (✓/●)
--- and unread (▍) marks are derived per render from live buffer state.
+-- Left sidebar: a project's pages, split into tabbed sources. Each tab keeps
+-- its own list and paging cursor; the save-state (✓/●) and unread (▍) marks
+-- are derived per render from live buffer state, never cached.
 local M = {}
 
 local config = require('chatora.config')
@@ -17,14 +16,13 @@ local ns = vim.api.nvim_create_namespace('chatora_sidebar')
 
 local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTitle', { link = 'Title', default = true })
-  -- Cosense's web grid marks unread pages with a blue border along the card
-  -- edge; the list's leftmost column is the closest thing it has to one.
+  -- Cosense's web grid borders unread cards in blue; column 0 is the list's
+  -- equivalent of a card edge.
   vim.api.nvim_set_hl(0, 'ChatoraSidebarUnread', { fg = '#2d7ff9', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarUnreadTitle', { bold = true, default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabActive', { link = 'TabLineSel', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabInactive', { link = 'TabLine', default = true })
-  -- Underline spans the full row width, so it separates rows without spending
-  -- a line on a rule. Colour comes from the theme's own window separator.
+  -- Underline spans the full row, separating rows without spending a line.
   local sep = vim.api.nvim_get_hl(0, { name = 'WinSeparator', link = false })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarRow', {
     underline = true,
@@ -48,18 +46,13 @@ end
 
 local DEFAULT_TABS = {
   { label = 'すべて' },
-  -- Cosense's own saved filter (`/api/users/me`'s pageFilters), narrowed to
-  -- what hasn't been read yet — the sidebar equivalent of scanning the web
-  -- grid for blue borders under your own icon filter.
   { label = '未読', filter = 'me', unread_only = true },
 }
 
---- Resolved tab specs, one `state` each. Rebuilt whenever the config changes.
 local tabs = {}
 local active = 1
 
--- pageFilters from the authenticated user, fetched once per session; a `filter
--- = 'me'` tab has no query until this arrives.
+-- Fetched once per session; a `filter = 'me'` tab cannot query until it lands.
 local me = nil
 
 local function new_state()
@@ -83,8 +76,6 @@ local function build_tabs()
 end
 
 --- The `filterType`/`filterValue` pair for a tab, or nil for "no filter".
---- `filter = 'me'` resolves to the signed-in user's first saved page filter,
---- falling back to an icon filter on their own name.
 local function filter_of(tab)
   local filter = tab.filter
   if filter == nil or filter == false then
@@ -132,8 +123,6 @@ end
 -- rendering
 -- ---------------------------------------------------------------------------
 
--- Column 0 is the unread border, so a page's own text starts at column 1 and
--- nothing indents rows that carry no marks.
 local UNREAD_BAR = '▍'
 local READ_BAR = ' '
 
@@ -233,8 +222,6 @@ function M.load_more()
 
   local filter_type, filter_value = filter_of(tab)
   if tab.filter == 'me' and not filter_type then
-    -- The user's saved filters haven't arrived yet; open() re-runs this once
-    -- authStatus lands.
     return
   end
 
@@ -261,8 +248,6 @@ function M.load_more()
     for _, p in ipairs(result.pages or {}) do
       state.pages[#state.pages + 1] = p
     end
-    -- A batch that scanned nothing means the project is exhausted; so does
-    -- reaching the reported total.
     if scanned == 0 or (state.count and state.scanned >= state.count) then
       state.exhausted = true
     end

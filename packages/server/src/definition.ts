@@ -3,8 +3,31 @@ import { visit } from '@cosense-toolbox/parser/utils'
 import { formatUri } from './uriScheme'
 
 /**
+ * Cursor -> the URL a browser should open, for the external notations on one line.
+ * `null` when the cursor is on something that resolves to a page instead (see
+ * `findDefinitionTarget`) or to nothing at all.
+ */
+export const findUrlTarget = (lineText: string, character: number): string | null => {
+  const line = parseLine(lineText)
+  let url: string | null = null
+
+  visit(line, (node) => {
+    const inRange = character >= node.position.start.column && character < node.position.end.column
+    if (!inRange) return undefined
+
+    // `[<image url> <link url>]` puts a link *on* an image; the link is what a
+    // click should follow, and the image URL is only what gets rendered.
+    if (node.type === 'image') url = node.link ?? node.src
+    else if (node.type === 'externalLink') url = node.target
+    return url ? 'exit' : undefined
+  })
+
+  return url
+}
+
+/**
  * Cursor -> target page, for internalLink/hashtag/projectLink under the cursor on one line.
- * externalLink is deliberately not matched here — the Lua side opens those with `gx`.
+ * externalLink is deliberately not matched here — see `findUrlTarget`.
  */
 export const findDefinitionTarget = (
   lineText: string,

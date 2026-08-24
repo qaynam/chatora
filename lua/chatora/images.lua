@@ -1,18 +1,10 @@
--- Best-effort inline image rendering for Cosense icon notation and image
--- links. Two interchangeable render backends (Kitty graphics protocol
--- terminals): 3rd/image.nvim (preferred when installed) and
--- folke/snacks.nvim's image module. A no-op whenever no backend is usable
--- or config.images == false -- every backend call is pcall-guarded.
+-- Inline image rendering, over 3rd/image.nvim or snacks.nvim (both need a
+-- Kitty-graphics terminal). A no-op when neither is usable.
 --
--- Targets (which lines hold an image/icon, and whether it's the line's only
--- content) come from the `chatora/images` LSP request, which walks the
--- parser AST -- see docs/ARCHITECTURE.md's chatora/* request list and
--- packages/server/src/images.ts. The rendered src is always a *local* file
--- path, never a remote URL: every target is resolved through the
--- `chatora/fetchAsset` LSP request first, which the server fetches with
--- session credential headers when (and only when) the URL is same-origin,
--- so private-project icons work instead of 404ing the way an
--- unauthenticated curl would. See packages/server/src/assets.ts.
+-- What to draw comes from `chatora/images`; where the bytes come from is
+-- `chatora/fetchAsset`, which attaches session credentials for same-origin
+-- URLs so private-project icons resolve. Placements are therefore always a
+-- local file path, never a remote URL.
 local M = {}
 
 local config = require('chatora.config')
@@ -28,9 +20,7 @@ local path_by_key = {} -- fetch key -> local file path, resolved once via fetchA
 local signature_by_bufnr = {} -- target multiset of the last applied refresh (flicker guard)
 
 --- Border params for chatora/fetchAsset, or nil. The frame is composited into
---- the image file itself server-side (ImageMagick) — the only way to hug the
---- image's actual pixel edges; cell-grid extmarks can't. Standalone images
---- only: icons and inline images are 1 cell tall, too short to frame.
+--- the image's own pixels server-side, since a cell grid cannot hug its edges.
 local function border_params()
   local opt = config.options.image_border
   if opt == false or opt == nil then
@@ -46,9 +36,8 @@ local function border_params()
   }
 end
 
---- Cells available for text in the window showing bufnr (window width minus
---- the number/sign/fold gutter), or a conservative default when it isn't
---- displayed. Bounds how wide an inline image may render.
+--- Cells available for text in the window showing bufnr, or a conservative
+--- default when it isn't displayed.
 local function text_width(bufnr)
   local win = vim.fn.bufwinid(bufnr)
   if win == -1 then
@@ -75,9 +64,8 @@ end
 -- Backend contract: place(bufnr, path, row, col, opts) -> { close = fn } | nil
 -- with row 1-based, col 0-based (byte), opts.height / opts.max_height in cells.
 
---- 3rd/image.nvim: from_file API verified against its README/init.lua —
---- geometry x/y are 0-based, window+buffer binding required for inline
---- extmark-following placements, img:render()/img:clear().
+--- 3rd/image.nvim. Geometry x/y are 0-based, and an inline placement only
+--- follows the buffer when bound to both a window and a buffer.
 local function image_nvim_backend()
   local ok, img = pcall(require, 'image')
   if not ok or type(img) ~= 'table' or type(img.from_file) ~= 'function' then
@@ -156,11 +144,8 @@ local function images_enabled()
   return backend() ~= nil
 end
 
---- Percent-encode a page title for an HTTP path segment: same rule as the
---- server's encodeTitleForUrl (space -> `_`, percent-encode `% / ? #`), plus
---- control characters defensively since this becomes a URL path
---- (encodeTitleForUrl itself does not escape them). Unicode left raw.
---- See docs/ARCHITECTURE.md.
+--- The server's encodeTitleForUrl rule (space -> `_`, percent-encode
+--- `% / ? #`), plus control characters, which it does not escape.
 local function encode_path_segment(name)
   name = name:gsub(' ', '_')
   return (name:gsub('[%%/%?#%c]', function(c)
@@ -193,21 +178,15 @@ local function clear_placements(bufnr)
   placements_by_bufnr[bufnr] = nil
 end
 
---- Screen column for a target whose notation starts at byte column
---- byte_col on a line with `indent` leading whitespace bytes: shifted right
---- by however many cells the pads module's inline spacing inserted before
---- that point (pads only touches the indent region, so every column past it
---- shifts by the same fixed amount). Both standalone and inline targets need
---- this correction.
+--- Screen column for a target at byte column `byte_col`. pads only decorates
+--- the indent, so every column past it shifts by the same fixed amount.
 local function screen_col(byte_col, indent)
   return byte_col + require('chatora.pads').extra_cells(indent)
 end
 
---- Build this refresh's placement targets from a `chatora/images` reply,
---- keyed the same way the old regex-based scan was: dedupe-friendly for the
---- flicker-guard signature (see apply_images below). Skips a target whose
---- line went missing (buffer edited between request and reply) or whose
---- UTF-16 column doesn't land on a valid boundary.
+--- Placement targets from a `chatora/images` reply. Skips a target whose line
+--- went missing between request and reply, or whose column no longer lands on
+--- a character boundary.
 local function build_targets(bufnr, project, origin, border, images)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local targets = {}

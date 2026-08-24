@@ -16,12 +16,12 @@ end
 
 local function pad_opts()
   local opts = config.options.pads
-  -- '●' over '•' for a fat, list-like bullet; '┃' (heavy) over '│' so the
-  -- guide reads as structure, not a stray pipe. gap = spaces between the
-  -- bullet and the text — 0 keeps the bullet hugging the text the way
-  -- render-markdown.nvim draws its list icons ('●' being ambiguous-width
-  -- already leaves a sliver of air in most terminal fonts).
-  local bullet, guide, spacing, gap = '●', '┃', true, 0
+  -- gap is cells of slack after the bullet. It defaults to 1 because the
+  -- bullet is drawn as an *overlay*: '●' is East Asian Ambiguous, so a
+  -- terminal that draws it two cells wide paints over whatever follows, and
+  -- with no slack that is the line's first real character. gap = 0 hugs the
+  -- text, and is safe with 'ambiwidth' set to match the terminal.
+  local bullet, guide, spacing, gap = '●', '┃', true, 1
   if type(opts) == 'table' then
     bullet = opts.bullet or bullet
     guide = opts.guide or guide

@@ -135,6 +135,25 @@ local ok, err = pcall(function()
       assert(#marks > 0, 'expected at least one codeblock extmark when the lua parser is available')
     end
 
+    -- The marker reads as a bare filename label, and the interior is tinted.
+    local details = vim.api.nvim_buf_get_extmarks(buf, codeblock.ns, 0, -1, { details = true })
+    local conceal_n, label_n, tinted = 0, 0, 0
+    for _, m in ipairs(details) do
+      local d = m[4]
+      if d.conceal ~= nil then
+        conceal_n = conceal_n + 1
+      end
+      if d.hl_group == 'ChatoraCodeLabel' then
+        label_n = label_n + 1
+      end
+      if d.line_hl_group == 'ChatoraCodeBlock' then
+        tinted = tinted + 1
+      end
+    end
+    assert(conceal_n == 1, 'expected the code: prefix to be concealed, got ' .. conceal_n)
+    assert(label_n == 1, 'expected the filename to be highlighted as a label')
+    assert(tinted == 2, 'expected both interior lines tinted, got ' .. tinted)
+
     -- Re-attaching must not double-attach (guard flag) or error.
     codeblock.attach(buf)
     vim.api.nvim_buf_delete(buf, { force = true })
@@ -168,12 +187,11 @@ local ok, err = pcall(function()
     })
     pads.render(buf)
     local marks = vim.api.nvim_buf_get_extmarks(buf, pads.ns, 0, -1, {})
-    -- Spacing widens guide levels only; the bullet hugs its text (gap = 0 by
-    -- default). ' レベル1' -> bullet (1), '  レベル2' -> guide + spacing +
-    -- bullet (3), '   ' indent-only -> 2×(guide + spacing) + bullet (5,
-    -- Cosense shows the bullet on empty list items too), ' code:y.lua'
-    -- marker keeps its bullet (1), code interior and title/plain lines -> none.
-    assert(#marks == 10, 'expected 10 pad extmarks, got ' .. #marks)
+    -- Every level is glyph + one cell of slack (spacing for guides, `gap` for
+    -- the bullet). ' レベル1' -> 2, '  レベル2' -> 4, '   ' indent-only -> 6
+    -- (Cosense shows the bullet on empty list items too), ' code:y.lua'
+    -- marker -> 2, code interior and title/plain lines -> none.
+    assert(#marks == 14, 'expected 14 pad extmarks, got ' .. #marks)
 
     require('chatora.config').options.pads = false
     pads.render(buf)
@@ -264,11 +282,15 @@ local ok, err = pcall(function()
     ctable.render(buf)
 
     local marks = vim.api.nvim_buf_get_extmarks(buf, ctable.ns, 0, -1, { details = true })
-    local conceal_n, virt_lines_n, header_n = 0, 0, 0
+    local marker_conceal, tab_conceal, virt_lines_n, header_n, label_n = 0, 0, 0, 0, 0
     for _, m in ipairs(marks) do
-      local d = m[4]
+      local row, d = m[2], m[4]
       if d.conceal ~= nil then
-        conceal_n = conceal_n + 1
+        if row == 0 then
+          marker_conceal = marker_conceal + 1
+        else
+          tab_conceal = tab_conceal + 1
+        end
       end
       if d.virt_lines ~= nil then
         virt_lines_n = virt_lines_n + 1
@@ -276,16 +298,20 @@ local ok, err = pcall(function()
       if d.hl_group == 'ChatoraTableHeader' then
         header_n = header_n + 1
       end
+      if d.hl_group == 'ChatoraTableLabel' then
+        label_n = label_n + 1
+      end
     end
     -- Column widths: col1 max(1,4)=4, col2 max(2,1)=2, col3 max(3,1)=3.
     -- Row1 ('a','bb','ccc'): cell1 padded+sep, cell2 sep only (no pad),
     -- cell3 is last with 0 padding -> no extmark.
     -- Row2 ('dddd','e','f'): cell1 sep only (no pad), cell2 padded+sep,
     -- cell3 is last with padding -> padding-only extmark (no conceal).
-    assert(conceal_n == 4, 'expected 4 concealed tabs, got ' .. conceal_n)
+    assert(tab_conceal == 4, 'expected 4 concealed tabs, got ' .. tab_conceal)
+    assert(marker_conceal == 1, 'expected the table: prefix to be concealed')
+    assert(label_n == 1, 'expected the block name to be highlighted as a label')
     assert(virt_lines_n == 3, 'expected 3 border lines (top/mid/bottom), got ' .. virt_lines_n)
     assert(header_n == 1, 'expected exactly one header highlight, got ' .. header_n)
-    assert(#marks == 9, 'expected 9 total table extmarks, got ' .. #marks)
 
     require('chatora.config').options.tables = false
     ctable.render(buf)

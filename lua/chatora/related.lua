@@ -48,6 +48,24 @@ local function ensure_buf()
   end, { buffer = buf, nowait = true, silent = true, desc = 'chatora: 関連ページパネルを閉じる' })
 end
 
+--- Run `fn` with the panel's cursor and top line restored afterwards, so a
+--- refresh triggered while reading the list doesn't scroll it back to the top.
+local function keeping_view(fn)
+  local view = nil
+  if is_open() then
+    vim.api.nvim_win_call(win, function()
+      view = vim.fn.winsaveview()
+    end)
+  end
+  fn()
+  if view and is_open() then
+    vim.api.nvim_win_call(win, function()
+      view.lnum = math.min(view.lnum, vim.api.nvim_buf_line_count(buf))
+      pcall(vim.fn.winrestview, view)
+    end)
+  end
+end
+
 local function render(links1hop, links2hop)
   ensure_hl()
   line_items = {}
@@ -92,17 +110,20 @@ local function render(links1hop, links2hop)
 end
 
 --- Refresh the panel contents for project/title. No-op (besides remembering
---- the target) when the panel is closed.
+--- the target) when the panel is closed. A reply that arrives after the user
+--- has moved to another page is dropped rather than shown against it.
 function M.refresh(project, title)
   cur_project, cur_title = project, title
   if not is_open() then
     return
   end
   lsp.request_ok('chatora/relatedPages', { project = project, title = title }, function(result)
-    if not is_open() then
+    if not is_open() or cur_project ~= project or cur_title ~= title then
       return
     end
-    render(result.links1hop, result.links2hop)
+    keeping_view(function()
+      render(result.links1hop, result.links2hop)
+    end)
   end)
 end
 
@@ -173,6 +194,20 @@ function M.toggle()
     M.open()
   end
 end
+
+-- BufReadCmd only fires the first time a page is loaded, so switching back to
+-- an already-open page buffer would otherwise leave the panel showing the
+-- previous page's links.
+vim.api.nvim_create_autocmd('BufEnter', {
+  group = vim.api.nvim_create_augroup('ChatoraRelated', { clear = true }),
+  pattern = 'cosense://*',
+  callback = function(ev)
+    local project, title = require('chatora.uri').parse(vim.api.nvim_buf_get_name(ev.buf))
+    if project and title and (project ~= cur_project or title ~= cur_title) then
+      M.on_page_opened(project, title)
+    end
+  end,
+})
 
 function M.open_current()
   if not is_open() then
