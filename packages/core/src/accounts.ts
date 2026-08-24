@@ -35,9 +35,8 @@ const isAccount = (value: unknown): value is Account => {
   )
 }
 
-// The index is a local cache chatora fully owns (unlike CosenseApi responses, nothing
-// external produces this file) — a missing or corrupt one just means no accounts yet, not
-// an error worth surfacing.
+// Nothing outside chatora writes this file, so a missing or corrupt one means "no accounts
+// yet", not an error worth surfacing.
 const parseIndex = (text: string): AccountIndex => {
   try {
     const parsed: unknown = JSON.parse(text)

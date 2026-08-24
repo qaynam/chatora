@@ -17,6 +17,8 @@ export interface CompletionDetection {
   readonly query: string
   readonly replaceStart: number
   readonly replaceEnd: number
+  /** `replaceStart` up to the cursor — what the client sees as already typed. */
+  readonly typedText: string
 }
 
 // Link completion fires only when the cursor sits inside a *closed* bracket pair
@@ -43,6 +45,7 @@ const detectLink = (lineText: string, character: number): CompletionDetection | 
             query: lineText.slice(i + 1, j),
             replaceStart: i,
             replaceEnd: j + 1,
+            typedText: lineText.slice(i, character),
           }
         }
       }
@@ -66,6 +69,7 @@ const detectHashtag = (lineText: string, character: number): CompletionDetection
     query: lineText.slice(i + 1, character),
     replaceStart: i,
     replaceEnd: character,
+    typedText: lineText.slice(i, character),
   }
 }
 
@@ -275,7 +279,7 @@ export const mergeCandidates = (
   return out
 }
 
-const toCompletionItems = (
+export const toCompletionItems = (
   matches: readonly Candidate[],
   line: number,
   detection: CompletionDetection,
@@ -286,9 +290,11 @@ const toCompletionItems = (
     const item: CompletionItem = {
       label: entry.title,
       kind,
-      // Must cover the typed text from textEdit.range.start (which includes the leading
-      // bracket/hash), or clients that filter against that span drop every item.
-      filterText: detection.kind === 'link' ? `[${entry.title}` : `#${entry.title}`,
+      // The typed text trivially matches itself, so no client can re-filter
+      // this list. Ranking here is fuzzy + semantic; a prefix filter (Neovim's
+      // built-in completion applies one to filterText) would drop most of it
+      // and close the menu, ending the isIncomplete re-query loop with it.
+      filterText: detection.typedText,
       sortText: String(index).padStart(4, '0'),
       textEdit: edit as TextEdit,
     }

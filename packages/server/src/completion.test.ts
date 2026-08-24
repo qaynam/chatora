@@ -4,6 +4,7 @@ import {
   buildCandidateIndex,
   type Candidate,
   candidateItemFields,
+  toCompletionItems,
   detectCompletion,
   detectCompletionInDocument,
   mergeCandidates,
@@ -83,6 +84,7 @@ describe('detectCompletion — link', () => {
       query: 'que',
       replaceStart: 4,
       replaceEnd: 9,
+      typedText: '[que',
     })
   })
 
@@ -104,6 +106,7 @@ describe('detectCompletion — link', () => {
       query: 'done',
       replaceStart: 0,
       replaceEnd: 6,
+      typedText: '[do',
     })
   })
 
@@ -111,7 +114,13 @@ describe('detectCompletion — link', () => {
     const line = '[foo]'
     // cursor between 'foo' and the closing bracket: "[foo|]"
     const result = detectCompletion(line, 4)
-    expect(result).toEqual({ kind: 'link', query: 'foo', replaceStart: 0, replaceEnd: 5 })
+    expect(result).toEqual({
+      kind: 'link',
+      query: 'foo',
+      replaceStart: 0,
+      replaceEnd: 5,
+      typedText: '[foo',
+    })
   })
 
   test('no following ] -> null (pair must be closed)', () => {
@@ -132,6 +141,7 @@ describe('detectCompletion — hashtag', () => {
       query: 'tag',
       replaceStart: 4,
       replaceEnd: 8,
+      typedText: '#tag',
     })
   })
 
@@ -142,6 +152,7 @@ describe('detectCompletion — hashtag', () => {
       query: '',
       replaceStart: 0,
       replaceEnd: 1,
+      typedText: '#',
     })
   })
 
@@ -182,6 +193,7 @@ describe('detectCompletionInDocument (AST-aware suppression)', () => {
       query: 'que',
       replaceStart: 4,
       replaceEnd: character + 1,
+      typedText: '[que',
     })
   })
 })
@@ -361,5 +373,42 @@ describe('buildCandidateIndex', () => {
     const index = buildCandidateIndex(titles)
     expect(index.map((c) => c.title).sort()).toEqual(['ホーム', 'メモ'])
     expect(index.every((c) => c.exists)).toBe(true)
+  })
+})
+
+describe('toCompletionItems', () => {
+  const detection = {
+    kind: 'link' as const,
+    query: 'foo bar',
+    replaceStart: 4,
+    replaceEnd: 15,
+    typedText: '[foo b',
+  }
+  const candidates = [
+    { title: 'foo bar', key: 'foo bar', exists: true, updated: 1 },
+    { title: 'unrelated', key: 'unrelated', exists: false, updated: undefined },
+  ]
+
+  test('every item echoes the typed text as filterText, whatever its title', () => {
+    // Ranking is fuzzy/semantic, so a client that prefix-filters by filterText
+    // must find every item a match — otherwise it drops the ranked list and
+    // closes the menu, which also ends the isIncomplete re-query loop.
+    for (const item of toCompletionItems(candidates, 2, detection)) {
+      expect(item.filterText).toBe('[foo b')
+    }
+  })
+
+  test('server order is preserved through sortText', () => {
+    const items = toCompletionItems(candidates, 2, detection)
+    expect(items.map((i) => i.sortText)).toEqual(['0000', '0001'])
+    expect(items.map((i) => i.label)).toEqual(['foo bar', 'unrelated'])
+  })
+
+  test('accepting an item replaces the whole bracket pair', () => {
+    const [item] = toCompletionItems(candidates, 2, detection)
+    expect(item?.textEdit).toEqual({
+      range: { start: { line: 2, character: 4 }, end: { line: 2, character: 15 } },
+      newText: '[foo bar]',
+    })
   })
 })

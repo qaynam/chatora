@@ -51,8 +51,8 @@ local defaults = {
   autosave = false,
   -- Cosense-style bullet pads on indented lines (guides + a bullet at the
   -- deepest level, plus inline spacing so it reads as a list). false disables;
-  -- a table customizes: { bullet = '⬤', guide = '│', spacing = true, gap = 1 }
-  -- (gap = spaces between the bullet and the text).
+  -- a table overrides any of { bullet = '●', guide = '┃', spacing = true,
+  -- gap = 0 } — gap being the spaces between the bullet and its text.
   pads = true,
   -- Conceal notation markup ([* ], link brackets, backticks) except on the
   -- cursor line (render-markdown.nvim style). false disables.

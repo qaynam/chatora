@@ -3,11 +3,10 @@
 -- buffer text (and therefore what gets saved) never changes.
 --
 -- Cosense notation: a line `table:<name>` (optionally indented) starts a
--- block; every following line with indent strictly greater than the
--- marker's indent belongs to it (blank lines never end a block, same rule
--- as `code:` blocks in codeblock.lua); the first line at or below the
--- marker's indent ends it. Body lines hold tab-separated cells; rows may
--- have differing cell counts.
+-- block; every following line with indent strictly greater than the marker's
+-- indent belongs to it. A blank line, or a line at or below the marker's
+-- indent, ends it. Body lines hold tab-separated cells; rows may have
+-- differing cell counts.
 local M = {}
 
 local config = require('chatora.config')
@@ -41,19 +40,12 @@ function M.find_blocks(lines)
       name = name:gsub('%s+$', '')
       local marker_indent = #indent
       if name ~= '' then
+        -- The blank-line rule is the one place tables differ from `code:`
+        -- blocks (matching @cosense-toolbox/parser); treating blanks as
+        -- interior swallows every later indented line as another row.
         local j = i + 1
-        while j <= n do
-          local l = lines[j]
-          if not is_blank(l) and indent_of(l) <= marker_indent then
-            break
-          end
+        while j <= n and not is_blank(lines[j]) and indent_of(lines[j]) > marker_indent do
           j = j + 1
-        end
-        -- Trailing blank lines are structurally inside the block (blank never
-        -- ends one) but hold no cells; keeping them would hang the bottom
-        -- border below empty rows, visibly detached from the grid.
-        while j - 1 > i and is_blank(lines[j - 1]) do
-          j = j - 1
         end
 
         local rows = {}

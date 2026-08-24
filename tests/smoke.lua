@@ -228,9 +228,10 @@ local ok, err = pcall(function()
   end
 
   do
-    -- Blank lines inside a block belong to it; block ends at EOF if nothing
-    -- dedents; rows may have differing cell counts; a second marker with no
-    -- deeper-indented content following it still yields an empty-rows block.
+    -- A blank line ends a table (unlike a code block), so the indented line
+    -- after it is a plain line, not another row. Rows may have differing cell
+    -- counts; a marker with no deeper-indented content still yields a block
+    -- with an empty interior.
     local lines = {
       'table:t1',
       ' a\tb\tc',
@@ -241,23 +242,12 @@ local ok, err = pcall(function()
     }
     local blocks = ctable.find_blocks(lines)
     assert(#blocks == 2, 'expected two blocks, got ' .. #blocks)
-    assert(blocks[1].start_line == 1 and blocks[1].end_line == 4, 'first block range mismatch')
-    assert(#blocks[1].rows == 3, 'expected 3 rows including the blank line, got ' .. #blocks[1].rows)
+    assert(blocks[1].start_line == 1 and blocks[1].end_line == 2, 'first block must end at the blank line')
+    assert(#blocks[1].rows == 1, 'expected 1 row before the blank line, got ' .. #blocks[1].rows)
     assert(#blocks[1].rows[1].cells == 3, 'row1 expected 3 cells')
-    assert(#blocks[1].rows[2].cells == 1 and blocks[1].rows[2].cells[1] == '', 'blank row expected a single empty cell')
-    assert(#blocks[1].rows[3].cells == 2, 'row3 expected 2 cells')
     assert(blocks[2].marker_line == 4, 'second marker_line mismatch: ' .. blocks[2].marker_line)
     assert(blocks[2].start_line == 5 and blocks[2].end_line == 5, 'second block expected an empty interior')
     assert(#blocks[2].rows == 0, 'expected 0 rows for the empty marker')
-  end
-
-  do
-    -- Trailing blank lines never end a block, but they hold no cells either:
-    -- they are trimmed so the bottom border hugs the last real row.
-    local blocks = ctable.find_blocks({ 'table:t', ' a\tb', '', '  ', 'after' })
-    assert(#blocks == 1, 'expected one block')
-    assert(blocks[1].end_line == 2, 'trailing blanks must be trimmed, end_line = ' .. blocks[1].end_line)
-    assert(#blocks[1].rows == 1, 'expected the single real row')
   end
 
   -- table.render: extmark shape for a 3-column, 2-row (header + 1 body)
@@ -364,8 +354,12 @@ local ok, err = pcall(function()
     status.set(buf, 'clean')
     status.sync(buf)
     assert(status.get(buf) == 'clean', 'sync follows the modified flag once idle')
-    assert(status.component() == '', 'component is empty for untracked current buffer')
+    -- The component follows the last tracked page even when the cursor sits
+    -- elsewhere (the sidebar), which is what the sidebar winbar relies on.
+    assert(status.component(buf):find('✓'), 'component reports the page it is asked about')
+    assert(status.component():find('✓'), 'component falls back to the last active page')
     status.forget(buf)
+    assert(status.component() == '', 'component is empty once nothing is tracked')
     assert(status.icon(buf) == nil, 'forget clears tracking')
     vim.api.nvim_buf_delete(buf, { force = true })
   end

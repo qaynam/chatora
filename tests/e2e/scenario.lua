@@ -317,10 +317,11 @@ local ok, err = pcall(function()
     if b == -1 then
       return false
     end
-    -- Sidebar lines carry a 2-cell status prefix: '● ' (unsaved) or '  '.
+    -- Sidebar lines carry a 2-cell save-state prefix: the page's status icon
+    -- plus a space ('✓ ', '● ', ...), or two spaces when it has no open buffer.
     local has_home, has_memo = false, false
     for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
-      local title = (l:gsub('^● ', ''):gsub('^  ', ''))
+      local title = l:match('^%s%s(.*)$') or l:match('^%S+%s(.*)$') or l
       if title == 'ホーム' then
         has_home = true
       end
@@ -373,13 +374,13 @@ local ok, err = pcall(function()
   end
 
   -- Clearing modified via the API fires no autocmd; the plugin's save path
-  -- calls refresh_marks explicitly, which is what we emulate here.
+  -- reports the new state through chatora.status, which is what we emulate.
   vim.bo[page_buf].modified = false
-  require('chatora.sidebar').refresh_marks()
+  require('chatora.status').sync(page_buf)
   if not wait_for(10000, function()
-    return sidebar_has_line('  ホーム')
+    return sidebar_has_line('✓ ホーム')
   end) then
-    fail('timed out waiting for the ● unsaved mark to clear')
+    fail('timed out waiting for the unsaved mark to turn back into ✓')
   end
   log('sidebar unsaved mark OK (appears and clears)')
 

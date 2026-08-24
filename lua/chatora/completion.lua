@@ -1,8 +1,7 @@
--- Keeps link completion alive through multi-word queries. Completion clients
--- dismiss their menu on space and blink.cmp additionally *blocks* ' ' as an
--- LSP trigger character by default (show_on_blocked_trigger_characters), so
--- the server-side trigger never reaches it. When a space is typed inside an
--- unclosed `[`, re-open the menu through whichever client is installed.
+-- Keeps link completion alive through multi-word queries: clients end their
+-- menu at a space, so re-open it whenever the cursor is inside a bracket and
+-- nothing is showing. (The other half of the problem — clients re-filtering the
+-- server's fuzzy ranking away — is handled server-side in completion.ts.)
 local M = {}
 
 --- Mirrors the server's detectLink: true only when the cursor sits inside a
@@ -101,7 +100,16 @@ local function enable_native_if_needed(bufnr)
   if not client then
     return
   end
-  pcall(vim.lsp.completion.enable, true, client.id, bufnr, { autotrigger = true })
+  pcall(vim.lsp.completion.enable, true, client.id, bufnr, {
+    autotrigger = true,
+    -- Vim filters the open menu by `word` between a keystroke and the debounced
+    -- re-query; the default (a page title) makes items vanish mid-query, while
+    -- filterText — the typed text — always matches. Insertion still comes from
+    -- the item's textEdit on CompleteDone.
+    convert = function(item)
+      return { word = item.filterText or item.label, abbr = item.label }
+    end,
+  })
   vim.b[bufnr].chatora_native_completion = true
 end
 
@@ -114,12 +122,17 @@ function M.attach(bufnr)
   vim.api.nvim_create_autocmd('TextChangedI', {
     buffer = bufnr,
     callback = function()
+      -- A visible menu is already re-querying itself (isIncomplete), so only
+      -- step in once it has closed — typing a space, or a keystroke that left
+      -- the client with nothing to show.
+      if tonumber(vim.fn.pumvisible()) == 1 then
+        return
+      end
       local col = vim.api.nvim_win_get_cursor(0)[2]
       if col == 0 then
         return
       end
-      local line = vim.api.nvim_get_current_line()
-      if line:sub(col, col) == ' ' and in_link_context(line, col) then
+      if in_link_context(vim.api.nvim_get_current_line(), col) then
         show_menu(bufnr)
       end
     end,

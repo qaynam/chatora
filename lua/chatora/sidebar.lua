@@ -15,6 +15,10 @@ local line_pages = {}
 local current_pages = {}
 local ns = vim.api.nvim_create_namespace('chatora_sidebar')
 
+local function ensure_hl()
+  vim.api.nvim_set_hl(0, 'ChatoraSidebarTitle', { link = 'Title', default = true })
+end
+
 local winutil = require('chatora.winutil')
 
 local function ensure_editor_win()
@@ -24,32 +28,30 @@ local function ensure_editor_win()
   return winutil.ensure_editor_win({ exclude = win })
 end
 
---- Buffer names of loaded cosense pages with unsaved changes.
-local function modified_uris()
-  local set = {}
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(b) and vim.bo[b].modified then
-      local name = vim.api.nvim_buf_get_name(b)
-      if name:match('^cosense://') then
-        set[name] = true
-      end
-    end
-  end
-  return set
-end
+local BLANK_MARK = '  '
 
-local MARK = '● '
+--- The save-state glyph for a listed page, padded to the 2-cell mark column.
+--- Pages with no open buffer get blanks.
+local function mark_for(page)
+  if not (project and page.title) then
+    return BLANK_MARK, nil
+  end
+  local icon, hl_group = require('chatora.status').icon_for_uri(uri.format(project, page.title))
+  if not icon then
+    return BLANK_MARK, nil
+  end
+  return icon .. ' ', hl_group
+end
 
 local function render(pages)
   current_pages = pages
   line_pages = {}
-  local mods = modified_uris()
   local lines = {}
-  local marked = {}
+  local marks = {}
   for i, p in ipairs(pages) do
-    local is_mod = (project and p.title and mods[uri.format(project, p.title)]) or false
-    lines[i] = (is_mod and MARK or '  ') .. (p.title or '(untitled)')
-    marked[i] = is_mod
+    local mark, hl_group = mark_for(p)
+    lines[i] = mark .. (p.title or '(untitled)')
+    marks[i] = { width = #mark, hl_group = hl_group }
     line_pages[i] = p
   end
   if #lines == 0 then
@@ -59,9 +61,12 @@ local function render(pages)
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-  for i, is_mod in ipairs(marked) do
-    if is_mod then
-      vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, { end_col = #MARK, hl_group = 'DiagnosticWarn' })
+  for i, mark in ipairs(marks) do
+    if mark.hl_group then
+      vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, {
+        end_col = mark.width,
+        hl_group = mark.hl_group,
+      })
     end
   end
   vim.bo[buf].modifiable = false
@@ -172,6 +177,7 @@ end
 --- Open (or focus) the sidebar for project, listing its pages.
 function M.open(proj)
   project = proj
+  ensure_hl()
 
   if not (buf and vim.api.nvim_buf_is_valid(buf)) then
     buf = vim.api.nvim_create_buf(false, true)
@@ -215,6 +221,9 @@ function M.open(proj)
   -- focused must not hijack this window (E1513 instead).
   vim.wo[win].winfixbuf = true
   vim.wo[win].statusline = 'chatora: ' .. project
+  -- A winbar shows even under laststatus=3 (one global statusline), which is
+  -- where the per-window statusline above would otherwise never be drawn.
+  vim.wo[win].winbar = "%#ChatoraSidebarTitle#  " .. project .. "%* %=%{%v:lua.require'chatora.status'.component()%} "
 
   lsp.ensure_start(buf)
   M.reload()

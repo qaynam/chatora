@@ -212,10 +212,8 @@ export interface BorderParams {
 
 const execFileAsync = promisify(execFile)
 
-// Everything reaching an ImageMagick argv goes through these: numbers clamp to a sane pixel
-// range, and the color must parse as a CSS-ish color literal. Anything else means the whole
-// border is skipped, not "best guess" — a rejected value came from user config, and rendering
-// the plain image is the least surprising fallback.
+// Everything reaching an ImageMagick argv goes through these. A rejected value came from
+// user config, so the whole border is skipped rather than guessed at.
 const clampPx = (value: unknown, fallback: number): number => {
   const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback
   return Math.min(64, Math.max(0, n))
@@ -251,12 +249,11 @@ const resolveMagick = async (): Promise<string | null> => {
 }
 
 /**
- * Composites a web-style frame into the image itself (a transparent padding ring, then the
- * border line), cached beside the original as `b<paramsHash>-<hash>.png` — prefixed, not
- * suffixed, so the plain `findCached(hash)` prefix lookup can never pick up a bordered
- * variant. PNG output keeps the padding's alpha so it shows the terminal background,
- * whatever the colorscheme. Falls back to the original path when ImageMagick is missing or
- * the composite fails — the border is cosmetic, the image is not.
+ * Composites a frame into the image itself — a transparent padding ring, then the border
+ * line — since a terminal can only frame an image by baking it into the pixels. The cache
+ * name is *prefixed* with the params hash so the plain `findCached(hash)` prefix lookup can
+ * never pick up a bordered variant. Falls back to the original path when ImageMagick is
+ * missing or the composite fails: the border is cosmetic, the image is not.
  */
 const withBorder = (
   cacheDir: string,

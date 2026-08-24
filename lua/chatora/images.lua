@@ -45,6 +45,18 @@ end
 
 local IMAGE_EXTENSIONS = { png = true, jpg = true, jpeg = true, gif = true, webp = true }
 
+--- Cells available for text in the window showing bufnr (window width minus
+--- the number/sign/fold gutter), or a conservative default when it isn't
+--- displayed. Bounds how wide an inline image may render.
+local function text_width(bufnr)
+  local win = vim.fn.bufwinid(bufnr)
+  if win == -1 then
+    return 80
+  end
+  local info = vim.fn.getwininfo(win)[1]
+  return math.max(1, vim.api.nvim_win_get_width(win) - ((info and info.textoff) or 0))
+end
+
 --- Return require('snacks').image if snacks is installed and the current
 --- terminal can actually render images, else nil.
 local function snacks_image()
@@ -83,7 +95,9 @@ local function image_nvim_backend()
         with_virtual_padding = true,
         x = col,
         y = row - 1,
-        height = opts and (opts.height or opts.max_height) or nil,
+        height = opts and opts.height or nil,
+        max_height = opts and opts.max_height or nil,
+        max_width = opts and opts.max_width or nil,
       })
       if not ok_new or not o then
         return nil
@@ -265,7 +279,9 @@ function M.refresh(bufnr)
         url = standalone_src,
         row = i,
         col = col,
-        opts = { max_height = 20 },
+        -- Capped at the room left of the right edge, so a wide image scales
+        -- down instead of being clipped.
+        opts = { max_height = 20, max_width = math.max(1, text_width(bufnr) - col) },
         border = border,
       }
       -- Placements pin their x at creation, so a changed indent must defeat
@@ -281,7 +297,9 @@ function M.refresh(bufnr)
     parts[#parts + 1] = url .. '\0' .. n
   end
   table.sort(parts)
-  local signature = table.concat(parts, '\1')
+  -- Width is part of the signature: placements bake in their scale, so a
+  -- window resize has to re-place even when the target set is unchanged.
+  local signature = table.concat(parts, '\1') .. '\2' .. text_width(bufnr)
 
   if signature_by_bufnr[bufnr] == signature and placements_by_bufnr[bufnr] then
     return
@@ -388,6 +406,15 @@ function M.attach(bufnr, project)
     return
   end
   vim.b[bufnr].chatora_images_attached = true
+
+  vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
+    group = vim.api.nvim_create_augroup('ChatoraImages' .. bufnr, { clear = true }),
+    callback = function()
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        schedule_refresh(bufnr)
+      end
+    end,
+  })
 
   vim.api.nvim_buf_attach(bufnr, false, {
     on_lines = function()

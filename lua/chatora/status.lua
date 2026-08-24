@@ -9,6 +9,11 @@ local config = require('chatora.config')
 --- bufnr -> 'clean' | 'dirty' | 'saving' | 'error'
 local state_by_bufnr = {}
 
+-- The page whose state chatora's own chrome reports. Tracked separately from
+-- the current buffer so the sidebar's winbar keeps showing the page you are
+-- editing while the cursor sits in the sidebar.
+local last_page_bufnr = nil
+
 local DEFAULT_ICONS = { clean = '✓', dirty = '●', saving = '◍', error = '✗' }
 
 local HL_GROUP = {
@@ -85,6 +90,7 @@ function M.set(bufnr, state, message)
   ensure_hl()
   local previous = state_by_bufnr[bufnr]
   state_by_bufnr[bufnr] = state
+  last_page_bufnr = bufnr
   if message then
     echo(message, HL_GROUP[state])
   end
@@ -110,14 +116,26 @@ end
 
 function M.forget(bufnr)
   state_by_bufnr[bufnr] = nil
+  if last_page_bufnr == bufnr then
+    last_page_bufnr = nil
+  end
 end
 
---- Statusline component for the current buffer: the icon wrapped in its
---- highlight group, or '' for buffers chatora doesn't track. Wire it into any
+--- Statusline component for `bufnr` (default: the current buffer if it's a
+--- tracked page, else the most recently active one): the icon wrapped in its
+--- highlight group, or '' when there is nothing to report. Wire it into any
 --- statusline plugin, or into Neovim's own:
 ---   vim.o.statusline = "%f %{%v:lua.require'chatora.status'.component()%}"
-function M.component()
-  local icon, hl_group = M.icon(vim.api.nvim_get_current_buf())
+function M.component(bufnr)
+  local target = bufnr
+  if not target then
+    local current = vim.api.nvim_get_current_buf()
+    target = state_by_bufnr[current] and current or last_page_bufnr
+  end
+  if not target then
+    return ''
+  end
+  local icon, hl_group = M.icon(target)
   if not icon then
     return ''
   end
