@@ -294,7 +294,15 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         }
         // Real Cosense: a title with no page yet still 200s, with persistent:false and a
         // fake/unsafe id (see docs/ARCHITECTURE.md "存在しないページは404にならない").
-        return respond({ persistent: false, id: 'fake', commitId: 'fake', lines: [{ id: 'fakeline', text: title }] }, 200)
+        return respond(
+          {
+            persistent: false,
+            id: 'fake',
+            commitId: 'fake',
+            lines: [{ id: 'fakeline', text: title }],
+          },
+          200,
+        )
       }
 
       return respond({ error: 'NotFound', path }, 404)

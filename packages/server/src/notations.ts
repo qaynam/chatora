@@ -1,4 +1,4 @@
-import type { BracketRule, Extension, ParseOptions } from '@cosense-toolbox/parser'
+import type { Extension, ParseOptions } from '@cosense-toolbox/parser'
 import { Option } from 'effect'
 
 /** One user-defined `[<marker> body]` notation, wired to a semantic token type named `name`. */
@@ -6,6 +6,9 @@ export interface NotationSpec {
   readonly marker: string
   readonly name: string
 }
+
+// Not part of the package's public exports (only Extension is) — recovered from its shape.
+type BracketRule = NonNullable<Extension['bracketRules']>[number]
 
 const WHITESPACE_RE = /\s/
 

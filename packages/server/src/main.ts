@@ -87,6 +87,8 @@ interface Position {
 
 const toSemanticTokens = (tokens: RawToken[]): SemanticTokens => ({ data: encodeTokens(tokens) })
 
+type UrlAtResult = { ok: true; url: string | null } | { ok: false; code: string; message: string }
+
 // Markers that would collide with an official notation ([* /-_$[#] as its own marker char).
 const RESERVED_MARKERS = new Set(['*', '/', '-', '_', '$', '[', '#'])
 const NOTATION_NAME_RE = /^[A-Za-z0-9_]+$/
@@ -181,14 +183,17 @@ connection.onDefinition((params: DefinitionParams) => {
   return target ? definitionLocation(target) : null
 })
 
-type UrlAtResult = { ok: true; url: string | null } | { ok: false; code: string; message: string }
-const urlAt = (params: { uri: string; line: number; character: number }): UrlAtResult => {
-  const doc = documents.get(params.uri)
-  if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
-  const lineText = normalizeCrLf(doc.getText()).split('\n')[params.line] ?? ''
-  return { ok: true, url: findUrlTarget(lineText, params.character) }
-}
-connection.onRequest('chatora/urlAt', urlAt)
+// Async like every other envelope-returning handler: onRequest only infers the
+// {ok:true}|{ok:false} union as one response type through a Promise.
+connection.onRequest(
+  'chatora/urlAt',
+  async (params: { uri: string; line: number; character: number }): Promise<UrlAtResult> => {
+    const doc = documents.get(params.uri)
+    if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
+    const lineText = normalizeCrLf(doc.getText()).split('\n')[params.line] ?? ''
+    return { ok: true, url: findUrlTarget(lineText, params.character) }
+  },
+)
 
 connection.onRequest('chatora/authStatus', () => runtime.runPromise(handlers.authStatus()))
 connection.onRequest('chatora/login', (params: { pat: string }) =>

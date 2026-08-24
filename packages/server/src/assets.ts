@@ -319,16 +319,18 @@ const RASTER_DPI = '192'
  * without it ImageMagick falls back to its own renderer, which cannot resolve fonts and so
  * fails outright on any SVG containing text. Resolved once per process.
  */
-const RASTERIZERS: readonly { readonly cmd: string; readonly args: (i: string, o: string) => string[] }[] =
-  [
-    {
-      cmd: 'rsvg-convert',
-      args: (i, o) => ['--dpi-x', RASTER_DPI, '--dpi-y', RASTER_DPI, '-o', o, i],
-    },
-    // -density must precede the input: SVG has no pixel size, and the default 72 DPI is blurry.
-    { cmd: 'magick', args: (i, o) => ['-density', RASTER_DPI, '-background', 'none', i, o] },
-    { cmd: 'convert', args: (i, o) => ['-density', RASTER_DPI, '-background', 'none', i, o] },
-  ]
+const RASTERIZERS: readonly {
+  readonly cmd: string
+  readonly args: (i: string, o: string) => string[]
+}[] = [
+  {
+    cmd: 'rsvg-convert',
+    args: (i, o) => ['--dpi-x', RASTER_DPI, '--dpi-y', RASTER_DPI, '-o', o, i],
+  },
+  // -density must precede the input: SVG has no pixel size, and the default 72 DPI is blurry.
+  { cmd: 'magick', args: (i, o) => ['-density', RASTER_DPI, '-background', 'none', i, o] },
+  { cmd: 'convert', args: (i, o) => ['-density', RASTER_DPI, '-background', 'none', i, o] },
+]
 
 let rasterizer: (typeof RASTERIZERS)[number] | null | undefined
 const resolveRasterizer = async (): Promise<(typeof RASTERIZERS)[number] | null> => {

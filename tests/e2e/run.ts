@@ -87,7 +87,12 @@ const readStream = async (stream: ReadableStream<Uint8Array> | null): Promise<st
   return Buffer.concat(chunks).toString('utf8')
 }
 
-const runScenario = async (): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut: boolean }> => {
+const runScenario = async (): Promise<{
+  exitCode: number
+  stdout: string
+  stderr: string
+  timedOut: boolean
+}> => {
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     COSENSE_PAT: 'test-pat',
@@ -140,7 +145,9 @@ if (exitCode !== 0) {
 }
 // nvim --headless's Lua print() typically lands on stderr, not stdout -- check both.
 if (!stdout.includes('SCENARIO OK') && !stderr.includes('SCENARIO OK')) {
-  console.error('[run.ts] nvim exited 0 but never printed SCENARIO OK (stdout or stderr) -- treating as a failure')
+  console.error(
+    '[run.ts] nvim exited 0 but never printed SCENARIO OK (stdout or stderr) -- treating as a failure',
+  )
   fake.stop()
   process.exit(1)
 }
@@ -224,7 +231,11 @@ check('GET .../ホーム/links2hop happened', links2hopReq !== undefined)
 
 // (d) preview POST shape
 const previewRequests = requests.filter((r) => r.method === 'POST' && r.path === PREVIEW_PATH)
-check('exactly one POST .../page-edit-for-ai/preview', previewRequests.length === 1, previewRequests)
+check(
+  'exactly one POST .../page-edit-for-ai/preview',
+  previewRequests.length === 1,
+  previewRequests,
+)
 
 const previewReq = previewRequests[0]
 if (previewReq) {
@@ -232,8 +243,15 @@ if (previewReq) {
   check('preview body.pageId === "pg1"', body?.pageId === 'pg1', body)
 
   const changes = body?.changes
-  const change = Array.isArray(changes) && changes.length === 1 ? (changes[0] as Record<string, unknown>) : undefined
-  check('preview body.changes has exactly one change', Array.isArray(changes) && changes.length === 1, changes)
+  const change =
+    Array.isArray(changes) && changes.length === 1
+      ? (changes[0] as Record<string, unknown>)
+      : undefined
+  check(
+    'preview body.changes has exactly one change',
+    Array.isArray(changes) && changes.length === 1,
+    changes,
+  )
   if (change) {
     check('change._insert === "_end"', change._insert === '_end', change)
     const lines = change.lines as { id?: unknown; text?: unknown } | undefined
@@ -258,10 +276,14 @@ if (submitReq) {
 // (f) a refetch GET of ホーム happened AFTER submit
 const submitIndex = submitReq ? requests.indexOf(submitReq) : -1
 const refetchAfterSubmit = homeGets.some((r) => requests.indexOf(r) > submitIndex)
-check('a GET of ホーム happened after the submit POST (post-submit refetch)', submitIndex >= 0 && refetchAfterSubmit, {
-  submitIndex,
-  homeGetIndices: homeGets.map((r) => requests.indexOf(r)),
-})
+check(
+  'a GET of ホーム happened after the submit POST (post-submit refetch)',
+  submitIndex >= 0 && refetchAfterSubmit,
+  {
+    submitIndex,
+    homeGetIndices: homeGets.map((r) => requests.indexOf(r)),
+  },
+)
 
 // (g) no request ever carried a wrong/absent token -- zero 401s anywhere in the log
 const unauthorized = requests.filter((r) => r.status === 401)
