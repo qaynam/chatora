@@ -139,53 +139,54 @@ local function cursor_row(bufnr)
   return cursor[1] - 1
 end
 
---- A border/separator line spanning `widths` columns, laid out to line up
---- under the ` │ ` separators and padded cells that `render_row` draws (a
---- 3-char-wide separator between columns, no leading/trailing edge).
+--- A border line for `widths` columns. Each column is drawn one cell wider on
+--- both sides than its content, matching the ` ` that `render_row` puts inside
+--- every `│`.
 local function build_border(widths, left, junction, right, fill)
-  local total = 0
-  for _, w in ipairs(widths) do
-    total = total + w
-  end
-  total = total + 3 * (#widths - 1)
-  if total < 1 then
+  if #widths == 0 then
     return ''
   end
-
-  local chars = {}
-  for k = 1, total do
-    chars[k] = fill
+  local parts = { left }
+  for i, w in ipairs(widths) do
+    parts[#parts + 1] = string.rep(fill, w + 2)
+    parts[#parts + 1] = (i == #widths) and right or junction
   end
-  chars[1] = left
-  chars[total] = right
-
-  local running = 0
-  for c = 1, #widths - 1 do
-    running = running + widths[c]
-    chars[running + 3 * (c - 1) + 2] = junction
-  end
-
-  return table.concat(chars)
+  return table.concat(parts)
 end
 
---- Conceal each inter-cell tab behind a ` │ ` extmark and right-pad every
---- cell (inline virt_text) to its column width. Skipped entirely for the
---- cursor's row (anti-conceal) since inline virt_text isn't hidden by
---- 'concealcursor' the way `conceal` ranges are.
+--- Draw one row as `│ cell │ cell │`: the inter-cell tabs are concealed and
+--- replaced by the separators, each cell is padded out to its column width, and
+--- the row is closed on both sides so it lines up with the border lines. Rows
+--- with fewer cells than the table has columns get the rest as empty ones.
+--- Skipped entirely on the cursor's row (anti-conceal), since inline virt_text
+--- isn't hidden by 'concealcursor' the way `conceal` ranges are.
 local function render_row(bufnr, line_no, row, widths)
-  local col = row.indent
   local ncells = #row.cells
+  if ncells == 0 then
+    return
+  end
+
+  local function mark(col, opts)
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, line_no, col, opts)
+  end
+
+  mark(row.indent, {
+    virt_text = { { '│ ', 'ChatoraTableBorder' } },
+    virt_text_pos = 'inline',
+  })
+
+  local col = row.indent
   for idx, cell in ipairs(row.cells) do
     local cell_end = col + #cell
-    local pad_n = widths[idx] - vim.fn.strdisplaywidth(cell)
     local chunks = {}
+    local pad_n = (widths[idx] or 0) - vim.fn.strdisplaywidth(cell)
     if pad_n > 0 then
       chunks[#chunks + 1] = { string.rep(' ', pad_n) }
     end
 
     if idx < ncells then
       chunks[#chunks + 1] = { ' │ ', 'ChatoraTableBorder' }
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, line_no, cell_end, {
+      mark(cell_end, {
         end_col = cell_end + 1,
         conceal = '',
         virt_text = chunks,
@@ -193,13 +194,12 @@ local function render_row(bufnr, line_no, row, widths)
       })
       col = cell_end + 1
     else
-      if #chunks > 0 then
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, line_no, cell_end, {
-          virt_text = chunks,
-          virt_text_pos = 'inline',
-        })
+      for missing = idx + 1, #widths do
+        chunks[#chunks + 1] = { ' │ ', 'ChatoraTableBorder' }
+        chunks[#chunks + 1] = { string.rep(' ', widths[missing]) }
       end
-      col = cell_end
+      chunks[#chunks + 1] = { ' │', 'ChatoraTableBorder' }
+      mark(cell_end, { virt_text = chunks, virt_text_pos = 'inline' })
     end
   end
 end

@@ -369,6 +369,59 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- table.render: a row's drawn width must equal the border's, or the frame
+  -- doesn't close around the content. Checked as an invariant over the emitted
+  -- extmarks rather than by re-simulating the renderer.
+  do
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      'table:t',
+      ' 指標\tX（7日間）\tMeta（2日目時点）',
+      ' インプレッション\t125,035\t1,099',
+      ' 欠けた行\tひとつだけ',
+    })
+    ctable.render(buf)
+
+    -- Cells are measured individually: strdisplaywidth on the raw line would
+    -- expand the separator tabs by 'tabstop', which the render conceals away.
+    local blocks = ctable.find_blocks(vim.api.nvim_buf_get_lines(buf, 0, -1, false))
+    local rows_by_line = {}
+    for i, r in ipairs(blocks[1].rows) do
+      rows_by_line[blocks[1].start_line + i - 1] = r
+    end
+
+    local function drawn_width(row)
+      local width = rows_by_line[row].indent
+      for _, cell in ipairs(rows_by_line[row].cells) do
+        width = width + vim.fn.strdisplaywidth(cell)
+      end
+      for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ctable.ns, { row, 0 }, { row, -1 }, { details = true })) do
+        for _, chunk in ipairs(m[4].virt_text or {}) do
+          width = width + vim.fn.strdisplaywidth(chunk[1])
+        end
+      end
+      return width
+    end
+
+    local border = nil
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ctable.ns, 0, -1, { details = true })) do
+      local lines_spec = m[4].virt_lines
+      if lines_spec and not border then
+        border = vim.fn.strdisplaywidth(lines_spec[1][1][1])
+      end
+    end
+    assert(border, 'expected a border line')
+
+    for row = 1, 3 do
+      assert(
+        drawn_width(row) == border,
+        ('row %d is %d cells wide but the border is %d'):format(row, drawn_width(row), border)
+      )
+    end
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- table.render: column width must be strdisplaywidth-based so fullwidth
   -- (double-cell) characters pad correctly, not byte- or char-length-based.
   do
