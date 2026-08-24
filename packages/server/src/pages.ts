@@ -1,4 +1,5 @@
 import type {
+  Account,
   CosenseApiError,
   Credential,
   HttpClient,
@@ -9,7 +10,7 @@ import type {
   RelatedPage,
   SearchResultPage,
 } from '@chatora/core'
-import { computeChanges, createNewLineId } from '@chatora/core'
+import { AccountStore, computeChanges, createNewLineId } from '@chatora/core'
 import { Effect, Option } from 'effect'
 import { textToLines } from './lines'
 import { type BasePageState, SessionState } from './state'
@@ -69,6 +70,18 @@ export interface AuthStatusResult {
 
 const toUserRef = (user: Me) => ({ id: user.id, name: user.name, displayName: user.displayName })
 
+// Account.id doubles as the multi-account Keychain lookup key (docs/ARCHITECTURE.md), so
+// login and addAccount — which both turn a freshly-verified PAT into a stored account —
+// build it the same way.
+const buildAccount = (origin: string, user: Me): Account => ({
+  id: `${origin}#${user.id}`,
+  origin,
+  userId: user.id,
+  name: user.name,
+  displayName: user.displayName,
+  ...(user.photo !== undefined ? { photo: user.photo } : {}),
+})
+
 export const authStatus = (): Effect.Effect<
   AuthStatusResult | ErrEnvelope,
   never,
@@ -95,9 +108,12 @@ export const authStatus = (): Effect.Effect<
     }),
   )
 
+// login is an alias for "add this account and make it active": both verify the PAT once,
+// then hand the resulting account to AccountStore.add, which is what actually persists it
+// (Keychain entry keyed by Account.id + the accounts.json index) and marks it active.
 export const login = (
   pat: string,
-): Effect.Effect<AuthStatusResult | ErrEnvelope, never, SessionState | HttpClient> =>
+): Effect.Effect<AuthStatusResult | ErrEnvelope, never, SessionState | HttpClient | AccountStore> =>
   Effect.gen(function* () {
     const session = yield* SessionState
     const credential: Credential = { type: 'pat', value: pat, source: 'keychain' }
@@ -111,7 +127,8 @@ export const login = (
 
     return yield* handle(
       Effect.gen(function* () {
-        yield* session.storeCredential(pat)
+        const accountStore = yield* AccountStore
+        yield* accountStore.add(buildAccount(session.origin, user), pat)
         yield* session.invalidateCredentials()
         yield* session.setVerifiedUser(user)
         return {
@@ -125,14 +142,112 @@ export const login = (
     )
   })
 
-export const logout = (): Effect.Effect<{ readonly ok: true } | ErrEnvelope, never, SessionState> =>
+// Best-effort like the pre-multi-account logout it replaces: every delete below is allowed
+// to fail (missing item, non-darwin, ...) without turning logout itself into a failure.
+export const logout = (): Effect.Effect<
+  { readonly ok: true },
+  never,
+  SessionState | AccountStore
+> =>
   Effect.gen(function* () {
     const session = yield* SessionState
-    // "not found" and any other delete failure are both fine to ignore on logout.
+    const accountStore = yield* AccountStore
+    const { active } = yield* accountStore.list()
+    if (Option.isSome(active)) {
+      yield* accountStore.remove(active.value).pipe(Effect.catchAll(() => Effect.void))
+    }
+    // The legacy origin-keyed entry predates AccountStore; removing it too keeps a
+    // pre-multi-account user fully logged out.
     yield* session.removeCredential().pipe(Effect.catchAll(() => Effect.void))
     yield* session.invalidateCredentials()
     return { ok: true as const }
   })
+
+// ---------------------------------------------------------------------------
+// multi-account
+// ---------------------------------------------------------------------------
+
+export interface AccountsResult {
+  readonly ok: true
+  readonly active: string | null
+  readonly accounts: readonly Account[]
+}
+
+export const accounts = (): Effect.Effect<AccountsResult, never, AccountStore> =>
+  Effect.gen(function* () {
+    const store = yield* AccountStore
+    const { active, accounts: list } = yield* store.list()
+    return { ok: true as const, active: Option.getOrNull(active), accounts: list }
+  })
+
+export interface AddAccountResult {
+  readonly ok: true
+  readonly account: Account
+  readonly accounts: readonly Account[]
+  readonly active: string | null
+}
+
+export const addAccount = (
+  pat: string,
+): Effect.Effect<AddAccountResult | ErrEnvelope, never, SessionState | HttpClient | AccountStore> =>
+  Effect.gen(function* () {
+    const session = yield* SessionState
+    const credential: Credential = { type: 'pat', value: pat, source: 'keychain' }
+    const api = session.apiFor(credential)
+    const verified = yield* api.me().pipe(Effect.option)
+    if (Option.isNone(verified)) return err('unauthorized', 'invalid token')
+    const user = verified.value
+    const account = buildAccount(session.origin, user)
+
+    return yield* handle(
+      Effect.gen(function* () {
+        const store = yield* AccountStore
+        yield* store.add(account, pat)
+        yield* session.invalidateCredentials()
+        yield* session.setVerifiedUser(user)
+        const { active, accounts: list } = yield* store.list()
+        return { ok: true as const, account, accounts: list, active: Option.getOrNull(active) }
+      }),
+    )
+  })
+
+export interface UseAccountResult {
+  readonly ok: true
+  readonly account: Account
+  readonly active: string | null
+}
+
+export const useAccount = (params: {
+  readonly id: string
+}): Effect.Effect<UseAccountResult | ErrEnvelope, never, SessionState | AccountStore> =>
+  Effect.gen(function* () {
+    const session = yield* SessionState
+    const store = yield* AccountStore
+    const accountOpt = yield* store.setActive(params.id)
+    if (Option.isNone(accountOpt)) return err('error', 'unknown account')
+    yield* session.invalidateCredentials()
+    return { ok: true as const, account: accountOpt.value, active: params.id }
+  })
+
+export interface RemoveAccountResult {
+  readonly ok: true
+  readonly accounts: readonly Account[]
+  readonly active: string | null
+}
+
+export const removeAccount = (params: {
+  readonly id: string
+}): Effect.Effect<RemoveAccountResult | ErrEnvelope, never, SessionState | AccountStore> =>
+  handle(
+    Effect.gen(function* () {
+      const session = yield* SessionState
+      const store = yield* AccountStore
+      yield* store.remove(params.id)
+      yield* session.invalidateCredentials()
+      const { active, accounts: list } = yield* store.list()
+      return { ok: true as const, accounts: list, active: Option.getOrNull(active) }
+    }),
+  )
 
 // ---------------------------------------------------------------------------
 // projects / pages

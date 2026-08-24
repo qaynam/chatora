@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import type { Credential, Me } from '@chatora/core'
-import { CredentialStore, HttpClient, KeychainError } from '@chatora/core'
+import type { Account, Credential, Me } from '@chatora/core'
+import { AccountStore, CredentialStore, HttpClient, KeychainError } from '@chatora/core'
 import { Effect, Layer, Option } from 'effect'
 import * as handlers from './pages'
 import { makeSessionStateLayer, type SessionState } from './state'
@@ -8,6 +8,13 @@ import { makeSessionStateLayer, type SessionState } from './state'
 const ORIGIN = 'https://scrapbox.io'
 const PAT: Credential = { type: 'pat', value: 'secret-pat', source: 'keychain' }
 const ME: Me = { id: 'u1', name: 'qaynam', displayName: 'Qaynam' }
+const ME_ACCOUNT: Account = {
+  id: `${ORIGIN}#${ME.id}`,
+  origin: ORIGIN,
+  userId: ME.id,
+  name: ME.name,
+  displayName: ME.displayName,
+}
 
 interface Call {
   readonly url: string
@@ -59,22 +66,77 @@ const testCredentialStore = (
   return { layer, storeCalls, removeCalls }
 }
 
+// A stateful fake: add/remove/setActive mutate the same in-memory index that list() reads,
+// so a test can chain e.g. addAccount() -> list() the way the real handlers do.
+const testAccountStore = (
+  seed: { active: Option.Option<string>; accounts: readonly Account[] } = {
+    active: Option.none(),
+    accounts: [],
+  },
+): {
+  layer: Layer.Layer<AccountStore>
+  addCalls: { account: Account; pat: string }[]
+  removeCalls: string[]
+  setActiveCalls: string[]
+} => {
+  let state = seed
+  const addCalls: { account: Account; pat: string }[] = []
+  const removeCalls: string[] = []
+  const setActiveCalls: string[] = []
+  const layer = Layer.succeed(
+    AccountStore,
+    AccountStore.of({
+      list: () => Effect.succeed(state),
+      add: (account, pat) => {
+        addCalls.push({ account, pat })
+        state = {
+          active: Option.some(account.id),
+          accounts: [...state.accounts.filter((a) => a.id !== account.id), account],
+        }
+        return Effect.void
+      },
+      remove: (id) => {
+        removeCalls.push(id)
+        const accounts = state.accounts.filter((a) => a.id !== id)
+        const wasActive = Option.isSome(state.active) && state.active.value === id
+        state = {
+          active: wasActive ? Option.fromNullable(accounts[0]?.id) : state.active,
+          accounts,
+        }
+        return Effect.void
+      },
+      setActive: (id) => {
+        setActiveCalls.push(id)
+        const account = state.accounts.find((a) => a.id === id)
+        if (account === undefined) return Effect.succeed(Option.none())
+        state = { ...state, active: Option.some(id) }
+        return Effect.succeed(Option.some(account))
+      },
+      resolveActive: () => Effect.succeed(Option.none()),
+    }),
+  )
+  return { layer, addCalls, removeCalls, setActiveCalls }
+}
+
 const provideAll = <A, E>(
-  program: Effect.Effect<A, E, SessionState | HttpClient>,
+  program: Effect.Effect<A, E, SessionState | HttpClient | AccountStore>,
   httpLayer: Layer.Layer<HttpClient>,
   credentialLayer: Layer.Layer<CredentialStore>,
+  accountLayer: Layer.Layer<AccountStore> = testAccountStore().layer,
 ): Effect.Effect<A, E> =>
   program.pipe(
     Effect.provide(httpLayer),
+    Effect.provide(accountLayer),
     Effect.provide(makeSessionStateLayer(ORIGIN).pipe(Layer.provide(credentialLayer))),
   )
 
 /** One-shot handler run: each call gets its own SessionState (no cross-call caching). */
 const runOnce = <A, E>(
-  program: Effect.Effect<A, E, SessionState | HttpClient>,
+  program: Effect.Effect<A, E, SessionState | HttpClient | AccountStore>,
   httpLayer: Layer.Layer<HttpClient>,
   credentialLayer: Layer.Layer<CredentialStore>,
-): Promise<A> => Effect.runPromise(provideAll(program, httpLayer, credentialLayer))
+  accountLayer?: Layer.Layer<AccountStore>,
+): Promise<A> => Effect.runPromise(provideAll(program, httpLayer, credentialLayer, accountLayer))
 
 describe('authStatus', () => {
   test('no credential -> unauthenticated', async () => {
@@ -109,12 +171,13 @@ describe('authStatus', () => {
 })
 
 describe('login', () => {
-  test('valid token stores to CredentialStore and returns authenticated', async () => {
+  test('valid token adds and activates the account via AccountStore', async () => {
     const { layer: httpLayer, calls } = testHttpClient(() =>
       json({ id: ME.id, name: ME.name, displayName: ME.displayName }),
     )
-    const { layer: credLayer, storeCalls } = testCredentialStore(Option.none())
-    const result = await runOnce(handlers.login('typed-pat'), httpLayer, credLayer)
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const { layer: accountLayer, addCalls } = testAccountStore()
+    const result = await runOnce(handlers.login('typed-pat'), httpLayer, credLayer, accountLayer)
     expect(result).toEqual({
       ok: true,
       authenticated: true,
@@ -122,16 +185,17 @@ describe('login', () => {
       source: 'keychain',
       user: ME,
     })
-    expect(storeCalls).toEqual([{ origin: ORIGIN, pat: 'typed-pat' }])
+    expect(addCalls).toEqual([{ account: ME_ACCOUNT, pat: 'typed-pat' }])
     expect(calls).toHaveLength(1)
   })
 
-  test('invalid token -> unauthorized "invalid token", nothing stored', async () => {
+  test('invalid token -> unauthorized "invalid token", nothing added', async () => {
     const { layer: httpLayer } = testHttpClient(() => new Response('no', { status: 401 }))
-    const { layer: credLayer, storeCalls } = testCredentialStore(Option.none())
-    const result = await runOnce(handlers.login('bad-pat'), httpLayer, credLayer)
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const { layer: accountLayer, addCalls } = testAccountStore()
+    const result = await runOnce(handlers.login('bad-pat'), httpLayer, credLayer, accountLayer)
     expect(result).toEqual({ ok: false, code: 'unauthorized', message: 'invalid token' })
-    expect(storeCalls).toHaveLength(0)
+    expect(addCalls).toHaveLength(0)
   })
 })
 
@@ -156,6 +220,125 @@ describe('logout', () => {
     const result = await runOnce(handlers.logout(), httpLayer, credLayer)
     expect(result).toEqual({ ok: true })
     expect(removeCalls).toEqual([ORIGIN])
+  })
+
+  test('removes the active AccountStore account, and still succeeds if that fails', async () => {
+    const { layer: httpLayer } = testHttpClient(() => json({}))
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const { layer: accountLayer, removeCalls } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT],
+    })
+    const result = await runOnce(handlers.logout(), httpLayer, credLayer, accountLayer)
+    expect(result).toEqual({ ok: true })
+    expect(removeCalls).toEqual([ME_ACCOUNT.id])
+  })
+})
+
+describe('accounts / addAccount / useAccount / removeAccount', () => {
+  const OTHER_ACCOUNT: Account = {
+    id: `${ORIGIN}#u2`,
+    origin: ORIGIN,
+    userId: 'u2',
+    name: 'qaynam',
+    displayName: 'Qaynam',
+  }
+
+  test('accounts: reflects the AccountStore index', async () => {
+    const { layer: httpLayer } = testHttpClient(() => json({}))
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const { layer: accountLayer } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT, OTHER_ACCOUNT],
+    })
+    const result = await runOnce(handlers.accounts(), httpLayer, credLayer, accountLayer)
+    expect(result).toEqual({
+      ok: true,
+      active: ME_ACCOUNT.id,
+      accounts: [ME_ACCOUNT, OTHER_ACCOUNT],
+    })
+  })
+
+  test('addAccount: valid token adds and activates the account', async () => {
+    const { layer: httpLayer } = testHttpClient(() =>
+      json({ id: ME.id, name: ME.name, displayName: ME.displayName }),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const { layer: accountLayer, addCalls } = testAccountStore({
+      active: Option.some(OTHER_ACCOUNT.id),
+      accounts: [OTHER_ACCOUNT],
+    })
+    const result = await runOnce(
+      handlers.addAccount('typed-pat'),
+      httpLayer,
+      credLayer,
+      accountLayer,
+    )
+    expect(result).toEqual({
+      ok: true,
+      account: ME_ACCOUNT,
+      accounts: [OTHER_ACCOUNT, ME_ACCOUNT],
+      active: ME_ACCOUNT.id,
+    })
+    expect(addCalls).toEqual([{ account: ME_ACCOUNT, pat: 'typed-pat' }])
+  })
+
+  test('addAccount: invalid token -> unauthorized, nothing added', async () => {
+    const { layer: httpLayer } = testHttpClient(() => new Response('no', { status: 401 }))
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const { layer: accountLayer, addCalls } = testAccountStore()
+    const result = await runOnce(handlers.addAccount('bad-pat'), httpLayer, credLayer, accountLayer)
+    expect(result).toEqual({ ok: false, code: 'unauthorized', message: 'invalid token' })
+    expect(addCalls).toHaveLength(0)
+  })
+
+  test('useAccount: switches active to a known account', async () => {
+    const { layer: httpLayer } = testHttpClient(() => json({}))
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const { layer: accountLayer } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT, OTHER_ACCOUNT],
+    })
+    const result = await runOnce(
+      handlers.useAccount({ id: OTHER_ACCOUNT.id }),
+      httpLayer,
+      credLayer,
+      accountLayer,
+    )
+    expect(result).toEqual({ ok: true, account: OTHER_ACCOUNT, active: OTHER_ACCOUNT.id })
+  })
+
+  test('useAccount: unknown id -> error', async () => {
+    const { layer: httpLayer } = testHttpClient(() => json({}))
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const { layer: accountLayer } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT],
+    })
+    const result = await runOnce(
+      handlers.useAccount({ id: 'unknown-id' }),
+      httpLayer,
+      credLayer,
+      accountLayer,
+    )
+    expect(result).toEqual({ ok: false, code: 'error', message: 'unknown account' })
+  })
+
+  test('removeAccount: removes the account and reports the resulting index', async () => {
+    const { layer: httpLayer } = testHttpClient(() => json({}))
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const { layer: accountLayer, removeCalls } = testAccountStore({
+      active: Option.some(OTHER_ACCOUNT.id),
+      accounts: [ME_ACCOUNT, OTHER_ACCOUNT],
+    })
+    const result = await runOnce(
+      handlers.removeAccount({ id: OTHER_ACCOUNT.id }),
+      httpLayer,
+      credLayer,
+      accountLayer,
+    )
+    expect(result).toEqual({ ok: true, accounts: [ME_ACCOUNT], active: ME_ACCOUNT.id })
+    expect(removeCalls).toEqual([OTHER_ACCOUNT.id])
   })
 })
 

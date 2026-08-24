@@ -126,6 +126,19 @@ function M.related()
   related.toggle()
 end
 
+--- Switch (or add) the active account, then reopen the sidebar from scratch:
+--- projects differ per account, so the remembered project choice is dropped
+--- and resolve_project runs again against the new account.
+function M.switch_account()
+  require('chatora.account').switch(function()
+    require('chatora.keymaps').invalidate_account_cache()
+    M.session.project = nil
+    M.resolve_project(function(project)
+      sidebar.open(project)
+    end)
+  end)
+end
+
 function M.logout()
   auth.logout()
 end
@@ -142,6 +155,8 @@ function M.dispatch(subcmd, args)
     M.related()
   elseif subcmd == 'project' then
     M.switch_project()
+  elseif subcmd == 'account' then
+    M.switch_account()
   elseif subcmd == 'logout' then
     M.logout()
   elseif subcmd == 'help' then

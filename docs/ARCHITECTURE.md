@@ -55,9 +55,22 @@ origin は既定 `https://scrapbox.io`（設定で変更可能に）。
 - PAT 発行ページ: `<origin>/settings/personal-access-tokens`
 - **資格情報の解決順**（chatora 独自管理。cosense-cli の settings.json は読まない）:
   1. 環境変数 `COSENSE_PAT`
-  2. macOS Keychain: `security find-generic-password -s chatora -a <origin> -w`
-- ログイン保存は Keychain のみ: `security add-generic-password -U -s chatora -a <origin> -w <pat>`
+  2. アカウント索引の active アカウント → macOS Keychain: `security find-generic-password -s chatora -a <accountId> -w`
+  3. レガシー: macOS Keychain: `security find-generic-password -s chatora -a <origin> -w`
+- ログイン保存は Keychain のみ: `security add-generic-password -U -s chatora -a <accountId> -w <pat>`
 - PAT は絶対にログ・エラーメッセージ・LSP レスポンスに含めない。
+
+#### 複数アカウント
+
+- 1 つの PAT = 1 アカウント（`{ id, origin, userId, name, displayName, photo? }`）。`id` = `` `${origin}#${userId}` `` で、Keychain の account（`-a`）にもそのまま使う。
+- PAT 本体は上記の通り Keychain のみに保存する。PAT を含まないアカウント索引（メタデータ + どれが active か）は JSON ファイルに永続化する: `${CHATORA_STATE_DIR}` があればそこ、なければ `${XDG_STATE_HOME:-$HOME/.local/state}/chatora/accounts.json`（`CHATORA_STATE_DIR` はテスト用の差し替え口）。ファイルは 0600。壊れた JSON は空の索引として扱う。
+  ```json
+  { "active": "https://scrapbox.io#abc123",
+    "accounts": [ { "id": "https://scrapbox.io#abc123", "origin": "https://scrapbox.io",
+                    "userId": "abc123", "name": "qaynam", "displayName": "Qaynam", "photo": "https://..." } ] }
+  ```
+- `@chatora/core` の `AccountStore`（`list` / `add` / `remove` / `setActive` / `resolveActive`）がこの索引 + Keychain を仲介する。`CredentialStore.resolve` は `AccountStore.resolveActive(origin)` を上記解決順 2 段目として呼ぶ。
+- 後方互換: 旧バージョンは Keychain の account = `<origin>`（上記解決順 3 段目）に PAT を持つ。このレガシーエントリを削除する移行処理はない（読めれば動く、を維持）。`chatora/login` はレガシー経路ではなく `AccountStore.add` を通る（＝アカウント追加 + active 化のエイリアス）。
 
 ### Read エンドポイント
 
@@ -102,9 +115,13 @@ KeychainError / CommandExecutorError / HttpClientError
 // サービス（それぞれ *Live Layer あり）
 CommandExecutor  // execFile ラッパー（argv 配列、shell 文字列禁止）
 HttpClient       // fetch ラッパー（テストで差し替え）
-CredentialStore  // resolve(origin): Effect<Option<Credential>>（env COSENSE_PAT → Keychain）
-                 // store(origin, pat) / remove(origin)（Keychain のみ）
-                 // CredentialStoreLive は CommandExecutor を要求
+CredentialStore  // resolve(origin): Effect<Option<Credential>>（env COSENSE_PAT → AccountStore の active → レガシー Keychain）
+                 // store(origin, pat) / remove(origin)（レガシー Keychain 経路。互換のため残存）
+                 // CredentialStoreLive は CommandExecutor | AccountStore を要求
+AccountStore     // list(): Effect<{ active: Option<string>; accounts: Account[] }>
+                 // add(account, pat) / remove(id): Effect<void, KeychainError>（Keychain + 索引ファイル）
+                 // setActive(id): Effect<Option<Account>> / resolveActive(origin): Effect<Option<string>>（active の PAT）
+                 // AccountStoreLive は CommandExecutor を要求
 
 // api.ts
 makeCosenseApi({ origin, credential }): CosenseApiShape
@@ -143,8 +160,15 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 
 ```ts
 'chatora/authStatus'  {}                          → { ok, authenticated, origin, source?, user?: Me }
-'chatora/login'       { pat }                     → 検証(/api/users/me) → Keychain 保存 → authStatus と同形
-'chatora/logout'      {}                          → Keychain から削除
+'chatora/login'       { pat }                     → 検証(/api/users/me) → AccountStore.add（アカウント追加 + active 化) → authStatus と同形
+'chatora/logout'      {}                          → active アカウントを削除（+ レガシー Keychain エントリも従来通り試行）
+'chatora/accounts'      {}      → { ok:true, active: string|null, accounts: Account[] }
+'chatora/addAccount'    { pat } → PAT で /api/users/me を検証 → Account 組み立て → AccountStore.add（active 化）
+                                   → セッションキャッシュ invalidate → { ok:true, account, accounts, active }
+                                   検証失敗: { ok:false, code:'unauthorized', message:'invalid token' }
+'chatora/useAccount'    { id }  → AccountStore.setActive → セッションキャッシュ invalidate → { ok:true, account, active }
+                                   未知 id: { ok:false, code:'error', message:'unknown account' }
+'chatora/removeAccount' { id }  → AccountStore.remove → セッションキャッシュ invalidate → { ok:true, accounts, active }
 'chatora/projects'    {}                          → { ok, projects: ProjectSummary[] }
 'chatora/listPages'   { project, skip?, limit? }  → { ok, count, pages: PageSummary[] }
 'chatora/openPage'    { project, title }          → { ok, uri, text, exists, pageId?, commitId? }

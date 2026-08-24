@@ -1,5 +1,11 @@
 import type { HttpClient } from '@chatora/core'
-import { CommandExecutorLive, CredentialStoreLive, HttpClientLive } from '@chatora/core'
+import {
+  type AccountStore,
+  AccountStoreLive,
+  CommandExecutorLive,
+  CredentialStoreLive,
+  HttpClientLive,
+} from '@chatora/core'
 import { Layer, ManagedRuntime } from 'effect'
 import {
   type CompletionParams,
@@ -28,17 +34,32 @@ const DEFAULT_ORIGIN = 'https://scrapbox.io'
 const connection = createConnection()
 const documents = new TextDocuments(TextDocument)
 
-type AppRuntime = ManagedRuntime.ManagedRuntime<SessionState | HttpClient | AssetCache, never>
+type AppRuntime = ManagedRuntime.ManagedRuntime<
+  SessionState | HttpClient | AssetCache | AccountStore,
+  never
+>
 
-/** One origin's worth of infrastructure: HttpClient (network), SessionState wired to CredentialStore/CommandExecutor (Keychain access), and AssetCache (chatora/fetchAsset's in-flight fetch dedupe). */
-const buildAppLayer = (origin: string): Layer.Layer<SessionState | HttpClient | AssetCache> =>
-  Layer.mergeAll(
+/**
+ * One origin's worth of infrastructure: HttpClient (network), AssetCache
+ * (chatora/fetchAsset's in-flight fetch dedupe), AccountStore (the multi-account index +
+ * Keychain, shared as a top-level service so the chatora/*Account* handlers can use it
+ * directly), and SessionState wired to CredentialStore, which itself now reads through
+ * AccountStore before falling back to the legacy per-origin Keychain entry.
+ */
+const buildAppLayer = (
+  origin: string,
+): Layer.Layer<SessionState | HttpClient | AssetCache | AccountStore> => {
+  const accountStore = AccountStoreLive.pipe(Layer.provide(CommandExecutorLive))
+  const credentialStore = CredentialStoreLive.pipe(
+    Layer.provide(Layer.mergeAll(CommandExecutorLive, accountStore)),
+  )
+  return Layer.mergeAll(
     HttpClientLive,
     AssetCacheLive,
-    makeSessionStateLayer(origin).pipe(
-      Layer.provide(CredentialStoreLive.pipe(Layer.provide(CommandExecutorLive))),
-    ),
+    accountStore,
+    makeSessionStateLayer(origin).pipe(Layer.provide(credentialStore)),
   )
+}
 
 // Replaced in onInitialize once the real origin (from initializationOptions) is known; every
 // chatora/* and completion handler below reads this `let` at call time, so a re-initialize
@@ -134,6 +155,16 @@ connection.onRequest('chatora/login', (params: { pat: string }) =>
   runtime.runPromise(handlers.login(params.pat)),
 )
 connection.onRequest('chatora/logout', () => runtime.runPromise(handlers.logout()))
+connection.onRequest('chatora/accounts', () => runtime.runPromise(handlers.accounts()))
+connection.onRequest('chatora/addAccount', (params: { pat: string }) =>
+  runtime.runPromise(handlers.addAccount(params.pat)),
+)
+connection.onRequest('chatora/useAccount', (params: { id: string }) =>
+  runtime.runPromise(handlers.useAccount(params)),
+)
+connection.onRequest('chatora/removeAccount', (params: { id: string }) =>
+  runtime.runPromise(handlers.removeAccount(params)),
+)
 connection.onRequest('chatora/projects', () => runtime.runPromise(handlers.projects()))
 connection.onRequest(
   'chatora/listPages',

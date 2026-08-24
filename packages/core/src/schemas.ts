@@ -26,6 +26,7 @@ export const MeSchema = Schema.Struct({
   name: optionalString,
   displayName: optionalString,
   email: Schema.optionalWith(Schema.String, { exact: true }),
+  photo: Schema.optionalWith(Schema.String, { exact: true }),
 })
 
 export const ProjectSummarySchema = Schema.Struct({

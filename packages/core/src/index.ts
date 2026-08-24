@@ -1,3 +1,4 @@
+export * from './accounts'
 export * from './api'
 export * from './changes'
 export * from './commandExecutor'

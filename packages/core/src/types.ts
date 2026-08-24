@@ -7,6 +7,7 @@ export interface Me {
   readonly name: string
   readonly displayName: string
   readonly email?: string
+  readonly photo?: string
 }
 
 export interface ProjectSummary {
