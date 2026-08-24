@@ -333,6 +333,32 @@ vim.api.nvim_create_autocmd('QuitPre', {
   end,
 })
 
+--- Windows currently showing a cosense page.
+local function page_windows()
+  local wins = {}
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):match('^cosense://') then
+      wins[#wins + 1] = w
+    end
+  end
+  return wins
+end
+
+-- chatora's chrome (sidebar, related panel) is only there to serve a page, so
+-- closing the last page window takes it along. Without this, :q leaves the
+-- panels behind and has to be repeated once per window to get out.
+vim.api.nvim_create_autocmd('QuitPre', {
+  group = augroup,
+  pattern = 'cosense://*',
+  callback = function()
+    if #page_windows() > 1 then
+      return
+    end
+    related.close()
+    require('chatora.sidebar').close()
+  end,
+})
+
 -- On exit, list every unsaved page in one place (Neovim's own E162 names
 -- only the first offending buffer).
 vim.api.nvim_create_autocmd('ExitPre', {

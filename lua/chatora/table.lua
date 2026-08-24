@@ -113,7 +113,7 @@ end
 --- to `false` (any other value, including omission, stays enabled).
 local function table_opts()
   local opt = config.options.tables
-  local border, header = true, true
+  local border, header, grid = true, true, true
   if type(opt) == 'table' then
     if opt.border == false then
       border = false
@@ -121,8 +121,11 @@ local function table_opts()
     if opt.header == false then
       header = false
     end
+    if opt.grid == false then
+      grid = false
+    end
   end
-  return border, header
+  return border, header, grid
 end
 
 --- 0-based cursor line if bufnr is showing in the current window, else nil.
@@ -204,33 +207,46 @@ local function render_row(bufnr, line_no, row, widths)
   end
 end
 
-local function render_borders(bufnr, lines, block, widths, header_enabled)
+local function render_borders(bufnr, lines, block, widths, header_enabled, grid_enabled)
   local first_line_no = block.start_line
   local last_line_no = block.end_line - 1
-  local first_indent = block.rows[1].indent
-  local last_indent = block.rows[#block.rows].indent
-  local first_prefix = (lines[first_line_no + 1] or ''):sub(1, first_indent)
-  local last_prefix = (lines[last_line_no + 1] or ''):sub(1, last_indent)
 
-  pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, first_line_no, 0, {
-    virt_lines = { { { first_prefix .. build_border(widths, '╭', '┬', '╮', '─'), 'ChatoraTableBorder' } } },
-    virt_lines_above = true,
-  })
+  --- The row's own indent, so a border sits under its content rather than at
+  --- the window edge.
+  local function prefix(line_no, row)
+    return (lines[line_no + 1] or ''):sub(1, row.indent)
+  end
 
-  if header_enabled and #block.rows >= 2 then
-    pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, first_line_no, 0, {
-      virt_lines = { { { first_prefix .. build_border(widths, '├', '┼', '┤', '─'), 'ChatoraTableSeparator' } } },
-      virt_lines_above = false,
+  local function rule(line_no, row, left, junction, right, hl, above)
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, line_no, 0, {
+      virt_lines = { { { prefix(line_no, row) .. build_border(widths, left, junction, right, '─'), hl } } },
+      virt_lines_above = above,
     })
   end
 
-  pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, last_line_no, 0, {
-    virt_lines = { { { last_prefix .. build_border(widths, '╰', '┴', '╯', '─'), 'ChatoraTableBorder' } } },
-    virt_lines_above = false,
-  })
+  rule(first_line_no, block.rows[1], '╭', '┬', '╮', 'ChatoraTableBorder', true)
+
+  -- Between every pair of rows, so a wide table stays readable across columns.
+  -- The first one doubles as the header rule when headers are on.
+  for idx = 1, #block.rows - 1 do
+    local is_header_rule = idx == 1 and header_enabled
+    if is_header_rule or grid_enabled then
+      rule(
+        block.start_line + idx - 1,
+        block.rows[idx],
+        '├',
+        '┼',
+        '┤',
+        is_header_rule and 'ChatoraTableSeparator' or 'ChatoraTableBorder',
+        false
+      )
+    end
+  end
+
+  rule(last_line_no, block.rows[#block.rows], '╰', '┴', '╯', 'ChatoraTableBorder', false)
 end
 
-local function render_block(bufnr, lines, block, border_enabled, header_enabled, active_line)
+local function render_block(bufnr, lines, block, border_enabled, header_enabled, grid_enabled, active_line)
   if active_line ~= block.marker_line then
     render_marker(bufnr, lines, block)
   end
@@ -274,7 +290,7 @@ local function render_block(bufnr, lines, block, border_enabled, header_enabled,
   end
 
   if border_enabled then
-    render_borders(bufnr, lines, block, widths, header_enabled)
+    render_borders(bufnr, lines, block, widths, header_enabled, grid_enabled)
   end
 end
 
@@ -289,7 +305,7 @@ function M.render(bufnr)
     return
   end
 
-  local border_enabled, header_enabled = table_opts()
+  local border_enabled, header_enabled, grid_enabled = table_opts()
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local ok, blocks = pcall(M.find_blocks, lines)
   if not ok then
@@ -298,7 +314,7 @@ function M.render(bufnr)
 
   local active_line = cursor_row(bufnr)
   for _, block in ipairs(blocks) do
-    pcall(render_block, bufnr, lines, block, border_enabled, header_enabled, active_line)
+    pcall(render_block, bufnr, lines, block, border_enabled, header_enabled, grid_enabled, active_line)
   end
 end
 
