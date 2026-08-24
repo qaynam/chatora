@@ -48,6 +48,8 @@ export interface PageSummary {
   readonly updated: number
   /** Requesting user's last visit (unix seconds); 0 when never visited. `updated > accessed` means unread. */
   readonly accessed: number
+  /** Sort weight for pinned pages; 0 means not pinned. */
+  readonly pin: number
 }
 
 export interface PageDetailLine {

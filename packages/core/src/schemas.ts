@@ -69,6 +69,8 @@ export const PageSummarySchema = Schema.Struct({
   // `updated > accessed` an unread test (the same one Cosense's web grid draws
   // its blue border from). 0 when the field is absent, i.e. never visited.
   accessed: optionalNumber,
+  // Sort weight for pinned pages; 0 means not pinned.
+  pin: optionalNumber,
 })
 
 export const PageDetailLineSchema = Schema.Struct({

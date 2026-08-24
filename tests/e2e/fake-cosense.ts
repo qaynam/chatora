@@ -245,6 +245,13 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         return respond({ commitId: 'c2', page: { title: 'ホーム' } }, 200)
       }
 
+      // POST /api/pages/:project/:pageId/accessed -> 204, the real read-tracking
+      // endpoint (verified against a scrapbox.io capture).
+      if (method === 'POST' && /^\/api\/pages\/[^/]+\/[^/]+\/accessed$/.test(path)) {
+        requests.push({ method, path, query: url.search, body, status: 204 })
+        return new Response(null, { status: 204 })
+      }
+
       // GET /api/pages/v2/testproj/:title[/links1hop|/links2hop]
       const v2Prefix = `/api/pages/v2/${PROJECT}/`
       if (path.startsWith(v2Prefix) && method === 'GET') {

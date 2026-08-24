@@ -14,6 +14,7 @@ import type {
 import { AccountStore, computeChanges, createNewLineId } from '@chatora/core'
 import { Effect, Option } from 'effect'
 import { textToLines } from './lines'
+import { ReadState } from './readState'
 import { type BasePageState, SessionState } from './state'
 import { formatUri } from './uriScheme'
 
@@ -285,13 +286,14 @@ export const projects = (): Effect.Effect<
 export type ListedPage = PageSummary & { readonly unread: boolean }
 
 /**
- * Cosense has no unread flag of its own: its web grid draws the blue border from
- * `updated > accessed`, and so does this. A page never visited has `accessed` 0, which makes
- * it unread — matching the web UI, where everything starts unread.
+ * Cosense has no unread flag of its own: its web grid computes `updated > accessed`, and so
+ * does this. A page never visited has `accessed` 0, so everything starts unread — same as the
+ * web UI. `localReadAt` covers the window before the server's own `accessed` catches up, and
+ * the case where it never does.
  */
-const withUnread = (page: PageSummary): ListedPage => ({
+const withUnread = (page: PageSummary, localReadAt: number): ListedPage => ({
   ...page,
-  unread: page.updated > page.accessed,
+  unread: page.updated > Math.max(page.accessed, localReadAt),
 })
 
 export const listPages = (params: {
@@ -312,7 +314,7 @@ export const listPages = (params: {
     }
   | ErrEnvelope,
   never,
-  SessionState | HttpClient
+  SessionState | HttpClient | ReadState
 > =>
   handle(
     Effect.gen(function* () {
@@ -332,7 +334,10 @@ export const listPages = (params: {
       if (params.filterValue !== undefined) opts.filterValue = params.filterValue
 
       const result = yield* apiOpt.value.listPages(params.project, opts)
-      const listed = result.pages.map(withUnread)
+      const readState = yield* ReadState
+      const listed = yield* Effect.forEach(result.pages, (page) =>
+        Effect.map(readState.readAt(params.project, page.id), (at) => withUnread(page, at)),
+      )
       // Unread has no server-side filter, so it thins a batch client-side and
       // the caller pages on `scanned` rather than on how many pages it got.
       const pages = params.unreadOnly ? listed.filter((p) => p.unread) : listed
@@ -352,7 +357,7 @@ export interface OpenPageResult {
 export const openPage = (params: {
   readonly project: string
   readonly title: string
-}): Effect.Effect<OpenPageResult | ErrEnvelope, never, SessionState | HttpClient> =>
+}): Effect.Effect<OpenPageResult | ErrEnvelope, never, SessionState | HttpClient | ReadState> =>
   handle(
     Effect.gen(function* () {
       const session = yield* SessionState
@@ -364,8 +369,10 @@ export const openPage = (params: {
       if (Option.isSome(pageOpt)) {
         const page = pageOpt.value
         const text = page.lines.map((l) => l.text).join('\n')
-        // Opening a page is what marks it read. Forked so a slow (or missing)
-        // accessed endpoint never delays showing the page.
+        // Opening a page is what marks it read. Recorded locally straight away
+        // so the mark clears even if the endpoint rejects this credential, and
+        // reported to Cosense in the background so other clients see it too.
+        yield* (yield* ReadState).markRead(params.project, page.id)
         yield* Effect.forkDaemon(apiOpt.value.markAccessed(params.project, page.id))
         yield* session.setPage(uri, {
           project: params.project,

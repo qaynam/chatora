@@ -22,6 +22,7 @@ local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraSidebarUnreadTitle', { bold = true, default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabActive', { link = 'TabLineSel', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabInactive', { link = 'TabLine', default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraSidebarPin', { link = 'Special', default = true })
   -- Underline spans the full row, separating rows without spending a line.
   local sep = vim.api.nvim_get_hl(0, { name = 'WinSeparator', link = false })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarRow', {
@@ -147,6 +148,7 @@ end
 
 local UNREAD_BAR = '▍'
 local READ_BAR = ' '
+local PIN_MARK = '󰐃 '
 
 --- The save-state glyph for a page, or nil when it has no open buffer.
 local function status_of(entry)
@@ -175,8 +177,11 @@ local function render()
   for i, p in ipairs(state.pages) do
     local unread = is_unread(p)
     local icon, hl_group = status_of(p)
-    lines[i] = (unread and UNREAD_BAR or READ_BAR) .. (p.title or '(untitled)')
-    rows[i] = { unread = unread, icon = icon, hl_group = hl_group }
+    -- Cosense sorts pinned pages to the front; the mark says why they are there.
+    local pinned = type(p.pin) == 'number' and p.pin > 0
+    local prefix = (unread and UNREAD_BAR or READ_BAR) .. (pinned and PIN_MARK or '')
+    lines[i] = prefix .. (p.title or '(untitled)')
+    rows[i] = { unread = unread, icon = icon, hl_group = hl_group, pin_width = pinned and #PIN_MARK or 0 }
     line_pages[i] = p
   end
   if #lines == 0 then
@@ -200,6 +205,12 @@ local function render()
       vim.api.nvim_buf_set_extmark(buf, ns, row, #UNREAD_BAR, {
         end_line = row + 1,
         hl_group = 'ChatoraSidebarUnreadTitle',
+      })
+    end
+    if row_info.pin_width > 0 then
+      vim.api.nvim_buf_set_extmark(buf, ns, row, #UNREAD_BAR, {
+        end_col = #UNREAD_BAR + row_info.pin_width,
+        hl_group = 'ChatoraSidebarPin',
       })
     end
     if row_info.icon then

@@ -3,6 +3,7 @@ import type { Account, Credential, Me } from '@chatora/core'
 import { AccountStore, CredentialStore, HttpClient, KeychainError } from '@chatora/core'
 import { Effect, Layer, Option } from 'effect'
 import * as handlers from './pages'
+import { ReadState } from './readState'
 import { makeSessionStateLayer, type SessionState } from './state'
 
 const ORIGIN = 'https://scrapbox.io'
@@ -118,8 +119,16 @@ const testAccountStore = (
   return { layer, addCalls, removeCalls, setActiveCalls }
 }
 
+// Read state is per-run and in-memory here: CHATORA_STATE_DIR points at a throwaway
+// directory so a handler test never reads or writes the real one.
+const testReadState = (): Layer.Layer<ReadState> =>
+  Layer.succeed(ReadState, {
+    readAt: () => Effect.succeed(0),
+    markRead: () => Effect.void,
+  })
+
 const provideAll = <A, E>(
-  program: Effect.Effect<A, E, SessionState | HttpClient | AccountStore>,
+  program: Effect.Effect<A, E, SessionState | HttpClient | AccountStore | ReadState>,
   httpLayer: Layer.Layer<HttpClient>,
   credentialLayer: Layer.Layer<CredentialStore>,
   accountLayer: Layer.Layer<AccountStore> = testAccountStore().layer,
@@ -127,12 +136,13 @@ const provideAll = <A, E>(
   program.pipe(
     Effect.provide(httpLayer),
     Effect.provide(accountLayer),
+    Effect.provide(testReadState()),
     Effect.provide(makeSessionStateLayer(ORIGIN).pipe(Layer.provide(credentialLayer))),
   )
 
 /** One-shot handler run: each call gets its own SessionState (no cross-call caching). */
 const runOnce = <A, E>(
-  program: Effect.Effect<A, E, SessionState | HttpClient | AccountStore>,
+  program: Effect.Effect<A, E, SessionState | HttpClient | AccountStore | ReadState>,
   httpLayer: Layer.Layer<HttpClient>,
   credentialLayer: Layer.Layer<CredentialStore>,
   accountLayer?: Layer.Layer<AccountStore>,

@@ -1,10 +1,10 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname } from 'node:path'
 import { Context, Effect, Layer, Option } from 'effect'
 import { CommandExecutor } from './commandExecutor'
 import { KeychainError } from './errors'
 import { addGenericPassword, deleteGenericPassword, findGenericPassword } from './keychain'
+import { stateFilePath } from './stateDir'
 
 export interface Account {
   readonly id: string
@@ -51,21 +51,7 @@ const parseIndex = (text: string): AccountIndex => {
   }
 }
 
-/**
- * `${CHATORA_STATE_DIR}/accounts.json` when that env var is set (the test override point),
- * otherwise `${XDG_STATE_HOME:-$HOME/.local/state}/chatora/accounts.json`. Resolved fresh on
- * every call rather than once per process/layer, so tests can repoint it per case.
- */
-const indexPath = (): string => {
-  const override = process.env.CHATORA_STATE_DIR
-  if (override !== undefined && override !== '') return join(override, 'accounts.json')
-  const xdgStateHome = process.env.XDG_STATE_HOME
-  const stateHome =
-    xdgStateHome !== undefined && xdgStateHome !== ''
-      ? xdgStateHome
-      : join(homedir(), '.local', 'state')
-  return join(stateHome, 'chatora', 'accounts.json')
-}
+const indexPath = (): string => stateFilePath('accounts.json')
 
 const readIndex = (filePath: string): Effect.Effect<AccountIndex> =>
   Effect.tryPromise(() => readFile(filePath, 'utf8')).pipe(

@@ -27,6 +27,7 @@ import { definitionLocation, findDefinitionTarget, findUrlTarget } from './defin
 import { computeImageTargets } from './images'
 import { type NotationSpec, notationSpecs, setNotations } from './notations'
 import * as handlers from './pages'
+import { type ReadState, ReadStateLive } from './readState'
 import { makeSessionStateLayer, type SessionState } from './state'
 import { computeTokens, encodeTokens, type RawToken, TOKEN_TYPES } from './tokens'
 import { parseUri } from './uriScheme'
@@ -37,7 +38,7 @@ const connection = createConnection()
 const documents = new TextDocuments(TextDocument)
 
 type AppRuntime = ManagedRuntime.ManagedRuntime<
-  SessionState | HttpClient | AssetCache | AccountStore,
+  SessionState | HttpClient | AssetCache | AccountStore | ReadState,
   never
 >
 
@@ -50,7 +51,7 @@ type AppRuntime = ManagedRuntime.ManagedRuntime<
  */
 const buildAppLayer = (
   origin: string,
-): Layer.Layer<SessionState | HttpClient | AssetCache | AccountStore> => {
+): Layer.Layer<SessionState | HttpClient | AssetCache | AccountStore | ReadState> => {
   const accountStore = AccountStoreLive.pipe(Layer.provide(CommandExecutorLive))
   const credentialStore = CredentialStoreLive.pipe(
     Layer.provide(Layer.mergeAll(CommandExecutorLive, accountStore)),
@@ -58,6 +59,7 @@ const buildAppLayer = (
   return Layer.mergeAll(
     HttpClientLive,
     AssetCacheLive,
+    ReadStateLive,
     accountStore,
     makeSessionStateLayer(origin).pipe(Layer.provide(credentialStore)),
   )

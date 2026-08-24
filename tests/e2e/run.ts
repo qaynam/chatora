@@ -285,6 +285,16 @@ check(
   },
 )
 
+// opening a page records the read, which is the only thing that clears its unread mark
+const accessedPosts = requests.filter(
+  (r) => r.method === 'POST' && /\/api\/pages\/[^/]+\/[^/]+\/accessed$/.test(r.path),
+)
+check(
+  'opening a page POSTs to .../accessed',
+  accessedPosts.length >= 1,
+  accessedPosts.map((r) => `${r.method} ${r.path} -> ${r.status}`),
+)
+
 // (g) no request ever carried a wrong/absent token -- zero 401s anywhere in the log
 const unauthorized = requests.filter((r) => r.status === 401)
 check('zero 401 responses across the whole request log', unauthorized.length === 0, unauthorized)
