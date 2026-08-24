@@ -55,6 +55,24 @@ lazy.nvim（GitHub から直接）:
 | `tables` | `true` | `table:` ブロックの罫線描画。`{ border = false, header = false }` で個別に無効化 |
 | `title_margin` | `1` | タイトル行の下に入れる仮想空行の数 |
 | `spacing` | `{ line = 0, code = 0 }` | 行間として挿入する仮想空行。ターミナルはセル高が固定なので、本当の行高は端末/GUI 側の設定（`linespace` 等） |
+| `notations` | `{}` | ユーザー定義のカスタム装飾記法 `[<記号> 本文]`。下記参照 |
+
+### カスタム装飾記法（`notations`）
+
+`[<記号> 本文]` の記号を自分で定義して好きなハイライトを当てられる:
+
+```lua
+notations = {
+  ['|'] = { name = 'highlight', hl = { bg = '#3a3a00', bold = true } },
+  ['='] = { name = 'boxed',     hl = { link = 'WarningMsg' } },
+}
+```
+
+- キー = `[` の直後に来る 1 文字の記号。公式記法の記号（`* / - _ $ [ #`）とは衝突不可
+- `name` = 英数字と `_` のみ（semantic token 型名になる）
+- `hl` = `nvim_set_hl` にそのまま渡る（`:colorscheme` 変更後も再適用される）
+
+不正な設定（記号が1文字でない・`name` が不正・公式記法と衝突）は `vim.notify` で警告して無視される。
 
 `gap = 0` にすると中点が本文に密着するが、中点は overlay で描くため、端末が
 East Asian Ambiguous 幅の文字を 2 セルで描く設定だと次の 1 文字を潰す。

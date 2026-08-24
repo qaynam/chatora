@@ -110,7 +110,6 @@ describe('fetchAsset', () => {
       ['image/jpeg', '.jpg'],
       ['image/gif', '.gif'],
       ['image/webp', '.webp'],
-      ['image/svg+xml', '.svg'],
       [undefined, '.img'],
     ]
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
@@ -128,6 +127,26 @@ describe('fetchAsset', () => {
       expect(result.ok).toBe(true)
       if (result.ok) expect(result.path.endsWith(expectedExt)).toBe(true)
     }
+  })
+
+  test('an SVG that cannot be rasterized reports why instead of a path nothing can draw', async () => {
+    // Terminal graphics composite raster formats only, so handing back the .svg
+    // would leave the backend silently drawing nothing.
+    const { layer: httpLayer } = testHttpClient(
+      () =>
+        new Response(new Uint8Array([1]), {
+          status: 200,
+          headers: { 'content-type': 'image/svg+xml' },
+        }),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const result = await runOnce(
+      fetchAsset({ project: 'p', url: 'https://i.gyazo.com/broken.svg' }),
+      httpLayer,
+      credLayer,
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.message).toContain('librsvg')
   })
 
   test('the credential header is attached only for a same-origin URL', async () => {

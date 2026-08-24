@@ -312,30 +312,68 @@ const applyBorder = (
 // SVG rasterization
 // ---------------------------------------------------------------------------
 
+const RASTER_DPI = '192'
+
 /**
- * Terminal graphics protocols (Kitty/iTerm2, driven here by image.nvim/snacks.nvim) composite
- * raster formats only, so an `image/svg+xml` asset is unusable as-is. Rasterized once and
- * cached under an `r`-prefixed name — same reasoning as `withBorder`'s `b` prefix: it must
- * never collide with the plain `findCached(hash)` lookup for the original `.svg`. `-density`
- * is set before ImageMagick reads the file, since SVG has no native pixel size and rasterizing
- * at the default 72 DPI comes out blurry.
+ * SVG rasterizers, best first. librsvg is what ImageMagick itself delegates to when present;
+ * without it ImageMagick falls back to its own renderer, which cannot resolve fonts and so
+ * fails outright on any SVG containing text. Resolved once per process.
  */
-const rasterizeSvg = (cacheDir: string, hash: string, svgPath: string): Effect.Effect<string> =>
+const RASTERIZERS: readonly { readonly cmd: string; readonly args: (i: string, o: string) => string[] }[] =
+  [
+    {
+      cmd: 'rsvg-convert',
+      args: (i, o) => ['--dpi-x', RASTER_DPI, '--dpi-y', RASTER_DPI, '-o', o, i],
+    },
+    // -density must precede the input: SVG has no pixel size, and the default 72 DPI is blurry.
+    { cmd: 'magick', args: (i, o) => ['-density', RASTER_DPI, '-background', 'none', i, o] },
+    { cmd: 'convert', args: (i, o) => ['-density', RASTER_DPI, '-background', 'none', i, o] },
+  ]
+
+let rasterizer: (typeof RASTERIZERS)[number] | null | undefined
+const resolveRasterizer = async (): Promise<(typeof RASTERIZERS)[number] | null> => {
+  if (rasterizer !== undefined) return rasterizer
+  for (const candidate of RASTERIZERS) {
+    try {
+      await execFileAsync(candidate.cmd, ['--version'])
+      rasterizer = candidate
+      return candidate
+    } catch {}
+  }
+  rasterizer = null
+  return null
+}
+
+/**
+ * Terminal graphics protocols composite raster formats only, so an `image/svg+xml` asset is
+ * unusable as-is. Cached under an `r`-prefixed name — same reasoning as `withBorder`'s `b`
+ * prefix: it must never collide with the plain `findCached(hash)` lookup for the `.svg`.
+ * `Option.none` means the SVG could not be rasterized and there is nothing to display.
+ */
+const rasterizeSvg = (
+  cacheDir: string,
+  hash: string,
+  svgPath: string,
+): Effect.Effect<Option.Option<string>> =>
   Effect.gen(function* () {
     const rasterName = `r${hash}`
     const rasterPath = join(cacheDir, `${rasterName}.png`)
     const existing = yield* findCached(cacheDir, rasterName)
-    if (Option.isSome(existing)) return existing.value
+    if (Option.isSome(existing)) return existing
 
-    const magick = yield* Effect.promise(resolveMagick)
-    if (magick === null) return svgPath
+    const tool = yield* Effect.promise(resolveRasterizer)
+    if (tool === null) return Option.none()
 
-    const args = ['-density', '192', '-background', 'none', svgPath, rasterPath]
-    return yield* Effect.tryPromise(() => execFileAsync(magick, args)).pipe(
-      Effect.as(rasterPath),
-      Effect.orElseSucceed(() => svgPath),
+    return yield* Effect.tryPromise(() =>
+      execFileAsync(tool.cmd, tool.args(svgPath, rasterPath)),
+    ).pipe(
+      Effect.as(Option.some(rasterPath)),
+      Effect.orElseSucceed(() => Option.none<string>()),
     )
   })
+
+const SVG_HELP =
+  'SVG を画像に変換できませんでした。`brew install librsvg` で表示できるようになります'
 
 const applySvgRaster = (
   cacheDir: string,
@@ -343,10 +381,15 @@ const applySvgRaster = (
   result: FetchAssetResult,
 ): Effect.Effect<FetchAssetResult> => {
   if (!result.ok || !result.path.endsWith('.svg')) return Effect.succeed(result)
-  return Effect.map(rasterizeSvg(cacheDir, hash, result.path), (path) => ({
-    ok: true as const,
-    path,
-  }))
+  return Effect.map(
+    rasterizeSvg(cacheDir, hash, result.path),
+    Option.match({
+      // Handing back the .svg would leave the render backend silently drawing
+      // nothing, with no way for the user to learn why.
+      onNone: (): FetchAssetResult => err('error', SVG_HELP),
+      onSome: (path): FetchAssetResult => ({ ok: true as const, path }),
+    }),
+  )
 }
 
 // ---------------------------------------------------------------------------

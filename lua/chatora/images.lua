@@ -18,6 +18,18 @@ local project_by_bufnr = {}
 local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async replies (chatora/images and chatora/fetchAsset alike)
 local path_by_key = {} -- fetch key -> local file path, resolved once via fetchAsset and reused
 local signature_by_bufnr = {} -- target multiset of the last applied refresh (flicker guard)
+local reported = {} -- fetch failures already surfaced, so a page of them notifies once each
+
+--- Fetch failures are normally silent (a missing image is cosmetic), but some
+--- are actionable — a missing SVG rasterizer, say — and the user can only act
+--- on what they are told.
+local function report_once(message)
+  if not message or reported[message] then
+    return
+  end
+  reported[message] = true
+  vim.notify('[chatora] ' .. message, vim.log.levels.WARN)
+end
 
 --- Border params for chatora/fetchAsset, or nil. The frame is composited into
 --- the image's own pixels server-side, since a cell grid cannot hug its edges.
@@ -178,10 +190,13 @@ local function clear_placements(bufnr)
   placements_by_bufnr[bufnr] = nil
 end
 
---- Screen column for a target at byte column `byte_col`. pads only decorates
---- the indent, so every column past it shifts by the same fixed amount.
-local function screen_col(byte_col, indent)
-  return byte_col + require('chatora.pads').extra_cells(indent)
+--- Screen column of the notation starting at byte column `byte_col`. Backends
+--- place by display cell, so the preceding text has to be *measured*, not
+--- counted in bytes — anything multibyte before it would otherwise push the
+--- image right. pads only decorates the indent, so its own additions shift
+--- every later column by the same fixed amount.
+local function screen_col(line, byte_col, indent)
+  return vim.fn.strdisplaywidth(line:sub(1, byte_col)) + require('chatora.pads').extra_cells(indent)
 end
 
 --- Placement targets from a `chatora/images` reply. Skips a target whose line
@@ -196,7 +211,7 @@ local function build_targets(bufnr, project, origin, border, images)
       local ok, byte_col = pcall(vim.str_byteindex, line, 'utf-16', img.startChar, false)
       if ok then
         local indent = #(line:match('^[ \t]*') or '')
-        local col = screen_col(byte_col, indent)
+        local col = screen_col(line, byte_col, indent)
         local row = img.line + 1
 
         if img.kind == 'icon' then
@@ -304,6 +319,7 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
       { project = project, url = url, border = target_border },
       function(err, result)
         if err or not result or result.ok == false then
+          report_once(result and result.message)
           return
         end
         path_by_key[key] = result.path

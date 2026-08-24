@@ -1,5 +1,6 @@
 import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
+import { parseOptions } from './notations'
 
 /**
  * Ranges of notation markup to conceal in the editor (render-markdown.nvim
@@ -15,7 +16,7 @@ export interface ConcealRange {
 }
 
 export const computeConcealRanges = (text: string): ConcealRange[] => {
-  const page = parse(text)
+  const page = parse(text, parseOptions())
   // Columns index UTF-16 code units, the same unit JS string indexing uses, so
   // these lines can be sliced with the parser's own column numbers.
   const docLines = normalizeLineEndings(text).split('\n')

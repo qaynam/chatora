@@ -7,6 +7,8 @@
 -- can only be emphasized, not enlarged.
 local M = {}
 
+local config = require('chatora.config')
+
 local function fg_of(name)
   local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
   if ok and hl and hl.fg then
@@ -55,6 +57,11 @@ local function apply()
   for token, spec in pairs(specs()) do
     spec.default = true
     vim.api.nvim_set_hl(0, '@lsp.type.' .. token .. '.cosense', spec)
+  end
+  for _, notation in pairs(config.options.notations) do
+    local hl = vim.deepcopy(notation.hl or {})
+    hl.default = true
+    pcall(vim.api.nvim_set_hl, 0, '@lsp.type.' .. notation.name .. '.cosense', hl)
   end
 end
 

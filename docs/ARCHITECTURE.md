@@ -154,6 +154,27 @@ createNewLineId(userId): string   // 24 hex（userId は未使用、cosense-cli 
 
 decoration ノードは bold/italic/strike/underline のうち該当するもの 1 つを優先順 bold > italic > strike > underline で出す。bold は sizeLevel で段階分け: `[*]`=bold、`[**]`=bold2、`[***]` 以上=bold3（ターミナルは太さ 1 段階しかないため色で強調を段階化する）。Neovim 側は `@lsp.type.<name>.cosense` に対して既定ハイライトを定義する。
 
+#### ユーザー定義のカスタム装飾記法（`notations`）
+
+`lua/chatora/config.lua` の `notations`（既定 `{}`）で `[<記号> 本文]` をユーザーが自分で定義できる。
+`{ ['|'] = { name = 'highlight', hl = {...} } }` の形。キーは `[` の直後 1 文字、`name` は
+`^[%w_]+$`、公式記法の記号（`* / - _ $ [ #`）とは衝突不可 — 違反はサーバーではなく
+`config.lua` の `setup()` が `vim.notify` で警告して黙って捨てる（プラグインは落とさない）。
+`init_options.notations`（`{ marker, name }[]`、marker 昇順）で LSP サーバーに渡す。`hl` は
+渡さない（描画は Neovim 側の関心事）。
+
+サーバー側（`packages/server/src/notations.ts`）は `@cosense-toolbox/parser` の
+`bracketRule` 拡張で実装: `inner` が `<marker>` + 空白 1 文字以上で始まれば `decoration` ノード
+（bold/italic/strike/underline 全部 false、sizeLevel 0、children は残りを `ctx.tokenize` で再帰
+解釈）を返す。`main.ts` の `onInitialize` が `initializationOptions.notations` を検証（信頼しない
+入力として、同じ規則で不正な要素を捨てる）して `setNotations()` に渡し、以後すべての
+`parse`/`parseLine` 呼び出しはこの拡張込みの `parseOptions()` を渡す（渡し漏れがあると機能ごとに
+装飾/リンクの解釈が食い違う）。legend は `[...TOKEN_TYPES, ...カスタム name（marker 昇順）]`。
+`computeTokens` は decoration ノードのフラグが全部 false のとき、ソース上 `position.start.column + 1`
+（`[` の次の文字）を見て設定済み marker と突き合わせ、対応する `name` を token 型として出す
+（`TOKEN_TYPES` 自体は固定のまま、末尾に動的追加）。conceal（`decorations.ts`）は decoration ノードの
+汎用処理に乗るので追加実装不要。
+
 ### カスタムリクエスト（`chatora/*`）
 
 すべて request（response あり）。エラーは LSP エラーではなく `{ ok: false, code, message }` を返す（Lua 側の分岐を単純にするため）。成功は `{ ok: true, ... }`。

@@ -34,6 +34,8 @@ local defaults = {
   tables = true,
   title_margin = 1,
   spacing = { line = 0, code = 0 },
+
+  notations = {},
 }
 
 M.options = vim.deepcopy(defaults)
@@ -43,6 +45,44 @@ local uv = vim.uv or vim.loop
 local function file_exists(path)
   local stat = uv.fs_stat(path)
   return stat ~= nil and stat.type == 'file'
+end
+
+-- Markers reserved by official notation ([* ], [/ ], [- ], [_ ], [$ ], [[ ]], [# ]).
+local RESERVED_MARKERS = {
+  ['*'] = true,
+  ['/'] = true,
+  ['-'] = true,
+  ['_'] = true,
+  ['$'] = true,
+  ['['] = true,
+  ['#'] = true,
+}
+
+-- Drops malformed entries (with a vim.notify warning) rather than erroring setup(): a typo in
+-- one notation shouldn't take the whole plugin down.
+local function validate_notations(notations)
+  local out = {}
+  for marker, spec in pairs(notations or {}) do
+    if type(marker) ~= 'string' or vim.fn.strchars(marker) ~= 1 then
+      vim.notify(
+        '[chatora] notations: marker must be exactly one character, ignoring ' .. vim.inspect(marker),
+        vim.log.levels.WARN
+      )
+    elseif RESERVED_MARKERS[marker] then
+      vim.notify(
+        '[chatora] notations: "' .. marker .. '" conflicts with an official notation, ignoring',
+        vim.log.levels.WARN
+      )
+    elseif type(spec) ~= 'table' or type(spec.name) ~= 'string' or not spec.name:match('^[%w_]+$') then
+      vim.notify(
+        '[chatora] notations: invalid name for marker "' .. marker .. '", ignoring',
+        vim.log.levels.WARN
+      )
+    else
+      out[marker] = spec
+    end
+  end
+  return out
 end
 
 -- Absolute path of the repo/plugin root, derived from this file's location:
@@ -55,11 +95,28 @@ end
 
 function M.setup(opts)
   M.options = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
+  M.options.notations = validate_notations(M.options.notations)
 end
 
 --- Repo root (= plugin root), used as LSP root_dir and for locating the server.
 function M.get_repo_root()
   return plugin_root()
+end
+
+--- options.notations as the { marker, name } list the LSP wire format expects,
+--- marker-ascending so the semantic token legend stays stable across restarts.
+function M.notation_list()
+  local markers = {}
+  for marker in pairs(M.options.notations) do
+    table.insert(markers, marker)
+  end
+  table.sort(markers)
+
+  local list = {}
+  for _, marker in ipairs(markers) do
+    table.insert(list, { marker = marker, name = M.options.notations[marker].name })
+  end
+  return list
 end
 
 --- Resolve the server command to launch.

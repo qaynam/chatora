@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { setNotations } from './notations'
 import { computeTokens, encodeTokens, type RawToken, TOKEN_TYPES } from './tokens'
 
 const findAll = (tokens: RawToken[], type: RawToken['type']) =>
@@ -168,6 +169,56 @@ describe('computeTokens', () => {
   test('every token has positive length', () => {
     const tokens = computeTokens(complexSource)
     expect(tokens.every((t) => t.length > 0)).toBe(true)
+  })
+})
+
+describe('computeTokens with custom notations', () => {
+  afterEach(() => setNotations([]))
+
+  test('a configured marker produces a token of its own name', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    const src = 'Title\n[| body text]'
+    const line = src.split('\n')[1] as string
+    const tokens = computeTokens(src)
+    expect(findAll(tokens, 'highlight')).toEqual([
+      { line: 1, char: 0, length: line.length, type: 'highlight' },
+    ])
+  })
+
+  test('an unconfigured marker stays a plain internalLink, not a custom token', () => {
+    setNotations([{ marker: '=', name: 'boxed' }])
+    const tokens = computeTokens('Title\n[| body text]')
+    expect(findAll(tokens, 'boxed')).toHaveLength(0)
+    expect(findAll(tokens, 'link')).toHaveLength(1)
+  })
+
+  test('legend-index round trip: encodeTokens indexes a custom type past TOKEN_TYPES, in marker order', () => {
+    setNotations([
+      { marker: '|', name: 'highlight' },
+      { marker: '=', name: 'boxed' },
+    ])
+    const legend = [...TOKEN_TYPES, 'boxed', 'highlight'] // marker-ascending: '=' < '|'
+    const tokens = computeTokens('Title\n[| a] [= b]')
+    const encoded = encodeTokens(tokens)
+
+    const byType = new Map(tokens.map((t) => [t.type, t]))
+    for (const [type, token] of byType) {
+      // Re-derive this token's absolute index the same way decode would.
+      let line = 0
+      let char = 0
+      let index = -1
+      for (let i = 0; i < encoded.length; i += 5) {
+        const deltaLine = encoded[i] as number
+        const deltaChar = encoded[i + 1] as number
+        line = deltaLine === 0 ? line : line + deltaLine
+        char = deltaLine === 0 ? char + deltaChar : deltaChar
+        if (line === token.line && char === token.char) {
+          index = encoded[i + 3] as number
+          break
+        }
+      }
+      expect(index).toBe(legend.indexOf(type))
+    }
   })
 })
 

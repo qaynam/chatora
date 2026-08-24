@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { computeConcealRanges } from './decorations'
+import { setNotations } from './notations'
 
 const rangesOnLine = (text: string, line: number) =>
   computeConcealRanges(text).filter((r) => r.line === line)
@@ -51,6 +52,19 @@ describe('computeConcealRanges', () => {
   test('hashtags stay visible', () => {
     const text = 'タイトル\n#tag のまま'
     expect(rangesOnLine(text, 1)).toEqual([])
+  })
+})
+
+describe('custom notations', () => {
+  afterEach(() => setNotations([]))
+
+  test('a configured marker hides `[| ` and `]` the same way as an official decoration', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    const text = 'タイトル\n[| 太字]'
+    expect(rangesOnLine(text, 1)).toEqual([
+      { line: 1, startChar: 0, endChar: 3 },
+      { line: 1, startChar: 5, endChar: 6 },
+    ])
   })
 })
 

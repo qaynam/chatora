@@ -1,6 +1,7 @@
 import type { AnyNode, AnyNodeType, Decoration, Position } from '@cosense-toolbox/parser'
 import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
+import { notationName, notationSpecs, parseOptions } from './notations'
 
 /**
  * Legend order is a contract with the Lua side (lua/chatora/highlight.lua defines
@@ -28,7 +29,9 @@ export const TOKEN_TYPES = [
   'bold3',
 ] as const
 
-export type TokenType = (typeof TOKEN_TYPES)[number]
+// `string & {}` (not plain `string`) keeps the TOKEN_TYPES literals as editor
+// autocomplete while still accepting a user-defined notation's `name`.
+export type TokenType = (typeof TOKEN_TYPES)[number] | (string & {})
 
 export interface RawToken {
   readonly line: number
@@ -40,6 +43,15 @@ export interface RawToken {
 const TOKEN_TYPE_INDEX: ReadonlyMap<TokenType, number> = new Map(
   TOKEN_TYPES.map((type, index) => [type, index]),
 )
+
+// Custom notation types live past the fixed TOKEN_TYPES, at the same
+// marker-ascending offsets main.ts appends to the legend it returns.
+const resolveTypeIndex = (type: TokenType): number => {
+  const core = TOKEN_TYPE_INDEX.get(type)
+  if (core !== undefined) return core
+  const custom = notationSpecs().findIndex((s) => s.name === type)
+  return custom === -1 ? 0 : TOKEN_TYPES.length + custom
+}
 
 // Leaf inline node types that map 1:1 to a token type. Their position is always a single
 // line (tokenize runs per physical line), so no per-line splitting is needed here.
@@ -85,11 +97,22 @@ const decorationTokenType = (node: Decoration): TokenType | null => {
   return null
 }
 
+// A custom-notation decoration has no flags set (see notations.ts's buildRule); which
+// notation it was is recovered from the source, not the AST: the marker sits right after
+// the node's opening `[`.
+const customDecorationTokenType = (
+  node: Decoration,
+  docLines: readonly string[],
+): TokenType | null => {
+  const marker = docLines[node.position.start.line]?.[node.position.start.column + 1]
+  return marker !== undefined ? (notationName(marker) ?? null) : null
+}
+
 /** Pure AST -> tokens. No LSP delta-encoding here (see encodeTokens) so this stays unit-testable. */
 export const computeTokens = (text: string): RawToken[] => {
   const normalized = normalizeLineEndings(text)
   const docLines = normalized.split('\n')
-  const page = parse(normalized)
+  const page = parse(normalized, parseOptions())
   const tokens: RawToken[] = []
 
   const pushLineSpan = (type: TokenType, startLine: number, endLine: number): void => {
@@ -118,7 +141,7 @@ export const computeTokens = (text: string): RawToken[] => {
         }
         return undefined
       case 'decoration': {
-        const type = decorationTokenType(node)
+        const type = decorationTokenType(node) ?? customDecorationTokenType(node, docLines)
         if (type) tokens.push(spanToken(type, node.position))
         return 'skip'
       }
@@ -140,10 +163,9 @@ export const encodeTokens = (tokens: readonly RawToken[]): number[] => {
   let prevLine = 0
   let prevChar = 0
   for (const token of sorted) {
-    const typeIndex = TOKEN_TYPE_INDEX.get(token.type) ?? 0
     const deltaLine = token.line - prevLine
     const deltaStartChar = deltaLine === 0 ? token.char - prevChar : token.char
-    data.push(deltaLine, deltaStartChar, token.length, typeIndex, 0)
+    data.push(deltaLine, deltaStartChar, token.length, resolveTypeIndex(token.type), 0)
     prevLine = token.line
     prevChar = token.char
   }

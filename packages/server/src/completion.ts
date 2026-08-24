@@ -10,6 +10,7 @@ import {
   type TextEdit,
 } from 'vscode-languageserver/node'
 import { Asearch } from './asearch'
+import { parseOptions } from './notations'
 import { SessionState } from './state'
 
 export interface CompletionDetection {
@@ -109,7 +110,7 @@ export const detectCompletionInDocument = (
   text: string,
   position: { line: number; character: number },
 ): CompletionDetection | null => {
-  const page = parse(text)
+  const page = parse(text, parseOptions())
   if (isSuppressed(page, position.line, position.character)) return null
   const lineText = normalizeLineEndings(text).split('\n')[position.line] ?? ''
   return detectCompletion(lineText, position.character)

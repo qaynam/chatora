@@ -64,6 +64,36 @@ local ok, err = pcall(function()
     assert(next(hl) ~= nil, 'expected highlight group to be defined: ' .. name)
   end
 
+  -- notations: a user-defined marker gets its own @lsp.type.<name>.cosense group,
+  -- an invalid entry (2-char marker) is dropped with a warning instead of erroring,
+  -- and lsp.lua's wire list is marker-ascending.
+  do
+    chatora.setup({
+      notations = {
+        ['|'] = { name = 'highlight', hl = { bg = '#3a3a00', bold = true } },
+        ['='] = { name = 'boxed', hl = { link = 'WarningMsg' } },
+        ['??'] = { name = 'bad', hl = {} },
+      },
+    })
+
+    assert(
+      require('chatora.config').options.notations['??'] == nil,
+      'expected the 2-char marker entry to be dropped'
+    )
+
+    local highlight_hl = vim.api.nvim_get_hl(0, { name = '@lsp.type.highlight.cosense' })
+    assert(next(highlight_hl) ~= nil, 'expected @lsp.type.highlight.cosense to be defined')
+    local boxed_hl = vim.api.nvim_get_hl(0, { name = '@lsp.type.boxed.cosense' })
+    assert(next(boxed_hl) ~= nil, 'expected @lsp.type.boxed.cosense to be defined')
+
+    local list = require('chatora.config').notation_list()
+    assert(#list == 2, 'expected 2 valid notations in the wire list, got ' .. #list)
+    assert(list[1].marker == '=' and list[1].name == 'boxed', 'expected marker-ascending order')
+    assert(list[2].marker == '|' and list[2].name == 'highlight', 'expected marker-ascending order')
+
+    chatora.setup({})
+  end
+
   -- codeblock.find_blocks: pure Cosense code-block detection.
   local codeblock = require('chatora.codeblock')
 
@@ -220,6 +250,21 @@ local ok, err = pcall(function()
     images.attach(buf, 'myproject')
     images.refresh(buf)
     vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
+  -- pads.extra_cells: the shift image placement applies to every column past a
+  -- line's indent. Placements are positioned in display cells, so getting this
+  -- wrong (or measuring the prefix in bytes) drags images off their notation.
+  do
+    local pads = require('chatora.pads')
+    local config = require('chatora.config')
+    assert(pads.extra_cells(0) == 0, 'an unindented line gains nothing')
+    -- Level 1 is bullet + gap; each further level adds guide + spacing.
+    assert(pads.extra_cells(1) == 1, 'indent 1: gap only, got ' .. pads.extra_cells(1))
+    assert(pads.extra_cells(2) == 2, 'indent 2: one guide spacing + gap, got ' .. pads.extra_cells(2))
+    config.options.pads = false
+    assert(pads.extra_cells(3) == 0, 'no shift when pads are disabled')
+    config.options.pads = true
   end
 
   -- table.find_blocks: pure Cosense table-block detection.

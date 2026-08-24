@@ -25,6 +25,7 @@ import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
 import { definitionLocation, findDefinitionTarget, findUrlTarget } from './definition'
 import { computeImageTargets } from './images'
+import { type NotationSpec, notationSpecs, setNotations } from './notations'
 import * as handlers from './pages'
 import { makeSessionStateLayer, type SessionState } from './state'
 import { computeTokens, encodeTokens, type RawToken, TOKEN_TYPES } from './tokens'
@@ -86,17 +87,46 @@ interface Position {
 
 const toSemanticTokens = (tokens: RawToken[]): SemanticTokens => ({ data: encodeTokens(tokens) })
 
+// Markers that would collide with an official notation ([* /-_$[#] as its own marker char).
+const RESERVED_MARKERS = new Set(['*', '/', '-', '_', '$', '[', '#'])
+const NOTATION_NAME_RE = /^[A-Za-z0-9_]+$/
+
+// initializationOptions come from the client, which is not trusted: drop anything malformed
+// instead of failing initialize.
+const validateNotations = (input: unknown): NotationSpec[] => {
+  if (!Array.isArray(input)) return []
+  const seen = new Set<string>()
+  const out: NotationSpec[] = []
+  for (const entry of input) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const { marker, name } = entry as { marker?: unknown; name?: unknown }
+    if (typeof marker !== 'string' || [...marker].length !== 1 || RESERVED_MARKERS.has(marker))
+      continue
+    if (typeof name !== 'string' || !NOTATION_NAME_RE.test(name)) continue
+    if (seen.has(marker)) continue
+    seen.add(marker)
+    out.push({ marker, name })
+  }
+  return out
+}
+
 connection.onInitialize((params: InitializeParams): InitializeResult => {
-  const options = params.initializationOptions as { origin?: unknown } | undefined
+  const options = params.initializationOptions as
+    | { origin?: unknown; notations?: unknown }
+    | undefined
   const origin =
     typeof options?.origin === 'string' && options.origin !== '' ? options.origin : DEFAULT_ORIGIN
   runtime = ManagedRuntime.make(buildAppLayer(origin))
+  setNotations(validateNotations(options?.notations))
 
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       semanticTokensProvider: {
-        legend: { tokenTypes: [...TOKEN_TYPES], tokenModifiers: [] },
+        legend: {
+          tokenTypes: [...TOKEN_TYPES, ...notationSpecs().map((s) => s.name)],
+          tokenModifiers: [],
+        },
         full: true,
         range: true,
       },
@@ -152,15 +182,13 @@ connection.onDefinition((params: DefinitionParams) => {
 })
 
 type UrlAtResult = { ok: true; url: string | null } | { ok: false; code: string; message: string }
-connection.onRequest(
-  'chatora/urlAt',
-  (params: { uri: string; line: number; character: number }): UrlAtResult => {
-    const doc = documents.get(params.uri)
-    if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
-    const lineText = normalizeCrLf(doc.getText()).split('\n')[params.line] ?? ''
-    return { ok: true, url: findUrlTarget(lineText, params.character) }
-  },
-)
+const urlAt = (params: { uri: string; line: number; character: number }): UrlAtResult => {
+  const doc = documents.get(params.uri)
+  if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
+  const lineText = normalizeCrLf(doc.getText()).split('\n')[params.line] ?? ''
+  return { ok: true, url: findUrlTarget(lineText, params.character) }
+}
+connection.onRequest('chatora/urlAt', urlAt)
 
 connection.onRequest('chatora/authStatus', () => runtime.runPromise(handlers.authStatus()))
 connection.onRequest('chatora/login', (params: { pat: string }) =>

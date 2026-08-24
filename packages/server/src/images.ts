@@ -1,6 +1,7 @@
 import type { AnyNode } from '@cosense-toolbox/parser'
 import { asImageSrc, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
+import { parseOptions } from './notations'
 
 /**
  * A drawable target found in a page's notation: an image link or an icon.
@@ -32,7 +33,7 @@ const isStandalone = (ancestors: readonly AnyNode[]): boolean => {
 }
 
 export const computeImageTargets = (text: string): ImageTarget[] => {
-  const page = parse(text)
+  const page = parse(text, parseOptions())
   const out: ImageTarget[] = []
 
   visit(page, ['image', 'icon'], (node, ancestors) => {

@@ -1,5 +1,6 @@
 import { parseLine } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
+import { parseOptions } from './notations'
 import { formatUri } from './uriScheme'
 
 /**
@@ -8,7 +9,7 @@ import { formatUri } from './uriScheme'
  * `findDefinitionTarget`) or to nothing at all.
  */
 export const findUrlTarget = (lineText: string, character: number): string | null => {
-  const line = parseLine(lineText)
+  const line = parseLine(lineText, parseOptions())
   let url: string | null = null
 
   visit(line, (node) => {
@@ -34,7 +35,7 @@ export const findDefinitionTarget = (
   character: number,
   currentProject: string,
 ): { project: string; title: string } | null => {
-  const line = parseLine(lineText)
+  const line = parseLine(lineText, parseOptions())
   let target: { project: string; title: string } | null = null
 
   visit(line, (node) => {
