@@ -58,11 +58,25 @@ describe('computeConcealRanges', () => {
 describe('custom notations', () => {
   afterEach(() => setNotations([]))
 
-  test('a configured marker hides `[| ` and `]` the same way as an official decoration', () => {
+  test('a configured marker hides `[| ` and `]`, tagging only the opening range with its notation name', () => {
     setNotations([{ marker: '|', name: 'highlight' }])
     const text = 'タイトル\n[| 太字]'
     expect(rangesOnLine(text, 1)).toEqual([
-      { line: 1, startChar: 0, endChar: 3 },
+      { line: 1, startChar: 0, endChar: 3, notation: 'highlight' },
+      { line: 1, startChar: 5, endChar: 6 },
+    ])
+  })
+
+  test('an official decoration is never tagged with a notation name', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    const text = 'タイトル\n[* 太字]'
+    for (const r of rangesOnLine(text, 1)) expect(r.notation).toBeUndefined()
+  })
+
+  test('an unconfigured marker falls back to internalLink and gets no notation tag', () => {
+    const text = 'タイトル\n[| 太字]'
+    expect(rangesOnLine(text, 1)).toEqual([
+      { line: 1, startChar: 0, endChar: 1 },
       { line: 1, startChar: 5, endChar: 6 },
     ])
   })

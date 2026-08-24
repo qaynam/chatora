@@ -1,6 +1,12 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { parse, parseLine } from '@cosense-toolbox/parser'
-import { notationName, notationSpecs, parseOptions, setNotations } from './notations'
+import {
+  notationName,
+  notationNameForDecoration,
+  notationSpecs,
+  parseOptions,
+  setNotations,
+} from './notations'
 
 describe('setNotations / parseOptions', () => {
   test('empty spec set produces no options — official parsing is unaffected', () => {
@@ -86,5 +92,25 @@ describe('setNotations / parseOptions', () => {
     ])
     expect(notationSpecs().map((s) => s.marker)).toEqual(['!', '~'])
     setNotations([])
+  })
+})
+
+describe('notationNameForDecoration', () => {
+  afterEach(() => setNotations([]))
+
+  const decorationNodeOf = (src: string) => {
+    const node = parseLine(src, parseOptions()).children[0]
+    if (node?.type !== 'decoration') throw new Error('expected a decoration node')
+    return node
+  }
+
+  test('resolves the marker at the node position back to its configured name', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    expect(notationNameForDecoration(decorationNodeOf('[| hi]'), ['[| hi]'])).toBe('highlight')
+  })
+
+  test('an official decoration marker never resolves to a name', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    expect(notationNameForDecoration(decorationNodeOf('[* hi]'), ['[* hi]'])).toBeUndefined()
   })
 })

@@ -1,10 +1,7 @@
 -- Cosense's own insert-mode editing shortcuts, reproduced in page buffers:
--- timestamp insertion, self-icon insertion, and bracket auto-pairing.
---
--- <C-i> and <Tab> are the same byte in a terminal; Neovim can only tell them
--- apart when the terminal speaks the kitty keyboard protocol (kitty, Ghostty,
--- WezTerm). Elsewhere this mapping also fires on <Tab>, so it is opt-out via
--- `keymaps = { insert_icon = false }`.
+-- timestamp insertion, self-icon insertion, tab-separated table cells, and
+-- bracket auto-pairing. Plus the one global mapping chatora installs, for
+-- toggling the sidebar.
 local M = {}
 
 local config = require('chatora.config')
@@ -16,6 +13,7 @@ local DEFAULTS = {
   date_format = '%Y-%m-%d %H:%M:%S',
   autopair = true,
   table_tab = true,
+  toggle_sidebar = '<leader>ct',
 }
 
 local function settings()
@@ -89,24 +87,41 @@ local function in_table_row(bufnr, row)
   return false
 end
 
---- Cosense table cells are tab-separated, but page buffers use expandtab
---- (softtabstop=1) for indent — a plain Tab press would type a space and the
---- row would parse as a single cell. Inside a table row, past the leading
---- indent, Tab types a literal tab instead ('<C-v><Tab>' bypasses expandtab).
-local function table_tab_map(bufnr)
+--- Neovim receives <C-i> and <Tab> as the same byte unless the terminal speaks
+--- the kitty keyboard protocol, so one handler has to serve both. Which of the
+--- three things this key can mean is decided by where the cursor is:
+---   * inside a table row, past the indent -> a real tab (the cell separator;
+---     page buffers use expandtab, so a plain Tab would type a space and the
+---     row would parse as one cell)
+---   * still in the leading whitespace -> ordinary Tab, i.e. indent the line
+---   * anywhere else -> insert the icon, matching Cosense
+--- On a terminal that does distinguish them, the separate <C-i> map below wins
+--- and Tab keeps its ordinary meaning throughout.
+local function tab_map(bufnr, opts)
   vim.keymap.set('i', '<Tab>', function()
     local row, col = unpack(vim.api.nvim_win_get_cursor(0))
     local line = vim.api.nvim_get_current_line()
     local indent = #(line:match('^%s*'))
-    if col > indent and in_table_row(bufnr, row - 1) then
+    if col <= indent then
+      return '<Tab>'
+    end
+    if opts.table_tab and in_table_row(bufnr, row - 1) then
       return '<C-v><Tab>'
+    end
+    if opts.insert_icon then
+      vim.schedule(function()
+        with_own_name(function(name)
+          insert_at_cursor(bufnr, '[' .. name .. '.icon]')
+        end)
+      end)
+      return ''
     end
     return '<Tab>'
   end, {
     buffer = bufnr,
     expr = true,
     silent = true,
-    desc = 'chatora: テーブル内はタブ区切り、それ以外はインデント',
+    desc = 'chatora: テーブル内はタブ / 行頭はインデント / それ以外はアイコン',
   })
 end
 
@@ -163,13 +178,24 @@ function M.attach(bufnr)
     end, { buffer = bufnr, silent = true, desc = 'chatora: 自分のアイコンを挿入' })
   end
 
+  -- Registered last so it wins the shared byte on terminals that don't
+  -- distinguish <C-i> from <Tab>; it falls back to the icon itself.
+  tab_map(bufnr, opts)
+
   if opts.autopair then
     autopair_maps(bufnr)
   end
+end
 
-  if opts.table_tab then
-    table_tab_map(bufnr)
+--- The one mapping chatora sets outside a page buffer. Called from setup().
+function M.setup_global()
+  local opts = settings()
+  if not (opts and opts.toggle_sidebar) then
+    return
   end
+  vim.keymap.set('n', opts.toggle_sidebar, function()
+    require('chatora').toggle()
+  end, { silent = true, desc = 'chatora: サイドバーを開閉' })
 end
 
 return M

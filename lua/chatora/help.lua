@@ -12,7 +12,7 @@ local SECTIONS = {
     title = 'コマンド',
     rows = {
       { ':Chatora [open]', 'サイドバーを開く（初回は PAT 認証 → プロジェクト選択）' },
-      { ':Chatora toggle', 'サイドバーを開閉' },
+      { ':Chatora toggle', 'サイドバーを開閉（既定 <leader>ct）' },
       { ':Chatora new [title]', '新規ページを作成（title 省略時は入力プロンプト）' },
       { ':Chatora search [q]', 'ページを検索（q 省略時は入力プロンプト）' },
       { ':Chatora related', '関連ページパネル（1-hop / 2-hop）をトグル' },
@@ -48,7 +48,7 @@ local SECTIONS = {
       { '[ / #', 'リンク・ハッシュタグを補完（[ は ] を自動で補う）' },
       { '<C-t>', '日時を挿入（insert モード）' },
       { '<C-i>', '自分のアイコンを挿入（insert モード）' },
-      { '<Tab>', 'テーブル行ではセル区切りのタブを入力（insert モード）' },
+      { '<Tab>', '行頭ならインデント / テーブル行ならセル区切り / それ以外はアイコン' },
     },
   },
   {

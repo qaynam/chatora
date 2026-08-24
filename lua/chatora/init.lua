@@ -17,6 +17,7 @@ M.session = { project = nil }
 function M.setup(opts)
   config.setup(opts)
   highlight.setup()
+  require('chatora.keymaps').setup_global()
 end
 
 --- Resolve the active project: config.project if set, else the session's

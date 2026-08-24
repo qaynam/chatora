@@ -46,7 +46,7 @@ lazy.nvim（GitHub から直接）:
 | `autosave` | `false` | 編集停止から n 秒後に自動保存 |
 | `completion` | `'auto'` | `'auto'` は blink.cmp が無い/無効なときだけ Neovim 内蔵補完を有効化。`'native'` は常に有効、`false` は外部エンジンに任せる |
 | `external_link` | `'confirm'` | 外部 URL 上の `gd`。`'open'` は確認なし、`'ignore'` は何もしない |
-| `keymaps` | `true` | insert モードの Cosense ショートカット。`{ insert_date = '<C-t>', insert_icon = '<C-i>', date_format = '%Y-%m-%d %H:%M:%S', autopair = true, table_tab = true }`。**`<C-i>` は kitty keyboard protocol 対応端末（kitty / Ghostty / WezTerm）以外では `<Tab>` と同一** |
+| `keymaps` | `true` | insert モードの Cosense ショートカット。`{ insert_date = '<C-t>', insert_icon = '<C-i>', date_format = '%Y-%m-%d %H:%M:%S', autopair = true, table_tab = true, toggle_sidebar = '<leader>ct' }`。**`<C-i>` は kitty keyboard protocol 対応端末（kitty / Ghostty / WezTerm）以外では `<Tab>` と同一**。そのため `<Tab>` は文脈で分岐する: 行頭の空白内ならインデント、テーブル行ならセル区切りのタブ、それ以外はアイコン挿入。`toggle_sidebar` は chatora が唯一設定するグローバルキーマップ |
 | `images` | `'auto'` | 描画バックエンドが使えるときだけ画像を描く。`false` で無効 |
 | `image_backend` | `'auto'` | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック。`'image_nvim'` / `'snacks'` で固定 |
 | `image_height` | `20` | 単独行の画像の高さ（行数）。文中のインライン画像は常に 1 行 |
@@ -66,14 +66,19 @@ lazy.nvim（GitHub から直接）:
 notations = {
   ['|'] = { name = 'highlight', hl = { bg = '#3a3a00', bold = true } },
   ['='] = { name = 'boxed',     hl = { link = 'WarningMsg' } },
+  ['@'] = { name = 'heading', icon = '📌', hl = { bold = true, underline = true } },
 }
 ```
 
 - キー = `[` の直後に来る 1 文字の記号。公式記法の記号（`* / - _ $ [ #`）とは衝突不可
 - `name` = 英数字と `_` のみ（semantic token 型名になる）
 - `hl` = `nvim_set_hl` にそのまま渡る（`:colorscheme` 変更後も再適用される）
+- `icon`（任意）= 開きマーカー（`[<記号> ` の部分）をこの 1 文字に置き換えて表示する。カーソル行では
+  `concealcursor` により自動的に元の記号が見える。Neovim の conceal 置換は 1 文字までしか使えないため、
+  複数文字を指定した場合は警告して無視される（`name`/`hl` は活きたまま）
 
-不正な設定（記号が1文字でない・`name` が不正・公式記法と衝突）は `vim.notify` で警告して無視される。
+不正な設定（記号が1文字でない・`name` が不正・公式記法と衝突）はエントリごと `vim.notify` で警告して無視される。
+`icon` だけが1文字でない場合はエントリは活かしたまま `icon` だけを警告して無視する。
 
 `gap = 0` にすると中点が本文に密着するが、中点は overlay で描くため、端末が
 East Asian Ambiguous 幅の文字を 2 セルで描く設定だと次の 1 文字を潰す。

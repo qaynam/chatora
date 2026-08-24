@@ -1,4 +1,4 @@
-import type { Extension, ParseOptions } from '@cosense-toolbox/parser'
+import type { Decoration, Extension, ParseOptions } from '@cosense-toolbox/parser'
 import { Option } from 'effect'
 
 /** One user-defined `[<marker> body]` notation, wired to a semantic token type named `name`. */
@@ -59,3 +59,18 @@ export const parseOptions = (): ParseOptions | undefined => currentOptions
 export const notationSpecs = (): readonly NotationSpec[] => currentSpecs
 
 export const notationName = (marker: string): string | undefined => markerToName.get(marker)
+
+/**
+ * Which notation (if any) produced a given decoration node. The AST doesn't
+ * retain the matched marker, only that all four style flags are false for a
+ * custom notation (see buildRule) — official markers (`* / - _`) never
+ * resolve here since RESERVED_MARKERS keeps them out of markerToName.
+ * Shared by tokens.ts (token type) and decorations.ts (conceal tagging).
+ */
+export const notationNameForDecoration = (
+  node: Decoration,
+  docLines: readonly string[],
+): string | undefined => {
+  const marker = docLines[node.position.start.line]?.[node.position.start.column + 1]
+  return marker !== undefined ? notationName(marker) : undefined
+}

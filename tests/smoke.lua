@@ -66,30 +66,44 @@ local ok, err = pcall(function()
 
   -- notations: a user-defined marker gets its own @lsp.type.<name>.cosense group,
   -- an invalid entry (2-char marker) is dropped with a warning instead of erroring,
-  -- and lsp.lua's wire list is marker-ascending.
+  -- a valid single-character icon is kept, a multi-character icon is dropped while
+  -- its name/hl survive, and lsp.lua's wire list is marker-ascending.
   do
     chatora.setup({
       notations = {
-        ['|'] = { name = 'highlight', hl = { bg = '#3a3a00', bold = true } },
+        ['|'] = { name = 'highlight', icon = '📌', hl = { bg = '#3a3a00', bold = true } },
         ['='] = { name = 'boxed', hl = { link = 'WarningMsg' } },
+        ['@'] = { name = 'bad_icon', icon = 'ab', hl = {} },
         ['??'] = { name = 'bad', hl = {} },
       },
     })
 
-    assert(
-      require('chatora.config').options.notations['??'] == nil,
-      'expected the 2-char marker entry to be dropped'
-    )
+    local notations = require('chatora.config').options.notations
+    assert(notations['??'] == nil, 'expected the 2-char marker entry to be dropped')
+    assert(notations['|'].icon == '📌', 'expected the 1-char icon to be kept')
+    assert(notations['@'] ~= nil, 'expected the bad-icon entry to survive')
+    assert(notations['@'].icon == nil, 'expected the multi-char icon to be dropped')
+    assert(notations['@'].name == 'bad_icon', 'expected name to survive a dropped icon')
 
     local highlight_hl = vim.api.nvim_get_hl(0, { name = '@lsp.type.highlight.cosense' })
     assert(next(highlight_hl) ~= nil, 'expected @lsp.type.highlight.cosense to be defined')
     local boxed_hl = vim.api.nvim_get_hl(0, { name = '@lsp.type.boxed.cosense' })
     assert(next(boxed_hl) ~= nil, 'expected @lsp.type.boxed.cosense to be defined')
 
+    assert(
+      require('chatora.config').notation_icon('highlight') == '📌',
+      'expected notation_icon to resolve name -> icon'
+    )
+    assert(
+      require('chatora.config').notation_icon('boxed') == nil,
+      'expected notation_icon to return nil when no icon is configured'
+    )
+
     local list = require('chatora.config').notation_list()
-    assert(#list == 2, 'expected 2 valid notations in the wire list, got ' .. #list)
+    assert(#list == 3, 'expected 3 valid notations in the wire list, got ' .. #list)
     assert(list[1].marker == '=' and list[1].name == 'boxed', 'expected marker-ascending order')
-    assert(list[2].marker == '|' and list[2].name == 'highlight', 'expected marker-ascending order')
+    assert(list[2].marker == '@' and list[2].name == 'bad_icon', 'expected marker-ascending order')
+    assert(list[3].marker == '|' and list[3].name == 'highlight', 'expected marker-ascending order')
 
     chatora.setup({})
   end
@@ -501,17 +515,24 @@ local ok, err = pcall(function()
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_current_buf(buf)
     require('chatora.keymaps').attach(buf)
-    local found_date, found_bracket = false, false
+    local lhs = {}
     for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, 'i')) do
-      if map.lhs == '<C-T>' then
-        found_date = true
-      end
-      if map.lhs == '[' then
-        found_bracket = true
+      lhs[map.lhs] = true
+    end
+    assert(lhs['<C-T>'], 'expected <C-t> insert-mode map')
+    assert(lhs['['], 'expected [ autopair map')
+    -- <C-i> and <Tab> are the same byte on most terminals, so both have to be
+    -- registered: whichever one nvim resolves must still do something useful.
+    assert(lhs['<C-I>'], 'expected <C-i> icon map')
+    assert(lhs['<Tab>'], 'expected the shared <Tab> handler')
+
+    local global = {}
+    for _, map in ipairs(vim.api.nvim_get_keymap('n')) do
+      if map.desc and map.desc:find('chatora') then
+        global[map.lhs] = true
       end
     end
-    assert(found_date, 'expected <C-t> insert-mode map')
-    assert(found_bracket, 'expected [ autopair map')
+    assert(global['\\ct'], 'expected the sidebar toggle to be mapped globally')
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 

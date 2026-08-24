@@ -1,7 +1,7 @@
 import type { AnyNode, AnyNodeType, Decoration, Position } from '@cosense-toolbox/parser'
 import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
-import { notationName, notationSpecs, parseOptions } from './notations'
+import { notationNameForDecoration, notationSpecs, parseOptions } from './notations'
 
 /**
  * Legend order is a contract with the Lua side (lua/chatora/highlight.lua defines
@@ -97,17 +97,6 @@ const decorationTokenType = (node: Decoration): TokenType | null => {
   return null
 }
 
-// A custom-notation decoration has no flags set (see notations.ts's buildRule); which
-// notation it was is recovered from the source, not the AST: the marker sits right after
-// the node's opening `[`.
-const customDecorationTokenType = (
-  node: Decoration,
-  docLines: readonly string[],
-): TokenType | null => {
-  const marker = docLines[node.position.start.line]?.[node.position.start.column + 1]
-  return marker !== undefined ? (notationName(marker) ?? null) : null
-}
-
 /** Pure AST -> tokens. No LSP delta-encoding here (see encodeTokens) so this stays unit-testable. */
 export const computeTokens = (text: string): RawToken[] => {
   const normalized = normalizeLineEndings(text)
@@ -141,7 +130,7 @@ export const computeTokens = (text: string): RawToken[] => {
         }
         return undefined
       case 'decoration': {
-        const type = decorationTokenType(node) ?? customDecorationTokenType(node, docLines)
+        const type = decorationTokenType(node) ?? notationNameForDecoration(node, docLines) ?? null
         if (type) tokens.push(spanToken(type, node.position))
         return 'skip'
       }

@@ -32,9 +32,10 @@ local function apply(bufnr, ranges)
       local ok1, sb = pcall(vim.str_byteindex, ltext, 'utf-16', r.startChar, false)
       local ok2, eb = pcall(vim.str_byteindex, ltext, 'utf-16', r.endChar, false)
       if ok1 and ok2 and eb > sb then
+        local icon = r.notation and config.notation_icon(r.notation)
         pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, r.line, sb, {
           end_col = eb,
-          conceal = '',
+          conceal = icon or '',
         })
       end
     end

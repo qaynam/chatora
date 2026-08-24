@@ -80,6 +80,15 @@ local function validate_notations(notations)
         vim.log.levels.WARN
       )
     else
+      -- Neovim's extmark `conceal` only ever shows one character, so a
+      -- multi-character icon is dropped rather than silently truncated.
+      if spec.icon ~= nil and (type(spec.icon) ~= 'string' or vim.fn.strchars(spec.icon) ~= 1) then
+        vim.notify(
+          '[chatora] notations: icon for marker "' .. marker .. '" must be exactly one character, ignoring',
+          vim.log.levels.WARN
+        )
+        spec.icon = nil
+      end
       out[marker] = spec
     end
   end
@@ -118,6 +127,16 @@ function M.notation_list()
     table.insert(list, { marker = marker, name = M.options.notations[marker].name })
   end
   return list
+end
+
+--- Icon configured for a notation `name`, or nil if it has none.
+function M.notation_icon(name)
+  for _, spec in pairs(M.options.notations) do
+    if spec.name == name then
+      return spec.icon
+    end
+  end
+  return nil
 end
 
 --- Resolve the server command to launch.

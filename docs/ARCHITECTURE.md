@@ -157,11 +157,13 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 #### ユーザー定義のカスタム装飾記法（`notations`）
 
 `lua/chatora/config.lua` の `notations`（既定 `{}`）で `[<記号> 本文]` をユーザーが自分で定義できる。
-`{ ['|'] = { name = 'highlight', hl = {...} } }` の形。キーは `[` の直後 1 文字、`name` は
+`{ ['|'] = { name = 'highlight', icon = '📌', hl = {...} } }` の形。キーは `[` の直後 1 文字、`name` は
 `^[%w_]+$`、公式記法の記号（`* / - _ $ [ #`）とは衝突不可 — 違反はサーバーではなく
-`config.lua` の `setup()` が `vim.notify` で警告して黙って捨てる（プラグインは落とさない）。
-`init_options.notations`（`{ marker, name }[]`、marker 昇順）で LSP サーバーに渡す。`hl` は
-渡さない（描画は Neovim 側の関心事）。
+`config.lua` の `setup()` が `vim.notify` で警告して黙って捨てる（プラグインは落とさない）。`icon`
+（任意）は 1 文字（`vim.fn.strchars`）でなければ警告してその項目だけ捨てる（`name`/`hl` は活かす）—
+Neovim の extmark `conceal` が 1 文字しか置換に使えないため。`init_options.notations`
+（`{ marker, name }[]`、marker 昇順）で LSP サーバーに渡す。`hl`/`icon` は渡さない（描画は Neovim
+側の関心事）。
 
 サーバー側（`packages/server/src/notations.ts`）は `@cosense-toolbox/parser` の
 `bracketRule` 拡張で実装: `inner` が `<marker>` + 空白 1 文字以上で始まれば `decoration` ノード
@@ -170,10 +172,12 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 入力として、同じ規則で不正な要素を捨てる）して `setNotations()` に渡し、以後すべての
 `parse`/`parseLine` 呼び出しはこの拡張込みの `parseOptions()` を渡す（渡し漏れがあると機能ごとに
 装飾/リンクの解釈が食い違う）。legend は `[...TOKEN_TYPES, ...カスタム name（marker 昇順）]`。
-`computeTokens` は decoration ノードのフラグが全部 false のとき、ソース上 `position.start.column + 1`
-（`[` の次の文字）を見て設定済み marker と突き合わせ、対応する `name` を token 型として出す
-（`TOKEN_TYPES` 自体は固定のまま、末尾に動的追加）。conceal（`decorations.ts`）は decoration ノードの
-汎用処理に乗るので追加実装不要。
+decoration ノードのフラグが全部 false のとき、ソース上 `position.start.column + 1`（`[` の次の文字）
+を設定済み marker と突き合わせて `name` を解決するロジックは `notations.ts` の
+`notationNameForDecoration()` に集約し、`computeTokens`（token 型として出力。`TOKEN_TYPES` 自体は
+固定のまま末尾に動的追加）と `computeConcealRanges`（下記 `ConcealRange.notation`）の双方から使う。
+公式記法の記号（`* / - _`）は `markerToName` に存在しないため常に `undefined` を返す
+（`RESERVED_MARKERS` がユーザー定義との衝突を防いでいる）。
 
 ### カスタムリクエスト（`chatora/*`）
 
@@ -215,11 +219,14 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
    // カーソル位置がブラウザで開くべき URL の上にあるか。`[<画像url> <リンクurl>]` は
    // リンク側を返す（画像はレンダリング対象でしかない）。ページに解決するもの（内部リンク・
    // ハッシュタグ）と何でもない位置は null で、Lua 側は通常の定義ジャンプに落とす。
-'chatora/decorations' { uri }                     → { ok, conceal: { line, startChar, endChar }[] }
+'chatora/decorations' { uri }                     → { ok, conceal: { line, startChar, endChar, notation? }[] }
    // 記法マークアップの conceal 範囲（UTF-16 列）。カーソル行の解除は Neovim の
    // conceallevel/concealcursor に任せる。外部リンクは `[label url]` / `[url label]` の
    // URL 部分と区切りの空白も隠し、本家 Cosense と同じく label だけを表示する
    // （`[url]` 単体はクリック対象が消えるので隠さない）。
+   // `notation` はカスタム記法の開きマーカー側の range にだけ設定済み name が乗る（閉じ `]` 側・
+   // 公式記法には乗らない）。Lua 側（render.lua）はこの range の conceal 置換文字として、
+   // その name に icon が設定されていればそれを、なければ従来どおり空文字（完全に隠す）を使う。
 'chatora/images'      { uri }                     → { ok, images: ImageTarget[] }
    // ImageTarget = { line, startChar, src, kind: 'image'|'icon', iconUser?, standalone }
    // （line/startChar は UTF-16 列、chatora/decorations と同じ単位）。パーサーの image/icon

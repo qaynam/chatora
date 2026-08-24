@@ -1,6 +1,6 @@
 import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
-import { parseOptions } from './notations'
+import { notationNameForDecoration, parseOptions } from './notations'
 
 /**
  * Ranges of notation markup to conceal in the editor (render-markdown.nvim
@@ -13,6 +13,8 @@ export interface ConcealRange {
   line: number
   startChar: number
   endChar: number
+  /** Set on the opening marker of a user-defined notation; the client replaces the range with that notation's icon. */
+  notation?: string
 }
 
 export const computeConcealRanges = (text: string): ConcealRange[] => {
@@ -21,8 +23,9 @@ export const computeConcealRanges = (text: string): ConcealRange[] => {
   // these lines can be sliced with the parser's own column numbers.
   const docLines = normalizeLineEndings(text).split('\n')
   const out: ConcealRange[] = []
-  const push = (line: number, startChar: number, endChar: number): void => {
-    if (endChar > startChar) out.push({ line, startChar, endChar })
+  const push = (line: number, startChar: number, endChar: number, notation?: string): void => {
+    if (endChar > startChar)
+      out.push(notation ? { line, startChar, endChar, notation } : { line, startChar, endChar })
   }
 
   visit(page, (node) => {
@@ -36,7 +39,14 @@ export const computeConcealRanges = (text: string): ConcealRange[] => {
         const first = node.children[0]
         const last = node.children[node.children.length - 1]
         if (first && last) {
-          push(start.line, start.column, first.position.start.column)
+          // Only the opening marker carries `notation`; an official decoration's
+          // marker (*, /, -, _) never resolves to one (see notationNameForDecoration).
+          push(
+            start.line,
+            start.column,
+            first.position.start.column,
+            notationNameForDecoration(node, docLines),
+          )
           push(end.line, last.position.end.column, end.column)
         }
         return 'skip'
