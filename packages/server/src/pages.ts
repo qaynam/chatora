@@ -5,6 +5,7 @@ import type {
   HttpClient,
   KeychainError,
   Me,
+  PageFilter,
   PageSummary,
   ProjectSummary,
   RelatedPage,
@@ -65,10 +66,22 @@ export interface AuthStatusResult {
   readonly authenticated: boolean
   readonly origin: string
   readonly source?: Credential['source']
-  readonly user?: { readonly id: string; readonly name: string; readonly displayName: string }
+  readonly user?: {
+    readonly id: string
+    readonly name: string
+    readonly displayName: string
+    readonly pageFilters: readonly PageFilter[]
+  }
 }
 
-const toUserRef = (user: Me) => ({ id: user.id, name: user.name, displayName: user.displayName })
+// pageFilters travels with the user so the sidebar can build a tab per saved
+// Cosense filter without a second round-trip.
+const toUserRef = (user: Me) => ({
+  id: user.id,
+  name: user.name,
+  displayName: user.displayName,
+  pageFilters: user.pageFilters,
+})
 
 // Account.id doubles as the multi-account Keychain lookup key (docs/ARCHITECTURE.md), so
 // login and addAccount — which both turn a freshly-verified PAT into a stored account —
@@ -285,8 +298,18 @@ export const listPages = (params: {
   readonly project: string
   readonly skip?: number
   readonly limit?: number
+  readonly filterType?: string
+  readonly filterValue?: string
+  readonly unreadOnly?: boolean
 }): Effect.Effect<
-  | { readonly ok: true; readonly count: number; readonly pages: readonly ListedPage[] }
+  | {
+      readonly ok: true
+      /** Total pages the *unfiltered* query would return, straight from Cosense. */
+      readonly count: number
+      readonly pages: readonly ListedPage[]
+      /** Pages in this batch before `unreadOnly` dropped any — how far `skip` really advanced. */
+      readonly scanned: number
+    }
   | ErrEnvelope,
   never,
   SessionState | HttpClient
@@ -296,11 +319,24 @@ export const listPages = (params: {
       const session = yield* SessionState
       const apiOpt = yield* session.getApi()
       if (Option.isNone(apiOpt)) return noCredential()
-      const opts: { skip?: number; limit?: number; sort: string } = { sort: 'updated' }
+      const opts: {
+        skip?: number
+        limit?: number
+        sort: string
+        filterType?: string
+        filterValue?: string
+      } = { sort: 'updated' }
       if (params.skip !== undefined) opts.skip = params.skip
       if (params.limit !== undefined) opts.limit = params.limit
+      if (params.filterType !== undefined) opts.filterType = params.filterType
+      if (params.filterValue !== undefined) opts.filterValue = params.filterValue
+
       const result = yield* apiOpt.value.listPages(params.project, opts)
-      return { ok: true as const, count: result.count, pages: result.pages.map(withUnread) }
+      const listed = result.pages.map(withUnread)
+      // Unread has no server-side filter, so it thins a batch client-side and
+      // the caller pages on `scanned` rather than on how many pages it got.
+      const pages = params.unreadOnly ? listed.filter((p) => p.unread) : listed
+      return { ok: true as const, count: result.count, pages, scanned: listed.length }
     }),
   )
 

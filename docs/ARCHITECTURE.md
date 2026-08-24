@@ -159,7 +159,9 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 すべて request（response あり）。エラーは LSP エラーではなく `{ ok: false, code, message }` を返す（Lua 側の分岐を単純にするため）。成功は `{ ok: true, ... }`。
 
 ```ts
-'chatora/authStatus'  {}                          → { ok, authenticated, origin, source?, user?: Me }
+'chatora/authStatus'  {}                          → { ok, authenticated, origin, source?, user?: { id, name, displayName, pageFilters } }
+   // pageFilters = /api/users/me の保存フィルタ（[{type:'icon', value:'name'}]）。サイドバーの
+   // タブが「自分のフィルタ」を解決するのに使う。
 'chatora/login'       { pat }                     → 検証(/api/users/me) → AccountStore.add（アカウント追加 + active 化) → authStatus と同形
 'chatora/logout'      {}                          → active アカウントを削除（+ レガシー Keychain エントリも従来通り試行）
 'chatora/accounts'      {}      → { ok:true, active: string|null, accounts: Account[] }
@@ -170,9 +172,13 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
                                    未知 id: { ok:false, code:'error', message:'unknown account' }
 'chatora/removeAccount' { id }  → AccountStore.remove → セッションキャッシュ invalidate → { ok:true, accounts, active }
 'chatora/projects'    {}                          → { ok, projects: ProjectSummary[] }
-'chatora/listPages'   { project, skip?, limit? }  → { ok, count, pages: (PageSummary & { unread })[] }
+'chatora/listPages'   { project, skip?, limit?, filterType?, filterValue?, unreadOnly? }
+                      → { ok, count, scanned, pages: (PageSummary & { unread })[] }
    // unread = updated > accessed（Cosense 本家のグリッドが青ボーダーを出す条件と同じ。サーバーは
    // 未読フラグを返さないのでクライアント側で計算する。accessed 欠落 = 未訪問 = 未読）。
+   // filterType/filterValue は Cosense の保存フィルタ（例 'icon' / ユーザー名）をそのまま透過する。
+   // unreadOnly はサーバー側フィルタが存在しないのでバッチを間引く。間引く前の件数が scanned で、
+   // 呼び出し側は取得件数ではなく scanned で skip を進める（さもないと落とした分を再取得する）。
    // 既読化は openPage が `POST /api/pages/:project/:pageId/accessed`（405 等なら GET に
    // フォールバック）を投げっぱなしで行う。このエンドポイントは非公式で失敗しても無視する。
 'chatora/openPage'    { project, title }          → { ok, uri, text, exists, pageId?, commitId? }
@@ -184,6 +190,11 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
 'chatora/relatedPages' { project, title }         → { ok, links1hop: RelatedPage[], links2hop: RelatedPage[] }
 'chatora/search'      { project, query, mode? }   → { ok, pages: { title, lines?: string[] }[] }  // mode: 'fulltext'(既定)|'vector'
 'chatora/newPage'     { project, title }          → { ok, uri, text }  // 空ページとして open（保存時に新規 preview/submit）
+'chatora/decorations' { uri }                     → { ok, conceal: { line, startChar, endChar }[] }
+   // 記法マークアップの conceal 範囲（UTF-16 列）。カーソル行の解除は Neovim の
+   // conceallevel/concealcursor に任せる。外部リンクは `[label url]` / `[url label]` の
+   // URL 部分と区切りの空白も隠し、本家 Cosense と同じく label だけを表示する
+   // （`[url]` 単体はクリック対象が消えるので隠さない）。
 'chatora/fetchAsset'  { project, url, border? }   → { ok, path }  // url を取得しローカルキャッシュ（$XDG_CACHE_HOME/chatora/assets）のファイルパスを返す。資格情報ヘッダーは url が session origin と同一のときのみ付与し、リダイレクトで origin を離れた時点で外す。border = { width, color, padding } を渡すと ImageMagick（magick/convert、無ければ素通し）で透明パディング + 枠線を画像自体に合成した PNG 変体を返す（数値は 0–64 px にクランプ、color は色リテラルのみ許可、いずれも argv 配列渡しで shell を経由しない）
 ```
 

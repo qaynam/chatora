@@ -53,3 +53,43 @@ describe('computeConcealRanges', () => {
     expect(rangesOnLine(text, 1)).toEqual([])
   })
 })
+
+/** What the editor shows for `line`: the raw text minus every concealed range. */
+const rendered = (text: string, line: number): string => {
+  const source = text.split('\n')[line] ?? ''
+  const hidden = new Set<number>()
+  for (const r of rangesOnLine(text, line)) {
+    for (let i = r.startChar; i < r.endChar; i++) hidden.add(i)
+  }
+  return [...source].filter((_, i) => !hidden.has(i)).join('')
+}
+
+describe('external links render as their label', () => {
+  const URL = 'https://note.com/sakura/n/n0123456789ab'
+
+  test('[label url]: the URL and its separating space are hidden', () => {
+    const label = 'note: 長いラベルでも折り返さずにそのまま見せる'
+    const text = `タイトル\n[${label} ${URL}]`
+    expect(rendered(text, 1)).toBe(label)
+  })
+
+  test('[url label]: same, with the URL leading', () => {
+    const text = `タイトル\n[${URL} sakura note]`
+    expect(rendered(text, 1)).toBe('sakura note')
+  })
+
+  test('[url]: kept verbatim — hiding it would leave nothing to click', () => {
+    const text = `タイトル\n[${URL}]`
+    expect(rendered(text, 1)).toBe(URL)
+  })
+
+  test('a bare URL is untouched', () => {
+    const text = `タイトル\nsee ${URL} for more`
+    expect(rangesOnLine(text, 1)).toEqual([])
+  })
+
+  test('surrounding text survives', () => {
+    const text = `タイトル\nsee [ラベル ${URL}] here`
+    expect(rendered(text, 1)).toBe('see ラベル here')
+  })
+})

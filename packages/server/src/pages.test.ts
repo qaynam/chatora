@@ -7,7 +7,7 @@ import { makeSessionStateLayer, type SessionState } from './state'
 
 const ORIGIN = 'https://scrapbox.io'
 const PAT: Credential = { type: 'pat', value: 'secret-pat', source: 'keychain' }
-const ME: Me = { id: 'u1', name: 'qaynam', displayName: 'Qaynam' }
+const ME: Me = { id: 'u1', name: 'qaynam', displayName: 'Qaynam', pageFilters: [] }
 const ME_ACCOUNT: Account = {
   id: `${ORIGIN}#${ME.id}`,
   origin: ORIGIN,
@@ -352,7 +352,7 @@ describe('projects / listPages', () => {
 
   test('projects: success', async () => {
     const { layer: httpLayer } = testHttpClient(() =>
-      json({ projects: [{ id: 'p1', name: 'proj', displayName: 'Proj' }] }),
+      json({ projects: [{ id: 'p1', name: 'proj', displayName: 'Proj', pageFilters: [] }] }),
     )
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
     const result = await runOnce(handlers.projects(), httpLayer, credLayer)

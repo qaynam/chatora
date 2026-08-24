@@ -7,6 +7,15 @@ local defaults = {
   project = nil,
   server_cmd = nil,
   sidebar_width = 32,
+  -- neo-tree-style sources shown as tabs in the sidebar's winbar. Each entry is
+  -- { label, filter?, unread_only? }, where filter is 'me' (the signed-in
+  -- user's first saved Cosense page filter, falling back to an icon filter on
+  -- their own name) or an explicit { type = 'icon', value = 'name' }.
+  -- false collapses the sidebar to a single unfiltered list.
+  sidebar_tabs = {
+    { label = 'すべて' },
+    { label = '未読', filter = 'me', unread_only = true },
+  },
   related_height = 8,
   -- Open the related-pages panel automatically when a page is opened. Closing
   -- it with q suppresses reopening until the next gR / :Chatora related.

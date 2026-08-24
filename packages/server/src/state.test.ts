@@ -6,7 +6,7 @@ import { makeSessionStateLayer, SessionState } from './state'
 
 const ORIGIN = 'https://scrapbox.io'
 const PAT: Credential = { type: 'pat', value: 'secret-pat', source: 'keychain' }
-const ME: Me = { id: 'u1', name: 'qaynam', displayName: 'Qaynam' }
+const ME: Me = { id: 'u1', name: 'qaynam', displayName: 'Qaynam', pageFilters: [] }
 
 const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -288,7 +288,7 @@ describe('SessionState page state', () => {
 describe('SessionState.apiFor', () => {
   test('builds a usable api for an explicit credential even when nothing is cached', async () => {
     const { layer: httpLayer, calls } = testHttpClient(() =>
-      json({ id: 'x', name: 'x', displayName: 'x' }),
+      json({ id: 'x', name: 'x', displayName: 'x', pageFilters: [] }),
     )
     const { layer: credLayer } = testCredentialStore(Option.none())
     const other: Credential = { type: 'pat', value: 'other-token', source: 'env' }
@@ -298,7 +298,7 @@ describe('SessionState.apiFor', () => {
       return yield* api.me()
     })
     const result = await run(program, httpLayer, credLayer)
-    expect(result).toEqual({ id: 'x', name: 'x', displayName: 'x' })
+    expect(result).toEqual({ id: 'x', name: 'x', displayName: 'x', pageFilters: [] })
     expect(calls).toHaveLength(1)
   })
 })

@@ -2,12 +2,19 @@
 // optional-with-default, see schemas.ts): unknown fields are ignored, missing fields fall
 // back to a zero value — see docs/ARCHITECTURE.md "Read エンドポイント".
 
+/** A saved page filter from Cosense's list UI, e.g. `{ type: 'icon', value: 'qaynam' }`. */
+export interface PageFilter {
+  readonly type: string
+  readonly value: string
+}
+
 export interface Me {
   readonly id: string
   readonly name: string
   readonly displayName: string
   readonly email?: string
   readonly photo?: string
+  readonly pageFilters: readonly PageFilter[]
 }
 
 export interface ProjectSummary {

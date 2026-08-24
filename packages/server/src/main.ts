@@ -168,8 +168,14 @@ connection.onRequest('chatora/removeAccount', (params: { id: string }) =>
 connection.onRequest('chatora/projects', () => runtime.runPromise(handlers.projects()))
 connection.onRequest(
   'chatora/listPages',
-  (params: { project: string; skip?: number; limit?: number }) =>
-    runtime.runPromise(handlers.listPages(params)),
+  (params: {
+    project: string
+    skip?: number
+    limit?: number
+    filterType?: string
+    filterValue?: string
+    unreadOnly?: boolean
+  }) => runtime.runPromise(handlers.listPages(params)),
 )
 connection.onRequest('chatora/openPage', (params: { project: string; title: string }) =>
   runtime.runPromise(handlers.openPage(params)),

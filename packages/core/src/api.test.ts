@@ -44,7 +44,7 @@ const run = <A>(
 describe('CosenseApi headers', () => {
   test('sends x-personal-access-token for a pat credential', async () => {
     const { layer, calls } = testHttpClient(() =>
-      json({ id: 'u1', name: 'qaynam', displayName: 'qaynam' }),
+      json({ id: 'u1', name: 'qaynam', displayName: 'qaynam', pageFilters: [] }),
     )
     const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
     await run(api.me(), layer)
@@ -55,7 +55,7 @@ describe('CosenseApi headers', () => {
 
   test('sends x-service-account-access-key for a serviceAccount credential', async () => {
     const { layer, calls } = testHttpClient(() =>
-      json({ id: 'u1', name: 'bot', displayName: 'bot' }),
+      json({ id: 'u1', name: 'bot', displayName: 'bot', pageFilters: [] }),
     )
     const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: SERVICE_ACCOUNT })
     await run(api.me(), layer)
@@ -68,10 +68,10 @@ describe('CosenseApi headers', () => {
 describe('CosenseApi happy paths', () => {
   test('me()', async () => {
     const { layer } = testHttpClient(() =>
-      json({ id: 'u1', name: 'qaynam', displayName: 'Qaynam' }),
+      json({ id: 'u1', name: 'qaynam', displayName: 'Qaynam', pageFilters: [] }),
     )
     const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
-    expect(await run(api.me(), layer)).toEqual({ id: 'u1', name: 'qaynam', displayName: 'Qaynam' })
+    expect(await run(api.me(), layer)).toEqual({ id: 'u1', name: 'qaynam', displayName: 'Qaynam', pageFilters: [] })
   })
 
   test('projects()', async () => {
@@ -250,7 +250,7 @@ describe('CosenseApi error handling', () => {
   })
 
   test('CosenseApi requests redirect: manual so credential headers never follow a redirect', async () => {
-    const { layer, calls } = testHttpClient(() => json({ id: 'u1', name: 'a', displayName: 'a' }))
+    const { layer, calls } = testHttpClient(() => json({ id: 'u1', name: 'a', displayName: 'a', pageFilters: [] }))
     const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
     await run(api.me(), layer)
     expect(calls[0]?.init.redirect).toBe('manual')

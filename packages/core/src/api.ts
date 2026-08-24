@@ -164,7 +164,14 @@ export interface CosenseApiShape {
   readonly projects: () => Effect.Effect<readonly ProjectSummary[], CosenseApiError, HttpClient>
   readonly listPages: (
     project: string,
-    opts?: { readonly skip?: number; readonly limit?: number; readonly sort?: string },
+    opts?: {
+      readonly skip?: number
+      readonly limit?: number
+      readonly sort?: string
+      /** Cosense's saved-filter pair, e.g. `'icon'` / a user name. Both are needed for either to apply. */
+      readonly filterType?: string
+      readonly filterValue?: string
+    },
   ) => Effect.Effect<
     { readonly count: number; readonly pages: readonly PageSummary[] },
     CosenseApiError,
@@ -224,6 +231,10 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
     if (opts.sort !== undefined) params.set('sort', opts.sort)
     if (opts.limit !== undefined) params.set('limit', String(opts.limit))
     if (opts.skip !== undefined) params.set('skip', String(opts.skip))
+    if (opts.filterType !== undefined && opts.filterValue !== undefined) {
+      params.set('filterType', opts.filterType)
+      params.set('filterValue', opts.filterValue)
+    }
     const query = params.toString()
     return request(`/api/pages/${project}/${query ? `?${query}` : ''}`).pipe(
       Effect.flatMap((res) => decode(ListPagesResponseSchema, res)),

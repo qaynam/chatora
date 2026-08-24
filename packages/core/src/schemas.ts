@@ -21,12 +21,19 @@ const optionalNullableString = Schema.optionalWith(Schema.NullOr(Schema.String),
   default: () => null,
 })
 
+// The saved page filters shown in Cosense's web list UI, e.g. { type: 'icon', value: 'qaynam' }.
+export const PageFilterSchema = Schema.Struct({
+  type: optionalString,
+  value: optionalString,
+})
+
 export const MeSchema = Schema.Struct({
   id: optionalString,
   name: optionalString,
   displayName: optionalString,
   email: Schema.optionalWith(Schema.String, { exact: true }),
   photo: Schema.optionalWith(Schema.String, { exact: true }),
+  pageFilters: Schema.optionalWith(Schema.Array(PageFilterSchema), { default: () => [] }),
 })
 
 export const ProjectSummarySchema = Schema.Struct({
