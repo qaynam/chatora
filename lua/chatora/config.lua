@@ -35,8 +35,11 @@ local defaults = {
   -- Render backend: 'auto' prefers 3rd/image.nvim, falling back to
   -- folke/snacks.nvim's image module. 'image_nvim' / 'snacks' force one.
   image_backend = 'auto',
-  -- Horizontal rules above/below standalone images, so an image reads as
-  -- embedded content instead of blending into the page. false disables.
+  -- Frame composited into standalone images themselves (ImageMagick,
+  -- server-side): a transparent padding ring + a border line, so an image
+  -- reads as embedded content instead of blending into the page. false
+  -- disables; a table customizes: { width = 1, color = '#8888', padding = 12 }
+  -- (pixels; color is any ImageMagick color literal, #rgba works).
   image_border = true,
   -- Completion UI in page buffers: 'auto' enables Neovim's native LSP
   -- completion (autotrigger) when blink.cmp is absent or disabled for the

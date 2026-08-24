@@ -251,6 +251,15 @@ local ok, err = pcall(function()
     assert(#blocks[2].rows == 0, 'expected 0 rows for the empty marker')
   end
 
+  do
+    -- Trailing blank lines never end a block, but they hold no cells either:
+    -- they are trimmed so the bottom border hugs the last real row.
+    local blocks = ctable.find_blocks({ 'table:t', ' a\tb', '', '  ', 'after' })
+    assert(#blocks == 1, 'expected one block')
+    assert(blocks[1].end_line == 2, 'trailing blanks must be trimmed, end_line = ' .. blocks[1].end_line)
+    assert(#blocks[1].rows == 1, 'expected the single real row')
+  end
+
   -- table.render: extmark shape for a 3-column, 2-row (header + 1 body)
   -- table with mixed column widths, so both padding and no-padding cells
   -- are exercised on every column position (first/middle/last).

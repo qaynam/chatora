@@ -158,13 +158,15 @@ function M.close()
 end
 
 local function setup_keymaps()
-  local opts = { buffer = buf, nowait = true, silent = true }
-  vim.keymap.set('n', '<CR>', function() M.open_current() end, opts)
-  vim.keymap.set('n', 'R', function() M.reload() end, opts)
-  vim.keymap.set('n', 's', function() M.search() end, opts)
-  vim.keymap.set('n', 'n', function() M.new_page() end, opts)
-  vim.keymap.set('n', 'P', function() require('chatora').switch_project() end, opts)
-  vim.keymap.set('n', 'q', function() M.close() end, opts)
+  local function opts(desc)
+    return { buffer = buf, nowait = true, silent = true, desc = desc }
+  end
+  vim.keymap.set('n', '<CR>', function() M.open_current() end, opts('chatora: ページを開く'))
+  vim.keymap.set('n', 'R', function() M.reload() end, opts('chatora: 一覧を再読込'))
+  vim.keymap.set('n', 's', function() M.search() end, opts('chatora: ページ検索'))
+  vim.keymap.set('n', 'n', function() M.new_page() end, opts('chatora: 新規ページ'))
+  vim.keymap.set('n', 'P', function() require('chatora').switch_project() end, opts('chatora: プロジェクト切替'))
+  vim.keymap.set('n', 'q', function() M.close() end, opts('chatora: サイドバーを閉じる'))
 end
 
 --- Open (or focus) the sidebar for project, listing its pages.

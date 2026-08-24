@@ -29,6 +29,8 @@ local LINES = {
   '   gs   検索',
   '   [ / #  でリンク・ハッシュタグ補完（[ は自動で ] を補う）',
   '   <C-t>  日時を挿入   <C-i>  自分のアイコンを挿入（insert モード）',
+  '   テーブルは table:名前 + インデント行、セルは Tab 区切り',
+  '   （テーブル行の中では Tab キーが本物のタブを入力する）',
   '   保存状態は ✓/●/◍/✗ アイコンで表示（statusline 連携は README 参照）',
   '   :q   閉じてもバッファは残る（未保存なら警告。:qa は未保存があると止まる）',
   '   画像表示（アイコン記法・画像リンク）には 3rd/image.nvim（推奨）か',
@@ -82,7 +84,7 @@ function M.open()
     end
   end
   for _, key in ipairs({ 'q', '<Esc>' }) do
-    vim.keymap.set('n', key, close, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set('n', key, close, { buffer = buf, nowait = true, silent = true, desc = 'chatora: ヘルプを閉じる' })
   end
 end
 

@@ -21,13 +21,26 @@ local timers_by_bufnr = {}
 local placements_by_bufnr = {} -- values are lists of { close = fn } wrappers
 local project_by_bufnr = {}
 local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async fetchAsset replies
-local path_by_url = {} -- url -> local file path, resolved once via fetchAsset and reused
+local path_by_key = {} -- fetch key -> local file path, resolved once via fetchAsset and reused
 local signature_by_bufnr = {} -- target multiset of the last applied refresh (flicker guard)
 
-local border_ns = vim.api.nvim_create_namespace('chatora_image_border')
-
-local function ensure_border_hl()
-  vim.api.nvim_set_hl(0, 'ChatoraImageBorder', { link = 'Comment', default = true })
+--- Border params for chatora/fetchAsset, or nil. The frame is composited into
+--- the image file itself server-side (ImageMagick) — the only way to hug the
+--- image's actual pixel edges; cell-grid extmarks can't. Standalone images
+--- only: icons are 1 cell tall.
+local function border_params()
+  local opt = config.options.image_border
+  if opt == false or opt == nil then
+    return nil
+  end
+  if type(opt) ~= 'table' then
+    opt = {}
+  end
+  return {
+    width = opt.width or 1,
+    color = opt.color or '#8888',
+    padding = opt.padding or 12,
+  }
 end
 
 local IMAGE_EXTENSIONS = { png = true, jpg = true, jpeg = true, gif = true, webp = true }
@@ -227,6 +240,7 @@ function M.refresh(bufnr)
   -- re-placing it would only make the images flash. Rows are deliberately
   -- NOT part of the signature (they shift on every line inserted above).
   local origin = config.options.origin
+  local border = border_params()
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local targets = {}
   local counts = {}
@@ -243,8 +257,22 @@ function M.refresh(bufnr)
     end
     local standalone_src = standalone_image_src(line)
     if standalone_src then
-      targets[#targets + 1] = { url = standalone_src, row = i, col = 0, opts = { max_height = 20 } }
-      counts[standalone_src] = (counts[standalone_src] or 0) + 1
+      -- The image sits where the text sits: at the line's indent, shifted by
+      -- however many cells the pads' inline spacing added before it.
+      local indent = #(line:match('^[ \t]*'))
+      local col = indent + require('chatora.pads').extra_cells(indent)
+      targets[#targets + 1] = {
+        url = standalone_src,
+        row = i,
+        col = col,
+        opts = { max_height = 20 },
+        border = border,
+      }
+      -- Placements pin their x at creation, so a changed indent must defeat
+      -- the flicker guard and re-place (icons stay col-free: mid-line text
+      -- edits shift their col constantly and re-placing would flash).
+      local key = standalone_src .. '\0' .. col
+      counts[key] = (counts[key] or 0) + 1
     end
   end
 
@@ -272,77 +300,42 @@ function M.refresh(bufnr)
   local new_placements = {}
   placements_by_bufnr[bufnr] = new_placements
 
-  --- Horizontal rules above and below a standalone image so it reads as an
-  --- embedded figure, not editor content. Created *after* the backend
-  --- placement: extmark virt_lines on one line stack in creation order, which
-  --- puts the bottom rule under the image's own virtual padding.
-  local function place_border(row)
-    if config.options.image_border == false then
-      return nil, nil
-    end
-    ensure_border_hl()
-    local win = vim.fn.bufwinid(bufnr)
-    if win == -1 then
-      return nil, nil
-    end
-    local info = vim.fn.getwininfo(win)[1]
-    local width = math.max(1, vim.api.nvim_win_get_width(win) - ((info and info.textoff) or 0) - 1)
-    local rule = { { { string.rep('─', width), 'ChatoraImageBorder' } } }
-    local top = vim.api.nvim_buf_set_extmark(bufnr, border_ns, row - 1, 0, {
-      virt_lines = rule,
-      virt_lines_above = true,
-    })
-    local bottom = vim.api.nvim_buf_set_extmark(bufnr, border_ns, row - 1, 0, {
-      virt_lines = rule,
-    })
-    return top, bottom
-  end
-
   local function place(path, row, col, opts)
     if epoch_by_bufnr[bufnr] ~= epoch or not vim.api.nvim_buf_is_valid(bufnr) then
       return
     end
     local p = active.place(bufnr, path, row, col, opts)
-    if not p then
-      return
+    if p then
+      new_placements[#new_placements + 1] = p
     end
-    -- Icons (height=1) sit inline in text; only standalone images get frames.
-    if opts and opts.max_height then
-      local top, bottom = place_border(row)
-      if top then
-        local backend_close = p.close
-        p = {
-          close = function()
-            backend_close()
-            pcall(vim.api.nvim_buf_del_extmark, bufnr, border_ns, top)
-            pcall(vim.api.nvim_buf_del_extmark, bufnr, border_ns, bottom)
-          end,
-        }
-      end
-    end
-    new_placements[#new_placements + 1] = p
   end
 
   --- Resolve url to a local path (via the fetchAsset cache, or a fresh LSP
   --- request) and place it. Fetch failures are silent -- this is a
   --- cosmetic feature, matching the previous curl-based behavior.
-  local function place_url(url, row, col, opts)
-    local cached_path = path_by_url[url]
+  local function place_url(url, row, col, opts, target_border)
+    -- Bordered and plain variants of the same url are different files.
+    local key = url .. (target_border and '\0border' or '')
+    local cached_path = path_by_key[key]
     if cached_path then
       place(cached_path, row, col, opts)
       return
     end
-    lsp.request('chatora/fetchAsset', { project = project, url = url }, function(err, result)
-      if err or not result or result.ok == false then
-        return
+    lsp.request(
+      'chatora/fetchAsset',
+      { project = project, url = url, border = target_border },
+      function(err, result)
+        if err or not result or result.ok == false then
+          return
+        end
+        path_by_key[key] = result.path
+        place(result.path, row, col, opts)
       end
-      path_by_url[url] = result.path
-      place(result.path, row, col, opts)
-    end)
+    )
   end
 
   for _, target in ipairs(targets) do
-    place_url(target.url, target.row, target.col, target.opts)
+    place_url(target.url, target.row, target.col, target.opts, target.border)
   end
 end
 

@@ -1,7 +1,9 @@
+import { execFile } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { mkdir, readdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import type { Credential, HttpClientShape } from '@chatora/core'
 import { HttpClient } from '@chatora/core'
 import { Context, Data, Deferred, Effect, Layer, Option, SynchronizedRef } from 'effect'
@@ -199,6 +201,117 @@ const fetchAndCache = (
   }).pipe(Effect.catchTag('AssetFetchError', (error) => Effect.succeed(fromAssetFetchError(error))))
 
 // ---------------------------------------------------------------------------
+// border compositing
+// ---------------------------------------------------------------------------
+
+export interface BorderParams {
+  readonly width: number
+  readonly color: string
+  readonly padding: number
+}
+
+const execFileAsync = promisify(execFile)
+
+// Everything reaching an ImageMagick argv goes through these: numbers clamp to a sane pixel
+// range, and the color must parse as a CSS-ish color literal. Anything else means the whole
+// border is skipped, not "best guess" — a rejected value came from user config, and rendering
+// the plain image is the least surprising fallback.
+const clampPx = (value: unknown, fallback: number): number => {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback
+  return Math.min(64, Math.max(0, n))
+}
+const COLOR_RE = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+)$/
+
+const sanitizeBorder = (border: BorderParams): BorderParams | null => {
+  if (!COLOR_RE.test(border.color)) return null
+  const width = clampPx(border.width, 1)
+  const padding = clampPx(border.padding, 12)
+  if (width === 0 && padding === 0) return null
+  return { width, color: border.color, padding }
+}
+
+/**
+ * ImageMagick 7 ships `magick`; some installs only have the IM6 `convert`. Tried in that
+ * order, remembered for the session. `null` (no ImageMagick at all) disables compositing.
+ */
+let magickCommand: string | null | undefined
+const resolveMagick = async (): Promise<string | null> => {
+  if (magickCommand !== undefined) return magickCommand
+  for (const candidate of ['magick', 'convert']) {
+    try {
+      await execFileAsync(candidate, ['-version'])
+      magickCommand = candidate
+      return candidate
+    } catch {
+      // keep trying
+    }
+  }
+  magickCommand = null
+  return null
+}
+
+/**
+ * Composites a web-style frame into the image itself (a transparent padding ring, then the
+ * border line), cached beside the original as `b<paramsHash>-<hash>.png` — prefixed, not
+ * suffixed, so the plain `findCached(hash)` prefix lookup can never pick up a bordered
+ * variant. PNG output keeps the padding's alpha so it shows the terminal background,
+ * whatever the colorscheme. Falls back to the original path when ImageMagick is missing or
+ * the composite fails — the border is cosmetic, the image is not.
+ */
+const withBorder = (
+  cacheDir: string,
+  hash: string,
+  sourcePath: string,
+  border: BorderParams,
+): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const paramsHash = cacheKey(`${border.width}\0${border.color}\0${border.padding}`).slice(0, 8)
+    const borderedName = `b${paramsHash}-${hash}`
+    const borderedPath = join(cacheDir, `${borderedName}.png`)
+    const existing = yield* findCached(cacheDir, borderedName)
+    if (Option.isSome(existing)) return existing.value
+
+    const magick = yield* Effect.promise(resolveMagick)
+    if (magick === null) return sourcePath
+
+    // -compose copy on the second -border: without it, IM floods the border
+    // color through the transparent padding ring instead of only framing it.
+    const args = [
+      sourcePath,
+      '-alpha',
+      'set',
+      '-bordercolor',
+      'none',
+      '-border',
+      String(border.padding),
+      '-compose',
+      'copy',
+      '-bordercolor',
+      border.color,
+      '-border',
+      String(border.width),
+      borderedPath,
+    ]
+    return yield* Effect.tryPromise(() => execFileAsync(magick, args)).pipe(
+      Effect.as(borderedPath),
+      Effect.orElseSucceed(() => sourcePath),
+    )
+  })
+
+const applyBorder = (
+  cacheDir: string,
+  hash: string,
+  result: FetchAssetResult,
+  border: BorderParams | null,
+): Effect.Effect<FetchAssetResult> => {
+  if (border === null || !result.ok) return Effect.succeed(result)
+  return Effect.map(withBorder(cacheDir, hash, result.path, border), (path) => ({
+    ok: true as const,
+    path,
+  }))
+}
+
+// ---------------------------------------------------------------------------
 // in-flight dedupe
 // ---------------------------------------------------------------------------
 
@@ -285,6 +398,7 @@ export const AssetCacheLive: Layer.Layer<AssetCache> = Layer.effect(
 export const fetchAsset = (params: {
   readonly project: string
   readonly url: string
+  readonly border?: BorderParams
 }): Effect.Effect<FetchAssetResult, never, SessionState | HttpClient | AssetCache> =>
   Effect.gen(function* () {
     const session = yield* SessionState
@@ -292,9 +406,14 @@ export const fetchAsset = (params: {
     const http = yield* HttpClient
     const cacheDir = resolveCacheDir()
     const hash = cacheKey(params.url)
+    const border = params.border === undefined ? null : sanitizeBorder(params.border)
 
+    // The bordered variant is derived from the plain cached original, so the plain lookup
+    // short-circuits the network either way.
     const cached = yield* findCached(cacheDir, hash)
-    if (Option.isSome(cached)) return { ok: true as const, path: cached.value }
+    if (Option.isSome(cached)) {
+      return yield* applyBorder(cacheDir, hash, { ok: true, path: cached.value }, border)
+    }
 
     const credential = yield* session.getCredential()
     const headersFor = headersForUrl(session.origin, credential)
@@ -302,8 +421,9 @@ export const fetchAsset = (params: {
     // `params.project` isn't read here: Lua already resolved the icon path into an absolute
     // `url` before sending this request. It stays part of the wire contract for symmetry with
     // the other chatora/* requests.
-    return yield* cache.dedupe(
+    const fetched = yield* cache.dedupe(
       params.url,
       fetchAndCache(http.fetch, headersFor, cacheDir, hash, params.url),
     )
+    return yield* applyBorder(cacheDir, hash, fetched, border)
   })

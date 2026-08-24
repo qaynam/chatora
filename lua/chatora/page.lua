@@ -114,15 +114,20 @@ local function finalize_buffer(bufnr, project, title)
   end
   vim.keymap.set('n', 'gR', function()
     related.toggle()
-  end, { buffer = bufnr, nowait = true, silent = true })
+  end, { buffer = bufnr, nowait = true, silent = true, desc = 'chatora: 関連ページパネルをトグル' })
   -- External URLs open in the browser (confirmed first); everything else is
   -- the normal LSP definition jump into another cosense:// buffer.
   vim.keymap.set('n', 'gd', function()
     require('chatora.links').goto_definition()
-  end, { buffer = bufnr, nowait = true, silent = true })
+  end, {
+    buffer = bufnr,
+    nowait = true,
+    silent = true,
+    desc = 'chatora: リンク先へジャンプ / 外部 URL はブラウザで開く',
+  })
   vim.keymap.set('n', 'gs', function()
     require('chatora').search()
-  end, { buffer = bufnr, nowait = true, silent = true })
+  end, { buffer = bufnr, nowait = true, silent = true, desc = 'chatora: ページ検索' })
 
   codeblock.attach(bufnr)
   images.attach(bufnr, project)

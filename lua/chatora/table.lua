@@ -49,6 +49,12 @@ function M.find_blocks(lines)
           end
           j = j + 1
         end
+        -- Trailing blank lines are structurally inside the block (blank never
+        -- ends one) but hold no cells; keeping them would hang the bottom
+        -- border below empty rows, visibly detached from the grid.
+        while j - 1 > i and is_blank(lines[j - 1]) do
+          j = j - 1
+        end
 
         local rows = {}
         for ln = i + 1, j - 1 do

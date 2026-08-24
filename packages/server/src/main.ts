@@ -20,7 +20,7 @@ import {
   TextDocuments,
 } from 'vscode-languageserver/node'
 import { TextDocument } from 'vscode-languageserver-textdocument'
-import { type AssetCache, AssetCacheLive, fetchAsset } from './assets'
+import { type AssetCache, AssetCacheLive, type BorderParams, fetchAsset } from './assets'
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
 import { definitionLocation, findDefinitionTarget } from './definition'
@@ -199,8 +199,10 @@ connection.onRequest(
   (params: { project: string; query: string; mode?: 'fulltext' | 'vector' }) =>
     runtime.runPromise(handlers.search(params)),
 )
-connection.onRequest('chatora/fetchAsset', (params: { project: string; url: string }) =>
-  runtime.runPromise(fetchAsset(params)),
+connection.onRequest(
+  'chatora/fetchAsset',
+  (params: { project: string; url: string; border?: BorderParams }) =>
+    runtime.runPromise(fetchAsset(params)),
 )
 
 documents.listen(connection)

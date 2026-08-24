@@ -35,6 +35,17 @@ local function pad_opts()
   return bullet, guide, spacing, gap
 end
 
+--- Display cells the inline spacing adds before the text of a line with
+--- `indent` leading whitespace chars. Anything rendered at a text column
+--- (inline images) must shift right by this much to stay aligned.
+function M.extra_cells(indent)
+  if config.options.pads == false or indent <= 0 then
+    return 0
+  end
+  local _, _, spacing, gap = pad_opts()
+  return (spacing and indent - 1 or 0) + gap
+end
+
 function M.render(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return

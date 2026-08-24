@@ -41,11 +41,11 @@ local function ensure_buf()
   vim.bo[buf].modifiable = false
   vim.bo[buf].filetype = 'chatora_related'
 
-  local opts = { buffer = buf, nowait = true, silent = true }
+  local opts = { buffer = buf, nowait = true, silent = true, desc = 'chatora: 関連ページを開く' }
   vim.keymap.set('n', '<CR>', function() M.open_current() end, opts)
   vim.keymap.set('n', 'q', function()
     M.close({ by_user = true })
-  end, opts)
+  end, { buffer = buf, nowait = true, silent = true, desc = 'chatora: 関連ページパネルを閉じる' })
 end
 
 local function render(links1hop, links2hop)

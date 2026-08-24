@@ -15,6 +15,7 @@ local DEFAULTS = {
   insert_icon = '<C-i>',
   date_format = '%Y-%m-%d %H:%M:%S',
   autopair = true,
+  table_tab = true,
 }
 
 local function settings()
@@ -77,14 +78,48 @@ local function char_at(line, col)
   return line:sub(col + 1, col + 1)
 end
 
+--- True when the 0-based `row` is a body row of some table block.
+local function in_table_row(bufnr, row)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  for _, block in ipairs(require('chatora.table').find_blocks(lines)) do
+    if row >= block.start_line and row < block.end_line then
+      return true
+    end
+  end
+  return false
+end
+
+--- Cosense table cells are tab-separated, but page buffers use expandtab
+--- (softtabstop=1) for indent — a plain Tab press would type a space and the
+--- row would parse as a single cell. Inside a table row, past the leading
+--- indent, Tab types a literal tab instead ('<C-v><Tab>' bypasses expandtab).
+local function table_tab_map(bufnr)
+  vim.keymap.set('i', '<Tab>', function()
+    local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+    local line = vim.api.nvim_get_current_line()
+    local indent = #(line:match('^%s*'))
+    if col > indent and in_table_row(bufnr, row - 1) then
+      return '<C-v><Tab>'
+    end
+    return '<Tab>'
+  end, {
+    buffer = bufnr,
+    expr = true,
+    silent = true,
+    desc = 'chatora: テーブル内はタブ区切り、それ以外はインデント',
+  })
+end
+
 local function autopair_maps(bufnr)
-  local opts = { buffer = bufnr, expr = true, silent = true }
+  local function opts(desc)
+    return { buffer = bufnr, expr = true, silent = true, desc = desc }
+  end
 
   -- Cosense inserts the closing bracket for you, which is also what makes link
   -- completion fire: the server only completes inside a *closed* pair.
   vim.keymap.set('i', '[', function()
     return '[]<Left>'
-  end, opts)
+  end, opts('chatora: [] を自動ペア'))
 
   vim.keymap.set('i', ']', function()
     local col = vim.api.nvim_win_get_cursor(0)[2]
@@ -92,7 +127,7 @@ local function autopair_maps(bufnr)
       return '<Right>'
     end
     return ']'
-  end, opts)
+  end, opts('chatora: 閉じ ] をスキップ'))
 
   vim.keymap.set('i', '<BS>', function()
     local line = vim.api.nvim_get_current_line()
@@ -101,7 +136,7 @@ local function autopair_maps(bufnr)
       return '<BS><Del>'
     end
     return '<BS>'
-  end, opts)
+  end, opts('chatora: 空の [] をまとめて削除'))
 end
 
 --- Install the insert-mode shortcuts on a cosense page buffer.
@@ -130,6 +165,10 @@ function M.attach(bufnr)
 
   if opts.autopair then
     autopair_maps(bufnr)
+  end
+
+  if opts.table_tab then
+    table_tab_map(bufnr)
   end
 end
 
