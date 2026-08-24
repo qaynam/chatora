@@ -311,17 +311,23 @@ local ok, err = pcall(function()
 
   require('chatora.sidebar').open('testproj')
 
+  --- Strip the sidebar's decoration columns, leaving the page title.
+  local function sidebar_title(line)
+    local rest = line:match('^%s%s(.*)$') or line:match('^%S+%s(.*)$') or line
+    return rest:match('^▍(.*)$') or rest:match('^%s(.*)$') or rest
+  end
+
   local sidebar_buf = nil
   if not wait_for(10000, function()
     local b = vim.fn.bufnr('chatora://sidebar')
     if b == -1 then
       return false
     end
-    -- Sidebar lines carry a 2-cell save-state prefix: the page's status icon
-    -- plus a space ('✓ ', '● ', ...), or two spaces when it has no open buffer.
+    -- Sidebar lines carry a save-state mark (icon + space, or two spaces) and
+    -- then the unread bar ('▍' or a space) before the title.
     local has_home, has_memo = false, false
     for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
-      local title = l:match('^%s%s(.*)$') or l:match('^%S+%s(.*)$') or l
+      local title = sidebar_title(l)
       if title == 'ホーム' then
         has_home = true
       end
@@ -368,7 +374,7 @@ local ok, err = pcall(function()
   vim.api.nvim_set_current_win(page_win)
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('Goマークテスト<Esc>', true, false, true), 'x', false)
   if not wait_for(10000, function()
-    return sidebar_has_line('● ホーム')
+    return sidebar_has_line('●  ホーム')
   end) then
     fail('timed out waiting for the ● unsaved mark on ホーム')
   end
@@ -378,7 +384,7 @@ local ok, err = pcall(function()
   vim.bo[page_buf].modified = false
   require('chatora.status').sync(page_buf)
   if not wait_for(10000, function()
-    return sidebar_has_line('✓ ホーム')
+    return sidebar_has_line('✓  ホーム')
   end) then
     fail('timed out waiting for the unsaved mark to turn back into ✓')
   end

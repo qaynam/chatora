@@ -200,6 +200,8 @@ export interface CosenseApiShape {
     project: string,
     previewId: string,
   ) => Effect.Effect<SubmitResponse, CosenseApiError, HttpClient>
+  /** Records a visit, which is what clears the page's unread state. Never fails: see the implementation. */
+  readonly markAccessed: (project: string, pageId: string) => Effect.Effect<void, never, HttpClient>
 }
 
 /** Builds a `CosenseApi` bound to one origin + credential. Every operation requires `HttpClient` in scope. */
@@ -291,6 +293,22 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
       ),
     )
 
+  /**
+   * `POST /api/pages/:project/:pageId/accessed`, falling back to `GET` — the two
+   * reverse-engineered records of this endpoint disagree on the method, and it is
+   * undocumented in cosense-cli. Marking a page read is a background nicety, so every
+   * failure (including "neither method exists") is swallowed: the client updates its own
+   * view optimistically either way.
+   */
+  const markAccessed: CosenseApiShape['markAccessed'] = (project, pageId) => {
+    const path = `/api/pages/${project}/${encodeURIComponent(pageId)}/accessed`
+    return request(path, { method: 'POST', body: {} }).pipe(
+      Effect.catchAll(() => request(path)),
+      Effect.asVoid,
+      Effect.catchAll(() => Effect.void),
+    )
+  }
+
   const previewEdit: CosenseApiShape['previewEdit'] = (project, body) =>
     request(`/api/pages/v2/${project}/page-edit-for-ai/preview`, { method: 'POST', body }).pipe(
       Effect.flatMap((res) => decode(PreviewResponseSchema, res)),
@@ -313,5 +331,6 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
     searchTitles,
     previewEdit,
     submitEdit,
+    markAccessed,
   }
 }

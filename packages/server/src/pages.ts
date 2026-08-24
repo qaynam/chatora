@@ -268,12 +268,25 @@ export const projects = (): Effect.Effect<
     }),
   )
 
+/** A listed page plus the unread flag the Lua sidebar renders. */
+export type ListedPage = PageSummary & { readonly unread: boolean }
+
+/**
+ * Cosense has no unread flag of its own: its web grid draws the blue border from
+ * `updated > accessed`, and so does this. A page never visited has `accessed` 0, which makes
+ * it unread — matching the web UI, where everything starts unread.
+ */
+const withUnread = (page: PageSummary): ListedPage => ({
+  ...page,
+  unread: page.updated > page.accessed,
+})
+
 export const listPages = (params: {
   readonly project: string
   readonly skip?: number
   readonly limit?: number
 }): Effect.Effect<
-  | { readonly ok: true; readonly count: number; readonly pages: readonly PageSummary[] }
+  | { readonly ok: true; readonly count: number; readonly pages: readonly ListedPage[] }
   | ErrEnvelope,
   never,
   SessionState | HttpClient
@@ -287,7 +300,7 @@ export const listPages = (params: {
       if (params.skip !== undefined) opts.skip = params.skip
       if (params.limit !== undefined) opts.limit = params.limit
       const result = yield* apiOpt.value.listPages(params.project, opts)
-      return { ok: true as const, count: result.count, pages: result.pages }
+      return { ok: true as const, count: result.count, pages: result.pages.map(withUnread) }
     }),
   )
 
@@ -315,6 +328,9 @@ export const openPage = (params: {
       if (Option.isSome(pageOpt)) {
         const page = pageOpt.value
         const text = page.lines.map((l) => l.text).join('\n')
+        // Opening a page is what marks it read. Forked so a slow (or missing)
+        // accessed endpoint never delays showing the page.
+        yield* Effect.forkDaemon(apiOpt.value.markAccessed(params.project, page.id))
         yield* session.setPage(uri, {
           project: params.project,
           title: params.title,

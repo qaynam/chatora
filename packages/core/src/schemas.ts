@@ -58,6 +58,10 @@ export const PageSummarySchema = Schema.Struct({
   charsCount: optionalNumber,
   created: optionalNumber,
   updated: optionalNumber,
+  // Unix seconds of the *requesting* user's last visit, which is what makes
+  // `updated > accessed` an unread test (the same one Cosense's web grid draws
+  // its blue border from). 0 when the field is absent, i.e. never visited.
+  accessed: optionalNumber,
 })
 
 export const PageDetailLineSchema = Schema.Struct({

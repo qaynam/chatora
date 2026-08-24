@@ -17,6 +17,10 @@ local ns = vim.api.nvim_create_namespace('chatora_sidebar')
 
 local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTitle', { link = 'Title', default = true })
+  -- Cosense's web grid marks unread pages with a blue top border; a list has no
+  -- card edge to colour, so the bar sits between the save mark and the title.
+  vim.api.nvim_set_hl(0, 'ChatoraSidebarUnread', { fg = '#2d7ff9', default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraSidebarUnreadTitle', { bold = true, default = true })
 end
 
 local winutil = require('chatora.winutil')
@@ -43,6 +47,19 @@ local function mark_for(page)
   return icon .. ' ', hl_group
 end
 
+local UNREAD_BAR = '▍'
+local READ_BAR = ' '
+
+--- True while `page` is listed as unread and has no open buffer. Opening a page
+--- marks it read server-side, but the list is only refetched on demand, so the
+--- bar is cleared locally the moment its buffer exists.
+local function is_unread(page)
+  if not (page.unread and project and page.title) then
+    return false
+  end
+  return require('chatora.status').icon_for_uri(uri.format(project, page.title)) == nil
+end
+
 local function render(pages)
   current_pages = pages
   line_pages = {}
@@ -50,22 +67,35 @@ local function render(pages)
   local marks = {}
   for i, p in ipairs(pages) do
     local mark, hl_group = mark_for(p)
-    lines[i] = mark .. (p.title or '(untitled)')
-    marks[i] = { width = #mark, hl_group = hl_group }
+    local unread = is_unread(p)
+    local bar = unread and UNREAD_BAR or READ_BAR
+    lines[i] = mark .. bar .. (p.title or '(untitled)')
+    marks[i] = { mark_width = #mark, bar_width = #bar, hl_group = hl_group, unread = unread }
     line_pages[i] = p
   end
   if #lines == 0 then
-    lines = { '  (no pages)' }
+    lines = { '   (no pages)' }
   end
 
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   for i, mark in ipairs(marks) do
+    local row = i - 1
     if mark.hl_group then
-      vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 0, {
-        end_col = mark.width,
+      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+        end_col = mark.mark_width,
         hl_group = mark.hl_group,
+      })
+    end
+    if mark.unread then
+      vim.api.nvim_buf_set_extmark(buf, ns, row, mark.mark_width, {
+        end_col = mark.mark_width + mark.bar_width,
+        hl_group = 'ChatoraSidebarUnread',
+      })
+      vim.api.nvim_buf_set_extmark(buf, ns, row, mark.mark_width + mark.bar_width, {
+        end_line = row + 1,
+        hl_group = 'ChatoraSidebarUnreadTitle',
       })
     end
   end

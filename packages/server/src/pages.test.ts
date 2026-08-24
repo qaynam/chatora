@@ -595,3 +595,24 @@ describe('relatedPages / search', () => {
     expect(vector).toEqual({ ok: true, pages: [{ title: 'V' }] })
   })
 })
+
+describe('listPages unread flag', () => {
+  test('unread is updated > accessed; a never-visited page counts as unread', async () => {
+    const { layer: httpLayer } = testHttpClient(() =>
+      json({
+        count: 3,
+        pages: [
+          { id: 'a', title: 'edited since my last visit', updated: 200, accessed: 100 },
+          { id: 'b', title: 'seen after its last edit', updated: 100, accessed: 200 },
+          { id: 'c', title: 'never visited', updated: 100 },
+        ],
+      }),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const result = await runOnce(handlers.listPages({ project: 'proj' }), httpLayer, credLayer)
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.pages.map((p) => p.unread)).toEqual([true, false, true])
+    }
+  })
+})

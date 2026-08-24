@@ -39,6 +39,8 @@ export interface PageSummary {
   readonly charsCount: number
   readonly created: number
   readonly updated: number
+  /** Requesting user's last visit (unix seconds); 0 when never visited. `updated > accessed` means unread. */
+  readonly accessed: number
 }
 
 export interface PageDetailLine {

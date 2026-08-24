@@ -265,3 +265,28 @@ describe('CosenseApi error handling', () => {
     expect(String(failure)).not.toContain(PAT.value)
   })
 })
+
+describe('markAccessed', () => {
+  const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+
+  test('POSTs to the accessed endpoint', async () => {
+    const { layer, calls } = testHttpClient(() => json({}))
+    await run(api.markAccessed('proj', 'page1'), layer)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.url).toBe('https://scrapbox.io/api/pages/proj/page1/accessed')
+    expect(calls[0]?.init.method).toBe('POST')
+  })
+
+  test('falls back to GET when POST is rejected', async () => {
+    const { layer, calls } = testHttpClient((_url, init) =>
+      init.method === 'POST' ? json({}, 405) : json({}),
+    )
+    await run(api.markAccessed('proj', 'page1'), layer)
+    expect(calls.map((c) => c.init.method)).toEqual(['POST', 'GET'])
+  })
+
+  test('never fails, whatever the endpoint does', async () => {
+    const { layer } = testHttpClient(() => json({}, 404))
+    expect(await run(api.markAccessed('proj', 'page1'), layer)).toBeUndefined()
+  })
+})

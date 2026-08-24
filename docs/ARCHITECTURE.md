@@ -170,7 +170,11 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
                                    未知 id: { ok:false, code:'error', message:'unknown account' }
 'chatora/removeAccount' { id }  → AccountStore.remove → セッションキャッシュ invalidate → { ok:true, accounts, active }
 'chatora/projects'    {}                          → { ok, projects: ProjectSummary[] }
-'chatora/listPages'   { project, skip?, limit? }  → { ok, count, pages: PageSummary[] }
+'chatora/listPages'   { project, skip?, limit? }  → { ok, count, pages: (PageSummary & { unread })[] }
+   // unread = updated > accessed（Cosense 本家のグリッドが青ボーダーを出す条件と同じ。サーバーは
+   // 未読フラグを返さないのでクライアント側で計算する。accessed 欠落 = 未訪問 = 未読）。
+   // 既読化は openPage が `POST /api/pages/:project/:pageId/accessed`（405 等なら GET に
+   // フォールバック）を投げっぱなしで行う。このエンドポイントは非公式で失敗しても無視する。
 'chatora/openPage'    { project, title }          → { ok, uri, text, exists, pageId?, commitId? }
    // サーバーはここで base 状態（lines with ids, pageId, commitId）を uri キーで保持
 'chatora/savePage'    { uri }                     → { ok: true, commitId, titleChanged?, text? }
