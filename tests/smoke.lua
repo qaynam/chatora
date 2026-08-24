@@ -249,6 +249,8 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '[example.icon]', '[https://example.com/pic.png]' })
     images.attach(buf, 'myproject')
     images.refresh(buf)
+    assert(type(images.invalidate) == 'function', 'expected images.invalidate')
+    images.invalidate(buf)
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 

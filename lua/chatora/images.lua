@@ -333,6 +333,14 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
   end
 end
 
+--- Forget that the current placements were applied, so the next refresh
+--- re-places them. Needed whenever something outside this module destroys what
+--- placements ride on — the buffer's extmarks, or the window they were bound
+--- to — since the target set alone then still looks unchanged.
+function M.invalidate(bufnr)
+  signature_by_bufnr[bufnr] = nil
+end
+
 --- Clear and re-render every image placement in bufnr. Both the target scan
 --- (`chatora/images`) and each target's local file path (`chatora/fetchAsset`)
 --- are asynchronous, so this kicks off requests and returns immediately;
@@ -408,9 +416,7 @@ function M.attach(bufnr, project)
     return
   end
   project_by_bufnr[bufnr] = project
-  -- An explicit attach follows a full buffer (re)load, which invalidates the
-  -- extmarks existing placements ride on — force the next refresh to re-place.
-  signature_by_bufnr[bufnr] = nil
+  M.invalidate(bufnr)
 
   if vim.b[bufnr].chatora_images_attached then
     schedule_refresh(bufnr)
@@ -418,8 +424,21 @@ function M.attach(bufnr, project)
   end
   vim.b[bufnr].chatora_images_attached = true
 
+  local group = vim.api.nvim_create_augroup('ChatoraImages' .. bufnr, { clear = true })
+
+  -- Backends bind a placement to the window it was created in, so showing the
+  -- buffer in a different window leaves every image pointing at a stale one.
+  vim.api.nvim_create_autocmd('BufWinEnter', {
+    group = group,
+    buffer = bufnr,
+    callback = function()
+      M.invalidate(bufnr)
+      schedule_refresh(bufnr)
+    end,
+  })
+
   vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
-    group = vim.api.nvim_create_augroup('ChatoraImages' .. bufnr, { clear = true }),
+    group = group,
     callback = function()
       if vim.api.nvim_buf_is_valid(bufnr) then
         schedule_refresh(bufnr)

@@ -55,6 +55,9 @@ local function set_content(bufnr, text)
   vim.bo[bufnr].undolevels = -1
   vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
   vim.bo[bufnr].undolevels = ul
+  -- Replacing every line destroys the extmarks image placements ride on, while
+  -- leaving the set of images in the text identical.
+  images.invalidate(bufnr)
 end
 
 local function refresh_sidebar_marks()
