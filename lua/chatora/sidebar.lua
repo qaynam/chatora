@@ -31,6 +31,28 @@ local function ensure_hl()
   })
 end
 
+local function is_open()
+  return win ~= nil and vim.api.nvim_win_is_valid(win)
+end
+
+--- Run `fn` with the sidebar's cursor and top line restored afterwards, so a
+--- background refresh doesn't scroll the list out from under the reader.
+local function keeping_view(fn)
+  local view = nil
+  if is_open() then
+    vim.api.nvim_win_call(win, function()
+      view = vim.fn.winsaveview()
+    end)
+  end
+  fn()
+  if view and is_open() then
+    vim.api.nvim_win_call(win, function()
+      view.lnum = math.min(view.lnum, vim.api.nvim_buf_line_count(buf))
+      pcall(vim.fn.winrestview, view)
+    end)
+  end
+end
+
 local winutil = require('chatora.winutil')
 
 local function ensure_editor_win()
@@ -208,6 +230,22 @@ local PAGE_SIZE = 100
 -- something worth showing (or the project runs out).
 local MIN_ROWS = 20
 
+--- Request params for one batch of `tab`, or nil when it cannot query yet.
+local function batch_params(tab, skip)
+  local filter_type, filter_value = filter_of(tab)
+  if tab.filter == 'me' and not filter_type then
+    return nil
+  end
+  return {
+    project = project,
+    skip = skip,
+    limit = PAGE_SIZE,
+    unreadOnly = tab.unread_only or nil,
+    filterType = filter_type,
+    filterValue = filter_value,
+  }
+end
+
 --- Fetch the next batch for the active tab (infinite scroll).
 function M.load_more()
   local index = active
@@ -220,22 +258,13 @@ function M.load_more()
     return
   end
 
-  local filter_type, filter_value = filter_of(tab)
-  if tab.filter == 'me' and not filter_type then
+  -- Paging advances by pages *scanned*, not kept: an unread tab may drop most
+  -- of a batch, and skipping by the kept count would re-fetch what it dropped.
+  local params = batch_params(tab, state.scanned)
+  if not params then
     return
   end
-
   state.loading = true
-  local params = {
-    project = project,
-    -- Paging advances by pages *scanned*, not kept: an unread tab may drop most
-    -- of a batch, and skipping by the kept count would re-fetch what it dropped.
-    skip = state.scanned,
-    limit = PAGE_SIZE,
-    unreadOnly = tab.unread_only or nil,
-    filterType = filter_type,
-    filterValue = filter_value,
-  }
 
   lsp.request_ok('chatora/listPages', params, function(result)
     state.loading = false
@@ -269,6 +298,98 @@ function M.reload()
   end
   render()
   M.load_more()
+end
+
+-- ---------------------------------------------------------------------------
+-- polling
+-- ---------------------------------------------------------------------------
+
+local uv = vim.uv or vim.loop
+local poll_timer = nil
+
+local function identity_of(entry)
+  return (entry.id or entry.title or '') .. '\0' .. tostring(entry.updated or '')
+end
+
+--- Signature of the first `limit` rows: what a poll compares to decide whether
+--- anything is worth redrawing.
+local function head_signature(pages, limit)
+  local parts = {}
+  for i = 1, math.min(limit, #pages) do
+    parts[i] = identity_of(pages[i])
+  end
+  return table.concat(parts, '\1')
+end
+
+--- Splice a freshly fetched first batch onto the front, dropping the entries it
+--- supersedes further down. The list is sorted by update time, so an edited
+--- page reappears at the top and must not also linger at its old position.
+local function merge_head(fresh, existing)
+  local seen = {}
+  for _, p in ipairs(fresh) do
+    seen[p.id or p.title] = true
+  end
+  local merged = { unpack(fresh) }
+  for _, p in ipairs(existing) do
+    if not seen[p.id or p.title] then
+      merged[#merged + 1] = p
+    end
+  end
+  return merged
+end
+
+--- Refetch the active tab's first batch and adopt it only if it differs. The
+--- request is asynchronous and the redraw is skipped when nothing changed, so
+--- an idle project costs nothing but one request per interval.
+function M.poll()
+  local index = active
+  local tab = tabs[index]
+  if not (project and tab and is_open()) or tab.state.loading then
+    return
+  end
+  local params = batch_params(tab, 0)
+  if not params then
+    return
+  end
+
+  lsp.request('chatora/listPages', params, function(err, result)
+    if err or not result or result.ok == false or index ~= active or not is_open() then
+      return
+    end
+    local state = tab.state
+    local fresh = result.pages or {}
+    if head_signature(fresh, #fresh) == head_signature(state.pages, #fresh) then
+      return
+    end
+    state.count = result.count or state.count
+    state.pages = merge_head(fresh, state.pages)
+    keeping_view(render)
+  end)
+end
+
+local function stop_polling()
+  if poll_timer then
+    poll_timer:stop()
+    poll_timer:close()
+    poll_timer = nil
+  end
+end
+
+local function start_polling()
+  stop_polling()
+  local seconds = config.options.sidebar_poll
+  if type(seconds) ~= 'number' or seconds <= 0 then
+    return
+  end
+  local interval = math.max(5000, math.floor(seconds * 1000))
+  poll_timer = uv.new_timer()
+  poll_timer:start(interval, interval, vim.schedule_wrap(function()
+    if is_open() then
+      M.poll()
+    else
+      stop_polling()
+    end
+  end))
 end
 
 -- ---------------------------------------------------------------------------
@@ -342,10 +463,23 @@ function M.search()
 end
 
 function M.close()
-  if win and vim.api.nvim_win_is_valid(win) then
+  if is_open() then
     vim.api.nvim_win_close(win, true)
   end
   win = nil
+  stop_polling()
+end
+
+--- Close the sidebar if it is showing, else (re)open it on the last project.
+--- Falls back to the full open flow when there is no project yet.
+function M.toggle()
+  if is_open() then
+    M.close()
+  elseif project then
+    M.open(project)
+  else
+    require('chatora').open()
+  end
 end
 
 local function setup_keymaps()
@@ -424,6 +558,7 @@ function M.open(proj)
 
   lsp.ensure_start(buf)
   M.reload()
+  start_polling()
 
   -- The filtered tabs need the user's saved pageFilters; fetch once, then let
   -- whichever tab is showing pick up its now-resolvable query.

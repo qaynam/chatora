@@ -14,6 +14,7 @@ local defaults = {
     { label = '未読', filter = 'me', unread_only = true },
   },
   sidebar_separator = true,
+  sidebar_poll = 60,
 
   related_height = 8,
   related_auto_open = true,

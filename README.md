@@ -39,6 +39,7 @@ lazy.nvim（GitHub から直接）:
 | `sidebar_width` | `32` | サイドバーの幅 |
 | `sidebar_tabs` | すべて / 未読 | サイドバー上部のタブ。各要素は `{ label, filter?, unread_only? }`。`filter` は `'me'`（自分の保存済み Cosense フィルタ、無ければ自分の名前の icon フィルタ）か `{ type = 'icon', value = 'name' }`。`false` でタブなしの単一リスト |
 | `sidebar_separator` | `true` | 行ごとの区切り下線。未読バーが一本線に見えるのを防ぐ |
+| `sidebar_poll` | `60` | サイドバーを n 秒ごとに自動更新（更新順で先頭が入れ替わったときだけ再描画）。`false` で無効、最短 5 秒 |
 | `related_height` | `8` | 関連ページパネルの高さ |
 | `related_auto_open` | `true` | ページを開いたら関連パネルも開く。`q` で閉じると次の `gR` まで抑制 |
 | `status` | `true` | 保存状態アイコン。`{ icons = { clean='✓', dirty='●', error='✗' }, echo = false }` で調整、`false` で無効 |
@@ -114,9 +115,10 @@ alias chatora='/path/to/chatora/bin/chatora'
    行頭は保存状態（`✓`/`●`）と未読バー（`▍`= 最後に見たあとに更新された。Cosense のグリッドの青ボーダーと同じ判定）
 3. ページバッファ: 普通に編集して `:w` で保存（preview → submit の公式 API、同期なので `:wq` 一回で閉じられる）。`gR` で関連ページパネル（1-hop / 2-hop）をトグル（既定で自動表示、`q` で閉じると次の `gR` まで出ない）。`[` や `#` でリンク補完、`gd` でリンク先へジャンプ（外部 URL は確認のうえブラウザで開く）。
 4. `:Chatora new [title]` — 新規ページ作成（title 省略時は入力プロンプト）
-5. `:Chatora search [query]` / `:Chatora related` / `:Chatora project` / `:Chatora logout`
-6. `:Chatora account` — アカウントの切り替え・追加（PAT ごとに 1 アカウント。切り替えるとサイドバーを再読込）
-7. `:Chatora help` — コマンド・キーマップのチートシート
+5. `:Chatora toggle` — サイドバーの開閉
+6. `:Chatora search [query]` / `:Chatora related` / `:Chatora project` / `:Chatora logout`
+7. `:Chatora account` — アカウントの切り替え・追加（PAT ごとに 1 アカウント。切り替えるとサイドバーを再読込）
+8. `:Chatora help` — コマンド・キーマップのチートシート
 
 ### 保存状態の表示
 

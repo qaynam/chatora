@@ -126,6 +126,12 @@ function M.related()
   related.toggle()
 end
 
+--- Toggle the sidebar. Runs the full open flow (auth, project choice) only
+--- when there is nothing to reopen.
+function M.toggle()
+  sidebar.toggle()
+end
+
 --- Switch (or add) the active account, then reopen the sidebar from scratch:
 --- projects differ per account, so the remembered project choice is dropped
 --- and resolve_project runs again against the new account.
@@ -151,6 +157,8 @@ function M.dispatch(subcmd, args)
     M.new(args ~= '' and args or nil)
   elseif subcmd == 'search' then
     M.search(args ~= '' and args or nil)
+  elseif subcmd == 'toggle' then
+    M.toggle()
   elseif subcmd == 'related' then
     M.related()
   elseif subcmd == 'project' then

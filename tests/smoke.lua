@@ -480,6 +480,81 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- sidebar polling: a refetched first batch replaces the head and pulls an
+  -- edited page up out of the tail, without duplicating it or dropping the
+  -- rest of what infinite scroll already loaded.
+  do
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
+
+    local listed = {}
+    for i = 1, 5 do
+      listed[i] = { id = 'id' .. i, title = 'ページ' .. i, updated = 100 - i }
+    end
+    lsp.ensure_start = function() end
+    lsp.request_ok = function(method, _, cb)
+      if method == 'chatora/listPages' then
+        cb({ ok = true, count = #listed, scanned = #listed, pages = listed })
+      end
+    end
+
+    sidebar.open('proj')
+    local buf = vim.fn.bufnr('chatora://sidebar')
+    local function titles()
+      local out = {}
+      for i, l in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+        out[i] = l:sub(2)
+      end
+      return out
+    end
+    assert(vim.deep_equal(titles(), { 'ページ1', 'ページ2', 'ページ3', 'ページ4', 'ページ5' }), 'initial list')
+
+    -- ページ4 was just edited, so the server now lists it first.
+    lsp.request = function(method, _, cb)
+      if method ~= 'chatora/listPages' then
+        return
+      end
+      cb(nil, {
+        ok = true,
+        count = 5,
+        scanned = 2,
+        pages = {
+          { id = 'id4', title = 'ページ4', updated = 200 },
+          { id = 'id1', title = 'ページ1', updated = 99 },
+        },
+      })
+    end
+    sidebar.poll()
+    assert(
+      vim.deep_equal(titles(), { 'ページ4', 'ページ1', 'ページ2', 'ページ3', 'ページ5' }),
+      'poll must move the edited page to the top exactly once, got ' .. vim.inspect(titles())
+    )
+
+    -- An unchanged batch must leave the list (and its extmarks) untouched.
+    local before = vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_get_namespaces()['chatora_sidebar'], 0, -1, {})
+    lsp.request = function(method, _, cb)
+      if method == 'chatora/listPages' then
+        cb(nil, { ok = true, count = 5, scanned = 2, pages = {
+          { id = 'id4', title = 'ページ4', updated = 200 },
+          { id = 'id1', title = 'ページ1', updated = 99 },
+        } })
+      end
+    end
+    sidebar.poll()
+    assert(vim.deep_equal(titles(), { 'ページ4', 'ページ1', 'ページ2', 'ページ3', 'ページ5' }), 'idle poll changed the list')
+    assert(#before == #vim.api.nvim_buf_get_extmarks(buf, vim.api.nvim_get_namespaces()['chatora_sidebar'], 0, -1, {}), 'idle poll redrew')
+
+    -- toggle closes and reopens without re-running the auth/project flow.
+    sidebar.toggle()
+    assert(vim.fn.bufwinid(buf) == -1, 'toggle should close the sidebar')
+    sidebar.toggle()
+    assert(vim.fn.bufwinid(buf) ~= -1, 'toggle should reopen the sidebar')
+    sidebar.close()
+
+    lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
+  end
+
   -- account: module loads and exposes its API (calls would need the LSP).
   do
     local account = require('chatora.account')

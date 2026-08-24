@@ -12,6 +12,7 @@ local SECTIONS = {
     title = 'コマンド',
     rows = {
       { ':Chatora [open]', 'サイドバーを開く（初回は PAT 認証 → プロジェクト選択）' },
+      { ':Chatora toggle', 'サイドバーを開閉' },
       { ':Chatora new [title]', '新規ページを作成（title 省略時は入力プロンプト）' },
       { ':Chatora search [q]', 'ページを検索（q 省略時は入力プロンプト）' },
       { ':Chatora related', '関連ページパネル（1-hop / 2-hop）をトグル' },
@@ -85,6 +86,7 @@ local SECTIONS = {
       { 'tables = false', 'table: ブロックの罫線描画をやめる' },
       { 'keymaps = false', '<C-t> / <C-i> / [ の自動ペアをやめる' },
       { 'external_link = "open"', 'gd で確認なしにブラウザを開く' },
+      { 'sidebar_poll = false', 'サイドバーの自動更新を止める（既定 60 秒間隔）' },
       { 'notations = {...}', '独自の [記号 本文] 記法を定義する' },
       '全オプションと statusline 連携は README を参照。',
     },
