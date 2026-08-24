@@ -228,6 +228,10 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
    // URL を組み立てず iconUser（`[/proj/name.icon]` は '/proj/name' 形式のまま）だけを返す。
    // standalone は、そのノードが行（または title 行）の直接の子として唯一の非空白コンテンツ
    // であるとき true（decoration 記法にネストしている場合は false）。
+   // 注意: パーサーの `isImageUrl` は `#.png` 等の接尾辞だけで判定しスキームを見ないため、
+   // `[?userId=…#.svg]` `[/relative.png]` `[javascript:…#.png]` もすべて image ノードになる。
+   // 絶対 http(s) URL 以外は images.ts で対象から外し、fetchAsset 側でも再度拒否する
+   // （ページ本文は信頼できない入力であり、ここが唯一ネットワークを触る境界のため）。
 'chatora/fetchAsset'  { project, url, border? }   → { ok, path }  // url を取得しローカルキャッシュ（$XDG_CACHE_HOME/chatora/assets）のファイルパスを返す。資格情報ヘッダーは url が session origin と同一のときのみ付与し、リダイレクトで origin を離れた時点で外す。content-type が image/svg+xml のときは ImageMagick で density 192 で PNG にラスタライズしてから返す（端末のグラフィックプロトコルは raster しか描けないため。失敗時/ImageMagick 不在時は元の .svg パスを返す）。border = { width, color, padding } を渡すと ImageMagick（magick/convert、無ければ素通し）で透明パディング + 枠線を画像自体に合成した PNG 変体を返す（数値は 0–64 px にクランプ、color は色リテラルのみ許可、いずれも argv 配列渡しで shell を経由しない）
 ```
 

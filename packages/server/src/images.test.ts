@@ -75,13 +75,13 @@ describe('computeImageTargets', () => {
   })
 
   test('standalone: true when the line is the image alone (indentation allowed)', () => {
-    const text = 'タイトル\n  [img.png]'
+    const text = 'タイトル\n  [https://example.com/img.png]'
     const targets = computeImageTargets(text)
     expect(targets[0]?.standalone).toBe(true)
   })
 
   test('standalone: false when other non-whitespace content shares the line', () => {
-    const text = 'タイトル\n[img.png] caption'
+    const text = 'タイトル\n[https://example.com/img.png] caption'
     const targets = computeImageTargets(text)
     expect(targets[0]?.standalone).toBe(false)
   })
@@ -101,5 +101,33 @@ describe('computeImageTargets', () => {
     const text = 'タイトル\n[[https://example.com/big.png]]'
     const targets = computeImageTargets(text)
     expect(targets[0]).toMatchObject({ kind: 'image', src: 'https://example.com/big.png' })
+  })
+})
+
+describe('only fetchable image URLs become targets', () => {
+  // The parser matches image notation on the '#.png'-style suffix alone, so
+  // everything here parses as an image node and has to be rejected downstream.
+  const rejected = [
+    '?userId=8607b16e-4561-4606-b0ea-402d3768bf3d#.svg',
+    '/relative/path.png',
+    'not a url at all#.svg',
+    'javascript:alert(1)#.png',
+    'file:///etc/passwd#.png',
+    'ftp://example.com/x.png',
+  ]
+
+  for (const src of rejected) {
+    test(`rejects ${src}`, () => {
+      expect(computeImageTargets(`T\n[${src}]`)).toEqual([])
+    })
+  }
+
+  test('keeps absolute http(s) URLs', () => {
+    expect(computeImageTargets('T\n[https://example.com/a.png]')).toHaveLength(1)
+    expect(computeImageTargets('T\n[http://example.com/a.png]')).toHaveLength(1)
+  })
+
+  test('icons are unaffected — they are resolved to a URL by the client, not carried as one', () => {
+    expect(computeImageTargets('T\n[someone.icon]')).toHaveLength(1)
   })
 })

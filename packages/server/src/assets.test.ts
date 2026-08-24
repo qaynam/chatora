@@ -263,3 +263,15 @@ describe('fetchAsset', () => {
     expect(calls).toHaveLength(1)
   })
 })
+
+describe('fetchAsset URL scheme', () => {
+  test('a non-http(s) URL is refused without touching the network', async () => {
+    const { layer: httpLayer, calls } = testHttpClient(() => png(1))
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    for (const url of ['javascript:alert(1)#.png', 'file:///etc/passwd#.png', '/relative.png']) {
+      const result = await runOnce(fetchAsset({ project: 'p', url }), httpLayer, credLayer)
+      expect(result.ok).toBe(false)
+    }
+    expect(calls).toHaveLength(0)
+  })
+})

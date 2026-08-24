@@ -127,6 +127,15 @@ const buildCredentialHeaders = (credential: Credential): Record<string, string> 
     ? { 'x-service-account-access-key': credential.value }
     : { 'x-personal-access-token': credential.value }
 
+const isFetchableUrl = (url: string): boolean => {
+  try {
+    const { protocol } = new URL(url)
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 const originOf = (url: string): string | null => {
   try {
     return new URL(url).origin
@@ -484,6 +493,10 @@ export const fetchAsset = (params: {
   readonly border?: BorderParams
 }): Effect.Effect<FetchAssetResult, never, SessionState | HttpClient | AssetCache> =>
   Effect.gen(function* () {
+    // This is the only place chatora turns page content into a network call, and page content
+    // is untrusted: nothing but an absolute http(s) URL gets to be one.
+    if (!isFetchableUrl(params.url)) return err('error', 'unsupported asset URL')
+
     const session = yield* SessionState
     const cache = yield* AssetCache
     const http = yield* HttpClient

@@ -23,6 +23,20 @@ const isWhitespaceText = (node: AnyNode): boolean =>
   node.type === 'text' && node.value.trim() === ''
 
 /**
+ * The parser's `isImageUrl` matches on the `#.png`-style suffix alone, with no scheme check,
+ * so `[?userId=…#.svg]`, `[/relative.png]` and `[javascript:…#.png]` all arrive here as image
+ * nodes. Only an absolute http(s) URL is something to fetch and draw.
+ */
+const isFetchableImage = (src: string): boolean => {
+  try {
+    const { protocol } = new URL(src)
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/**
  * A node is standalone when it's the line's own child (not nested inside
  * decoration markup) and the line has no other content besides whitespace.
  */
@@ -40,13 +54,10 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
     const { line, column } = node.position.start
     const standalone = isStandalone(ancestors)
     if (node.type === 'image') {
-      out.push({
-        line,
-        startChar: column,
-        src: asImageSrc(node.src) ?? node.src,
-        kind: 'image',
-        standalone,
-      })
+      const src = asImageSrc(node.src) ?? node.src
+      if (isFetchableImage(src)) {
+        out.push({ line, startChar: column, src, kind: 'image', standalone })
+      }
     } else {
       out.push({
         line,
