@@ -8,11 +8,36 @@ local defaults = {
   server_cmd = nil,
   sidebar_width = 32,
   related_height = 8,
+  -- Open the related-pages panel automatically when a page is opened. Closing
+  -- it with q suppresses reopening until the next gR / :Chatora related.
+  related_auto_open = true,
+  -- Save-state indicator: a small icon (sidebar mark / statusline component /
+  -- one cmdline echo) instead of toast notifications. false disables; a table
+  -- customizes: { icons = { clean='✓', dirty='●', saving='◍', error='✗' },
+  -- echo = false }.
+  status = true,
+  -- gd on an external URL: 'confirm' asks before opening in the browser,
+  -- 'open' opens immediately, 'ignore' leaves external links alone.
+  external_link = 'confirm',
+  -- Cosense's editor shortcuts in page buffers (insert mode). false disables
+  -- all; a table customizes/disables individually:
+  -- { insert_date = '<C-t>', insert_icon = '<C-i>',
+  --   date_format = '%Y-%m-%d %H:%M:%S', autopair = true }.
+  -- NOTE: <C-i> is <Tab> unless the terminal speaks the kitty keyboard
+  -- protocol (kitty / Ghostty / WezTerm).
+  keymaps = true,
+  -- Blank virtual lines inserted between lines: { line = 0, code = 0 }
+  -- (body lines / code-block interiors). A terminal cell has a fixed height,
+  -- so real (sub-cell) line-height only exists in GUIs ('linespace').
+  spacing = { line = 0, code = 0 },
   -- 'auto' = render inline images when a backend is usable; false = never.
   images = 'auto',
   -- Render backend: 'auto' prefers 3rd/image.nvim, falling back to
   -- folke/snacks.nvim's image module. 'image_nvim' / 'snacks' force one.
   image_backend = 'auto',
+  -- Horizontal rules above/below standalone images, so an image reads as
+  -- embedded content instead of blending into the page. false disables.
+  image_border = true,
   -- Completion UI in page buffers: 'auto' enables Neovim's native LSP
   -- completion (autotrigger) when blink.cmp is absent or disabled for the
   -- buffer; 'native' always enables it; false leaves completion entirely to
@@ -23,11 +48,13 @@ local defaults = {
   autosave = false,
   -- Cosense-style bullet pads on indented lines (guides + a bullet at the
   -- deepest level, plus inline spacing so it reads as a list). false disables;
-  -- a table customizes: { bullet = '⬤', guide = '│', spacing = true }.
+  -- a table customizes: { bullet = '⬤', guide = '│', spacing = true, gap = 1 }
+  -- (gap = spaces between the bullet and the text).
   pads = true,
   -- Conceal notation markup ([* ], link brackets, backticks) except on the
   -- cursor line (render-markdown.nvim style). false disables.
   conceal = true,
+  tables = true,
   -- Blank virtual lines shown below the page title. 0 disables.
   title_margin = 1,
 }

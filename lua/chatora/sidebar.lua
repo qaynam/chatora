@@ -174,7 +174,9 @@ function M.open(proj)
   if not (buf and vim.api.nvim_buf_is_valid(buf)) then
     buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_name(buf, 'chatora://sidebar')
-    vim.bo[buf].buftype = 'nofile'
+    -- acwrite (with page.lua's no-op chatora://* BufWriteCmd) so a reflexive
+    -- :wq closes the window instead of E382.
+    vim.bo[buf].buftype = 'acwrite'
     vim.bo[buf].bufhidden = 'hide'
     vim.bo[buf].swapfile = false
     vim.bo[buf].modifiable = false

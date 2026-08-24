@@ -5,8 +5,10 @@ Cosense（旧 Scrapbox）の Neovim クライアント。
 - 左サイドバーにページ一覧、右に本物の Neovim エディタ
 - `@cosense-toolbox/parser` による記法ハイライト（LSP semantic tokens）
 - リンク補完・定義ジャンプ・関連ページ（1-hop / 2-hop）・検索
-- PAT 認証（macOS Keychain 保存、または `COSENSE_PAT` 環境変数）
-- 書き込みは公式 `page-edit-for-ai` API（preview → submit）
+- `table:` ブロックの罫線描画（render-markdown.nvim 風、カーソル行はソース表示）
+- PAT 認証（macOS Keychain 保存、または `COSENSE_PAT` 環境変数）。複数アカウント対応（`:Chatora account` で切り替え）
+- 書き込みは公式 `page-edit-for-ai` API（preview → submit）。`:w` は同期なので `:wq` 一回で保存して閉じられる
+- Cosense のエディタショートカット: `<C-t>` 日時挿入 / `<C-i>` 自分のアイコン挿入 / `[` の自動ペア
 
 設計は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を参照。
 
@@ -25,7 +27,14 @@ lazy.nvim（GitHub から直接）:
     -- origin = 'https://scrapbox.io',  -- 既定値
     -- project = 'your-project',        -- 固定したい場合。未指定なら起動時に選択
     -- autosave = 3,                    -- 編集停止 n 秒後に自動保存（既定 false）
-    -- pads = { bullet = '•' },         -- 箇条書き表示のカスタマイズ / false で無効
+    -- pads = { bullet = '•', gap = 1 },-- 箇条書き表示のカスタマイズ / false で無効
+    -- tables = false,                  -- table: ブロックの罫線描画を無効化（既定 true）
+    -- related_auto_open = false,       -- 関連ページパネルの自動表示を止める（既定 true）
+    -- external_link = 'open',          -- gd で確認なしにブラウザを開く（既定 'confirm'）
+    -- status = false,                  -- 保存状態アイコン（✓/●/◍/✗）を無効化（既定 true）
+    -- keymaps = false,                 -- <C-t>/<C-i>/[ 自動ペアを無効化（既定 true）
+    -- image_border = false,            -- 画像上下の罫線を消す（既定 true）
+    -- spacing = { line = 1, code = 0 },-- 行間（仮想空行）。既定はどちらも 0
   },
 }
 ```
@@ -60,11 +69,26 @@ alias chatora='/path/to/chatora/bin/chatora'
 ## 使い方
 
 1. `:Chatora` — 初回は PAT の入力を求められる（発行: https://scrapbox.io/settings/personal-access-tokens ）。検証後 macOS Keychain に保存される。`COSENSE_PAT` 環境変数があればそちらが優先される。
-2. 左サイドバー: `<CR>` 開く / `R` 再読込 / `s` 検索 / `n` 新規ページ / `q` 閉じる
-3. ページバッファ: 普通に編集して `:w` で保存（preview → submit の公式 API）。`gR` で関連ページパネル（1-hop / 2-hop）をトグル。`[` や `#` でリンク補完、`gd` でリンク先へジャンプ。
+2. 左サイドバー: `<CR>` 開く / `R` 再読込 / `s` 検索 / `n` 新規ページ / `P` プロジェクト切替 / `q` 閉じる
+3. ページバッファ: 普通に編集して `:w` で保存（preview → submit の公式 API、同期なので `:wq` 一回で閉じられる）。`gR` で関連ページパネル（1-hop / 2-hop）をトグル（既定で自動表示、`q` で閉じると次の `gR` まで出ない）。`[` や `#` でリンク補完、`gd` でリンク先へジャンプ（外部 URL は確認のうえブラウザで開く）。
 4. `:Chatora new [title]` — 新規ページ作成（title 省略時は入力プロンプト）
-5. `:Chatora search [query]` / `:Chatora related` / `:Chatora logout`
-6. `:Chatora help` — コマンド・キーマップのチートシート
+5. `:Chatora search [query]` / `:Chatora related` / `:Chatora project` / `:Chatora logout`
+6. `:Chatora account` — アカウントの切り替え・追加（PAT ごとに 1 アカウント。切り替えるとサイドバーを再読込）
+7. `:Chatora help` — コマンド・キーマップのチートシート
+
+### 保存状態の表示
+
+保存の成否はトーストではなく小さなアイコンで伝える: サイドバーの ● マーク、
+コマンドラインへの一行 echo、そして statusline コンポーネント。
+statusline に出すには（例: 素の statusline）:
+
+```lua
+vim.o.statusline = "%f %{%v:lua.require'chatora.status'.component()%}"
+```
+
+lualine など「色は自前で付ける」系のプラグインにはアイコンだけ返す
+`require('chatora.status').icon(bufnr)`（戻り値: アイコン, ハイライト名）が使える。
+アイコンは `✓` 保存済み / `●` 未保存 / `◍` 保存中 / `✗` 失敗（`status.icons` で変更可）。
 
 ## 開発
 

@@ -13,6 +13,10 @@ local ns = vim.api.nvim_create_namespace('chatora_related')
 local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraRelatedHeader', { bold = true, underline = true, default = true })
   vim.api.nvim_set_hl(0, 'ChatoraRelatedEmpty', { link = 'NonText', default = true })
+  -- The panel gets the float background so it reads as chrome, not as a
+  -- continuation of the page. Overridable like every Chatora* group.
+  vim.api.nvim_set_hl(0, 'ChatoraRelatedNormal', { link = 'NormalFloat', default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraRelatedTitle', { link = 'Title', default = true })
 end
 
 local function is_open()
@@ -29,7 +33,9 @@ local function ensure_buf()
   end
   buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_name(buf, 'chatora://related')
-  vim.bo[buf].buftype = 'nofile'
+  -- acwrite (with page.lua's no-op chatora://* BufWriteCmd) so a reflexive
+  -- :wq closes the window instead of E382.
+  vim.bo[buf].buftype = 'acwrite'
   vim.bo[buf].bufhidden = 'hide'
   vim.bo[buf].swapfile = false
   vim.bo[buf].modifiable = false
@@ -37,7 +43,9 @@ local function ensure_buf()
 
   local opts = { buffer = buf, nowait = true, silent = true }
   vim.keymap.set('n', '<CR>', function() M.open_current() end, opts)
-  vim.keymap.set('n', 'q', function() M.close() end, opts)
+  vim.keymap.set('n', 'q', function()
+    M.close({ by_user = true })
+  end, opts)
 end
 
 local function render(links1hop, links2hop)
@@ -98,13 +106,21 @@ function M.refresh(project, title)
   end)
 end
 
+-- Set when the user closes the panel with q: related_auto_open must not fight
+-- an explicit close, so auto-open stays off until the next manual toggle.
+local user_closed = false
+
 --- Notify the panel that a page was (re)loaded: refreshes it if currently
---- open, otherwise just remembers the target page for next time it opens.
+--- open, opens it first when related_auto_open is on, otherwise just
+--- remembers the target page for next time it opens.
 function M.on_page_opened(project, title)
+  cur_project, cur_title = project, title
   if is_open() then
     M.refresh(project, title)
-  else
-    cur_project, cur_title = project, title
+    return
+  end
+  if config.options.related_auto_open and not user_closed then
+    M.open()
   end
 end
 
@@ -126,6 +142,10 @@ function M.open()
   vim.wo[win].winfixheight = true
   -- Same as the sidebar: never let another buffer take over this window.
   vim.wo[win].winfixbuf = true
+  -- Label + panel background so the split is visibly chrome, not page content.
+  vim.wo[win].winbar = '%#ChatoraRelatedTitle# 関連ページ%*'
+  vim.wo[win].winhighlight = 'Normal:ChatoraRelatedNormal,EndOfBuffer:ChatoraRelatedNormal'
+  user_closed = false
 
   if vim.api.nvim_win_is_valid(parent_win) then
     vim.api.nvim_set_current_win(parent_win)
@@ -136,16 +156,19 @@ function M.open()
   end
 end
 
-function M.close()
+function M.close(opts)
   if is_open() then
     vim.api.nvim_win_close(win, true)
   end
   win = nil
+  if opts and opts.by_user then
+    user_closed = true
+  end
 end
 
 function M.toggle()
   if is_open() then
-    M.close()
+    M.close({ by_user = true })
   else
     M.open()
   end

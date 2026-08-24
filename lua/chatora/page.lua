@@ -8,6 +8,7 @@ local codeblock = require('chatora.codeblock')
 local images = require('chatora.images')
 local pads = require('chatora.pads')
 local config = require('chatora.config')
+local status = require('chatora.status')
 
 local uv = vim.uv or vim.loop
 local autosave_timers = {}
@@ -87,16 +88,17 @@ local function finalize_buffer(bufnr, project, title)
   apply_title_margin(bufnr)
   lsp.ensure_start(bufnr)
   related.on_page_opened(project, title)
-  refresh_sidebar_marks()
+  status.sync(bufnr)
   -- on_lines is the only change notification that fires for every kind of
   -- edit (typing, API, :normal); TextChanged/BufModifiedSet miss scripted
-  -- changes. Drives the sidebar's unsaved (●) marks.
+  -- changes. Drives the save-state indicator (and through it the sidebar's
+  -- unsaved ● marks).
   if not vim.b[bufnr].chatora_attached then
     vim.b[bufnr].chatora_attached = true
     vim.api.nvim_buf_attach(bufnr, false, {
       on_lines = function()
         vim.schedule(function()
-          refresh_sidebar_marks()
+          status.sync(bufnr)
           schedule_autosave(bufnr)
         end)
       end,
@@ -104,6 +106,7 @@ local function finalize_buffer(bufnr, project, title)
         vim.schedule(function()
           pcall(vim.api.nvim_buf_set_var, bufnr, 'chatora_attached', false)
           drop_autosave(bufnr)
+          status.forget(bufnr)
           refresh_sidebar_marks()
         end)
       end,
@@ -112,7 +115,11 @@ local function finalize_buffer(bufnr, project, title)
   vim.keymap.set('n', 'gR', function()
     related.toggle()
   end, { buffer = bufnr, nowait = true, silent = true })
-  vim.keymap.set('n', 'gd', vim.lsp.buf.definition, { buffer = bufnr, nowait = true, silent = true })
+  -- External URLs open in the browser (confirmed first); everything else is
+  -- the normal LSP definition jump into another cosense:// buffer.
+  vim.keymap.set('n', 'gd', function()
+    require('chatora.links').goto_definition()
+  end, { buffer = bufnr, nowait = true, silent = true })
   vim.keymap.set('n', 'gs', function()
     require('chatora').search()
   end, { buffer = bufnr, nowait = true, silent = true })
@@ -120,8 +127,11 @@ local function finalize_buffer(bufnr, project, title)
   codeblock.attach(bufnr)
   images.attach(bufnr, project)
   pads.attach(bufnr)
+  require('chatora.table').attach(bufnr)
   require('chatora.render').attach(bufnr)
+  require('chatora.spacing').attach(bufnr)
   require('chatora.completion').attach(bufnr)
+  require('chatora.keymaps').attach(bufnr)
 end
 
 local function handle_read(ev)
@@ -155,76 +165,99 @@ local function handle_read(ev)
   end)
 end
 
+local SAVE_TIMEOUT_MS = 15000
+
 local function handle_write(ev)
   local bufnr = ev.buf
   local uri_str = vim.api.nvim_buf_get_name(bufnr)
 
+  status.set(bufnr, 'saving', '保存中…')
+
+  -- The save is awaited synchronously: :wq / :x check 'modified' the moment
+  -- BufWriteCmd returns, so an async save would leave the buffer "unsaved"
+  -- and force a second :wq. vim.wait pumps the main loop, which is what lets
+  -- the LSP reply (delivered via vim.schedule) land while we block.
+  local done, save_err, save_result = false, nil, nil
   lsp.request('chatora/savePage', { uri = uri_str }, function(err, result)
-    if err then
-      local msg = type(err) == 'table' and (err.message or vim.inspect(err)) or tostring(err)
-      vim.notify('[chatora] ' .. msg, vim.log.levels.ERROR)
-      return
-    end
-    if not vim.api.nvim_buf_is_valid(bufnr) then
-      return
-    end
-
-    if not result or result.ok == false then
-      local code = result and result.code
-      if code == 'notFastForward' then
-        vim.notify(
-          '[chatora] リモートが更新されています。:e で再読込してから保存してください',
-          vim.log.levels.WARN
-        )
-      else
-        vim.notify('[chatora] ' .. ((result and result.message) or 'save failed'), vim.log.levels.ERROR)
-      end
-      return
-    end
-
-    if result.text then
-      local winid = vim.fn.bufwinid(bufnr)
-      local cursor = nil
-      if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
-        cursor = vim.api.nvim_win_get_cursor(winid)
-      end
-      set_content(bufnr, result.text)
-      if cursor and vim.api.nvim_win_is_valid(winid) then
-        local max_line = vim.api.nvim_buf_line_count(bufnr)
-        pcall(vim.api.nvim_win_set_cursor, winid, { math.min(cursor[1], max_line), cursor[2] })
-      end
-    end
-
-    vim.bo[bufnr].modified = false
-    -- The modified flag just flipped without any text change, so no autocmd or
-    -- on_lines fires — refresh the sidebar's ● mark explicitly.
-    refresh_sidebar_marks()
-
-    if result.titleChanged then
-      -- Renaming the buffer in place would desync the LSP client (didOpen was sent for the
-      -- old URI), so reopen the page under its new URI instead.
-      local project = uri.parse(uri_str)
-      local new_uri = uri.format(project, result.titleChanged.to)
-      vim.notify(
-        '[chatora] title changed: ' .. result.titleChanged.from .. ' -> ' .. result.titleChanged.to,
-        vim.log.levels.INFO
-      )
-      local winid = vim.fn.bufwinid(bufnr)
-      if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
-        vim.api.nvim_win_call(winid, function()
-          -- magic.file=false: the URI contains %XX escapes that :edit would
-          -- otherwise expand as the "current file" special character.
-          vim.cmd({ cmd = 'edit', args = { new_uri }, magic = { file = false } })
-        end)
-        if vim.api.nvim_buf_is_valid(bufnr) then
-          pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-        end
-      end
-      return
-    end
-
-    vim.notify('[chatora] saved', vim.log.levels.INFO)
+    save_err, save_result = err, result
+    done = true
   end)
+  vim.wait(SAVE_TIMEOUT_MS, function()
+    return done
+  end, 10)
+
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+
+  if not done then
+    status.set(bufnr, 'error')
+    vim.notify('[chatora] 保存がタイムアウトしました', vim.log.levels.ERROR)
+    return
+  end
+
+  if save_err then
+    local msg = type(save_err) == 'table' and (save_err.message or vim.inspect(save_err))
+      or tostring(save_err)
+    status.set(bufnr, 'error')
+    vim.notify('[chatora] ' .. msg, vim.log.levels.ERROR)
+    return
+  end
+
+  local result = save_result
+  if not result or result.ok == false then
+    local code = result and result.code
+    status.set(bufnr, 'error')
+    if code == 'notFastForward' then
+      vim.notify(
+        '[chatora] リモートが更新されています。:e で再読込してから保存してください',
+        vim.log.levels.WARN
+      )
+    else
+      vim.notify('[chatora] ' .. ((result and result.message) or 'save failed'), vim.log.levels.ERROR)
+    end
+    return
+  end
+
+  if result.text then
+    local winid = vim.fn.bufwinid(bufnr)
+    local cursor = nil
+    if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
+      cursor = vim.api.nvim_win_get_cursor(winid)
+    end
+    set_content(bufnr, result.text)
+    if cursor and vim.api.nvim_win_is_valid(winid) then
+      local max_line = vim.api.nvim_buf_line_count(bufnr)
+      pcall(vim.api.nvim_win_set_cursor, winid, { math.min(cursor[1], max_line), cursor[2] })
+    end
+  end
+
+  vim.bo[bufnr].modified = false
+  -- Success feedback is one cmdline echo + the ✓ icon, not a toast; failures
+  -- above still use vim.notify, where demanding attention is the point.
+  status.set(bufnr, 'clean', '保存しました')
+
+  if result.titleChanged then
+    -- Renaming the buffer in place would desync the LSP client (didOpen was sent for the
+    -- old URI), so reopen the page under its new URI instead.
+    local project = uri.parse(uri_str)
+    local new_uri = uri.format(project, result.titleChanged.to)
+    vim.notify(
+      '[chatora] title changed: ' .. result.titleChanged.from .. ' -> ' .. result.titleChanged.to,
+      vim.log.levels.INFO
+    )
+    local winid = vim.fn.bufwinid(bufnr)
+    if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
+      vim.api.nvim_win_call(winid, function()
+        -- magic.file=false: the URI contains %XX escapes that :edit would
+        -- otherwise expand as the "current file" special character.
+        vim.cmd({ cmd = 'edit', args = { new_uri }, magic = { file = false } })
+      end)
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+      end
+    end
+  end
 end
 
 --- Titles of loaded cosense buffers with unsaved changes.
@@ -245,6 +278,17 @@ end
 local augroup = vim.api.nvim_create_augroup('ChatoraPage', { clear = true })
 vim.api.nvim_create_autocmd('BufReadCmd', { group = augroup, pattern = 'cosense://*', callback = handle_read })
 vim.api.nvim_create_autocmd('BufWriteCmd', { group = augroup, pattern = 'cosense://*', callback = handle_write })
+
+-- chatora:// UI buffers (sidebar, related panel) have nothing to write, but a
+-- reflexive :wq in them should close the window instead of failing with E382 —
+-- they use buftype=acwrite and this no-op accepts the write.
+vim.api.nvim_create_autocmd('BufWriteCmd', {
+  group = augroup,
+  pattern = 'chatora://*',
+  callback = function(ev)
+    vim.bo[ev.buf].modified = false
+  end,
+})
 
 -- :q on a window showing an unsaved page just hides the buffer ('hidden'):
 -- warn so the change isn't forgotten. Neovim itself still hard-blocks
