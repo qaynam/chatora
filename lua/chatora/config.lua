@@ -32,6 +32,7 @@ local defaults = {
 
   pads = true,
   conceal = true,
+  codeblock_numbers = true,
   tables = true,
   title_margin = 1,
   spacing = { line = 0, code = 0 },
@@ -129,7 +130,6 @@ function M.notation_list()
   return list
 end
 
---- Icon configured for a notation `name`, or nil if it has none.
 function M.notation_icon(name)
   for _, spec in pairs(M.options.notations) do
     if spec.name == name then

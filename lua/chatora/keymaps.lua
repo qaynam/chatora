@@ -87,16 +87,10 @@ local function in_table_row(bufnr, row)
   return false
 end
 
---- Neovim receives <C-i> and <Tab> as the same byte unless the terminal speaks
---- the kitty keyboard protocol, so one handler has to serve both. Which of the
---- three things this key can mean is decided by where the cursor is:
----   * inside a table row, past the indent -> a real tab (the cell separator;
----     page buffers use expandtab, so a plain Tab would type a space and the
----     row would parse as one cell)
----   * still in the leading whitespace -> ordinary Tab, i.e. indent the line
----   * anywhere else -> insert the icon, matching Cosense
---- On a terminal that does distinguish them, the separate <C-i> map below wins
---- and Tab keeps its ordinary meaning throughout.
+--- <C-i> and <Tab> are the same byte unless the terminal speaks the kitty
+--- keyboard protocol, so one handler serves both and picks by cursor position.
+--- A table row needs a *real* tab: page buffers use expandtab, so a plain Tab
+--- would type a space and the row would parse as a single cell.
 local function tab_map(bufnr, opts)
   vim.keymap.set('i', '<Tab>', function()
     local row, col = unpack(vim.api.nvim_win_get_cursor(0))
@@ -178,8 +172,7 @@ function M.attach(bufnr)
     end, { buffer = bufnr, silent = true, desc = 'chatora: 自分のアイコンを挿入' })
   end
 
-  -- Registered last so it wins the shared byte on terminals that don't
-  -- distinguish <C-i> from <Tab>; it falls back to the icon itself.
+  -- Last, so it wins the byte <C-i> shares with <Tab>.
   tab_map(bufnr, opts)
 
   if opts.autopair then
@@ -187,7 +180,7 @@ function M.attach(bufnr)
   end
 end
 
---- The one mapping chatora sets outside a page buffer. Called from setup().
+--- The one mapping chatora sets outside a page buffer.
 function M.setup_global()
   local opts = settings()
   if not (opts and opts.toggle_sidebar) then

@@ -198,6 +198,25 @@ local ok, err = pcall(function()
     assert(label_n == 1, 'expected the filename to be highlighted as a label')
     assert(tinted == 2, 'expected both interior lines tinted, got ' .. tinted)
 
+    -- Numbering restarts per block and is zero-padded to at least two digits.
+    local numbers = {}
+    for _, m in ipairs(details) do
+      for _, chunk in ipairs(m[4].virt_text or {}) do
+        if m[4].virt_text_pos == 'inline' then
+          numbers[#numbers + 1] = chunk[1]
+        end
+      end
+    end
+    assert(vim.deep_equal(numbers, { '01 ', '02 ' }), 'unexpected line numbers: ' .. vim.inspect(numbers))
+
+    require('chatora.config').options.codeblock_numbers = false
+    codeblock.refresh(buf)
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, codeblock.ns, 0, -1, { details = true })) do
+      assert(m[4].virt_text_pos ~= 'inline', 'expected no numbers when codeblock_numbers = false')
+    end
+    require('chatora.config').options.codeblock_numbers = true
+    codeblock.refresh(buf)
+
     -- Re-attaching must not double-attach (guard flag) or error.
     codeblock.attach(buf)
     vim.api.nvim_buf_delete(buf, { force = true })

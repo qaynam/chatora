@@ -22,12 +22,8 @@ export interface CompletionDetection {
   readonly typedText: string
 }
 
-// Link completion fires only when the cursor sits inside a *closed* bracket pair
-// `[...|...]` (Cosense behavior — autopairs/the web editor close the bracket the moment
-// it's typed). Backward scan: hitting `]` first means the cursor is past a pair; a `[`
-// that is the second half of `[[` belongs to `[[...]]` (bold/large-image), not a link.
-// Forward scan: the closing `]` must exist ahead on the same line; accepting a candidate
-// replaces the whole pair.
+// Only inside a *closed* pair, matching Cosense, whose editor closes the bracket as soon as
+// it is typed. A `[` that is the second half of `[[` opens bold/large-image, not a link.
 const detectLink = (lineText: string, character: number): CompletionDetection | null => {
   for (let i = character - 1; i >= 0; i--) {
     const ch = lineText[i]
@@ -101,11 +97,7 @@ const isSuppressed = (page: Page, line: number, character: number): boolean => {
   return suppressed
 }
 
-/**
- * The caller-level entry point: parses the whole document, suppresses completion inside
- * CodeBlock / inlineCode spans, then delegates to the pure detectCompletion for the cursor's
- * own line.
- */
+/** `detectCompletion` for one line of a document, suppressed inside code spans. */
 export const detectCompletionInDocument = (
   text: string,
   position: { line: number; character: number },
@@ -143,12 +135,9 @@ const candidateIndex = (titles: readonly TitleEntryLike[]): Candidate[] => {
 const VECTOR_BUDGET = Duration.millis(120)
 
 /**
- * Permissive shape for what `/search/titles` actually sends. @chatora/core's `TitleEntry`
- * declares `id`/`titleLc`/`updated`/`image` as required, but the real payload is parsed with
- * a bare `as` cast (no runtime validation — see CosenseApi.searchTitles) and the e2e fake
- * server's fixture omits everything but `title`, so treat every field but `title` as
- * possibly absent here. `links` is each page's outgoing link targets (verified against
- * cosense-app-client's TitleEntrySchema — see the response shape note in the task report).
+ * What `/search/titles` actually sends. `TitleEntry` declares more fields as required, but
+ * CosenseApi.searchTitles casts the body instead of validating it, so only `title` can be
+ * relied on. `links` is the page's outgoing link targets.
  */
 export interface TitleEntryLike {
   readonly title: string
@@ -187,11 +176,10 @@ export const buildCandidateIndex = (titles: readonly TitleEntryLike[]): Candidat
 }
 
 /**
- * Tiered ranking for a completion query: exact, then prefix, then substring, then
- * Asearch-fuzzy (1 error, then 2 errors) — each tier only run once the stricter ones leave
- * room under the cap, deduped across tiers by key. Within a tier, sort by `updated` desc
- * when the pool has updated data at all; otherwise keep API/insertion order (stable sort).
- * An empty query returns the pool itself in that same recency-or-API order, capped.
+ * Ranks a query over `candidates`: exact, prefix, substring, then Asearch-fuzzy, deduped by
+ * key and capped. Tiers stop once the cap is reached — fuzzy has a stricter condition of its
+ * own, below. Within a tier, most recently updated first when the pool carries `updated` at
+ * all, else API order. An empty query is the whole pool in that same order.
  */
 export const rankCandidates = (
   candidates: readonly Candidate[],
@@ -224,11 +212,9 @@ export const rankCandidates = (
   if (result.length < MAX_COMPLETION_ITEMS) {
     take(pool.filter((c) => !c.key.startsWith(q) && c.key.includes(q)))
   }
-  // Fuzzy is typo tolerance, not a way to pad the list: it only runs when the
-  // literal tiers came up short, since it costs a full scan of the pool. A
-  // 1-character query is excluded outright — it matches nearly everything.
-  // Both error budgets are collected in one pass; two `filter`s over a large
-  // pool measurably outweighed the search itself.
+  // A 1-character query fuzzy-matches nearly everything. Both error budgets are
+  // collected in one pass: two `filter`s over a large pool measurably outweighed
+  // the search itself.
   if (result.length < FUZZY_FALLBACK_THRESHOLD && q.length >= 2) {
     const matcher = Asearch(q)
     const oneError: Candidate[] = []
@@ -257,11 +243,7 @@ const buildTextEdit = (
   newText: detection.kind === 'link' ? `[${title}]` : `#${title}`,
 })
 
-/**
- * Maps a candidate's existence to its LSP presentation: an existing page is a plain
- * Reference; a link target with no page yet ("red link" in Cosense) is a subtly-marked
- * Text item, so the client can still show it differently without shouting about it.
- */
+/** An existing page is a Reference; a link target with no page yet is a Text item marked `(new)`. */
 export const candidateItemFields = (
   exists: boolean,
 ): { kind: CompletionItemKind; detail?: string } =>

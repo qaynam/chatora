@@ -9,6 +9,7 @@ describe('computeImageTargets', () => {
       {
         line: 1,
         startChar: 0,
+        endChar: '[https://kanban.qaynam.dev/api/status/xxx?userId=yyy#.svg]'.length,
         src: 'https://kanban.qaynam.dev/api/status/xxx?userId=yyy#.svg',
         kind: 'image',
         standalone: true,
@@ -23,6 +24,7 @@ describe('computeImageTargets', () => {
       {
         line: 1,
         startChar: 3,
+        endChar: 3 + '[https://example.com/pic.png]'.length,
         src: 'https://example.com/pic.png',
         kind: 'image',
         standalone: false,
@@ -34,8 +36,24 @@ describe('computeImageTargets', () => {
     const text = 'タイトル\n[qaynam.icon] と [foo.icon*3]'
     const targets = computeImageTargets(text)
     expect(targets).toEqual([
-      { line: 1, startChar: 0, src: 'qaynam', kind: 'icon', iconUser: 'qaynam', standalone: false },
-      { line: 1, startChar: 16, src: 'foo', kind: 'icon', iconUser: 'foo', standalone: false },
+      {
+        line: 1,
+        startChar: 0,
+        endChar: 13,
+        src: 'qaynam',
+        kind: 'icon',
+        iconUser: 'qaynam',
+        standalone: false,
+      },
+      {
+        line: 1,
+        startChar: 16,
+        endChar: 28,
+        src: 'foo',
+        kind: 'icon',
+        iconUser: 'foo',
+        standalone: false,
+      },
     ])
   })
 
@@ -47,6 +65,7 @@ describe('computeImageTargets', () => {
       {
         line: 1,
         startChar: 0,
+        endChar: `[https://gyazo.com/${hash}]`.length,
         src: `https://i.gyazo.com/${hash}.png`,
         kind: 'image',
         standalone: true,
@@ -64,7 +83,15 @@ describe('computeImageTargets', () => {
     const text = 'タイトル\n[qaynam.icon]'
     const targets = computeImageTargets(text)
     expect(targets).toEqual([
-      { line: 1, startChar: 0, src: 'qaynam', kind: 'icon', iconUser: 'qaynam', standalone: true },
+      {
+        line: 1,
+        startChar: 0,
+        endChar: 13,
+        src: 'qaynam',
+        kind: 'icon',
+        iconUser: 'qaynam',
+        standalone: true,
+      },
     ])
   })
 

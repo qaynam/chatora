@@ -157,12 +157,10 @@ local function build_border(widths, left, junction, right, fill)
   return table.concat(parts)
 end
 
---- Draw one row as `│ cell │ cell │`: the inter-cell tabs are concealed and
---- replaced by the separators, each cell is padded out to its column width, and
---- the row is closed on both sides so it lines up with the border lines. Rows
---- with fewer cells than the table has columns get the rest as empty ones.
---- Skipped entirely on the cursor's row (anti-conceal), since inline virt_text
---- isn't hidden by 'concealcursor' the way `conceal` ranges are.
+--- Draw one row as `│ cell │ cell │`, padding short rows out with empty
+--- columns so every row is exactly as wide as the border lines. Callers skip
+--- the cursor's row: inline virt_text isn't hidden by 'concealcursor' the way
+--- `conceal` ranges are, so it would sit on top of the revealed source.
 local function render_row(bufnr, line_no, row, widths)
   local ncells = #row.cells
   if ncells == 0 then
@@ -211,8 +209,7 @@ local function render_borders(bufnr, lines, block, widths, header_enabled, grid_
   local first_line_no = block.start_line
   local last_line_no = block.end_line - 1
 
-  --- The row's own indent, so a border sits under its content rather than at
-  --- the window edge.
+  --- The row's own indent, so a border sits under its content.
   local function prefix(line_no, row)
     return (lines[line_no + 1] or ''):sub(1, row.indent)
   end
@@ -227,7 +224,6 @@ local function render_borders(bufnr, lines, block, widths, header_enabled, grid_
   rule(first_line_no, block.rows[1], '╭', '┬', '╮', 'ChatoraTableBorder', true)
 
   -- Between every pair of rows, so a wide table stays readable across columns.
-  -- The first one doubles as the header rule when headers are on.
   for idx = 1, #block.rows - 1 do
     local is_header_rule = idx == 1 and header_enabled
     if is_header_rule or grid_enabled then

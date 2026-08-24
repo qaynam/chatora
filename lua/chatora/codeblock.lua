@@ -7,6 +7,8 @@
 -- line at or below the marker's indent ends it.
 local M = {}
 
+local config = require('chatora.config')
+
 M.ns = vim.api.nvim_create_namespace('chatora_codeblock')
 
 local DEBOUNCE_MS = 150
@@ -173,21 +175,34 @@ end
 local function ensure_hl()
   local normal = vim.api.nvim_get_hl(0, { name = 'Normal', link = false })
   local cursorline = vim.api.nvim_get_hl(0, { name = 'CursorLine', link = false })
-  vim.api.nvim_set_hl(0, 'ChatoraCodeBlock', {
-    bg = cursorline and cursorline.bg or (normal and normal.bg) or nil,
-    default = true,
-  })
-  vim.api.nvim_set_hl(0, 'ChatoraCodeLabel', { link = 'Label', default = true })
+  local block_bg = cursorline and cursorline.bg or (normal and normal.bg) or nil
+  vim.api.nvim_set_hl(0, 'ChatoraCodeBlock', { bg = block_bg, default = true })
+  -- The filename reads as a tab above the block, the way Cosense's web UI
+  -- draws it, so it takes the block's own background.
+  vim.api.nvim_set_hl(0, 'ChatoraCodeLabel', { bg = block_bg, bold = true, default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraCodeLineNr', { link = 'LineNr', default = true })
 end
 
---- Tint the block's interior and turn its `code:` marker into a bare filename
---- label. The `code:` prefix is concealed like any other notation, so the
---- cursor line still shows what is really in the buffer.
+--- Tint the block's interior, number its lines the way Cosense's web UI does,
+--- and turn the `code:` marker into a bare filename label. The prefix is
+--- concealed like any other notation, so the cursor line still shows what is
+--- really in the buffer.
 local function decorate_block(bufnr, lines, block)
+  local count = block.end_line - block.start_line
+  -- Numbering restarts per block and is padded to at least two digits, matching
+  -- the web UI; wider blocks grow the gutter rather than misaligning.
+  local width = math.max(2, #tostring(count))
   for lnum = block.start_line, block.end_line - 1 do
     pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, lnum, 0, {
       line_hl_group = 'ChatoraCodeBlock',
     })
+    if config.options.codeblock_numbers ~= false then
+      local n = ('%0' .. width .. 'd '):format(lnum - block.start_line + 1)
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, lnum, 0, {
+        virt_text = { { n, 'ChatoraCodeLineNr' } },
+        virt_text_pos = 'inline',
+      })
+    end
   end
 
   local marker = lines[block.marker_line + 1] or ''

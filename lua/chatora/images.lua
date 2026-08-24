@@ -73,8 +73,11 @@ local function snacks_image()
   return snacks.image
 end
 
--- Backend contract: place(bufnr, path, row, col, opts) -> { close = fn } | nil
--- with row 1-based, col 0-based (byte), opts.height / opts.max_height in cells.
+-- Backend contract: place(bufnr, path, geom, opts) -> { close = fn } | nil.
+-- `geom` carries the notation's position in both coordinate systems the two
+-- backends disagree about: `row` (1-based), `byte_col`/`byte_end` (0-based byte
+-- offsets into the line) and `screen_col` (display cells, which is what the
+-- indent actually looks like once pads' virtual text is counted).
 
 --- 3rd/image.nvim. Geometry x/y are 0-based, and an inline placement only
 --- follows the buffer when bound to both a window and a buffer.
@@ -84,7 +87,7 @@ local function image_nvim_backend()
     return nil
   end
   return {
-    place = function(bufnr, path, row, col, opts)
+    place = function(bufnr, path, geom, opts)
       local win = vim.fn.bufwinid(bufnr)
       if win == -1 then
         return nil
@@ -94,8 +97,8 @@ local function image_nvim_backend()
         buffer = bufnr,
         inline = true,
         with_virtual_padding = true,
-        x = col,
-        y = row - 1,
+        x = geom.screen_col,
+        y = geom.row - 1,
         height = opts and opts.height or nil,
         max_height = opts and opts.max_height or nil,
         max_width = opts and opts.max_width or nil,
@@ -119,9 +122,16 @@ local function snacks_backend()
     return nil
   end
   return {
-    place = function(bufnr, path, row, col, opts)
-      local placement_opts =
-        vim.tbl_extend('force', { pos = { row, col }, inline = true }, opts or {})
+    place = function(bufnr, path, geom, opts)
+      -- snacks slices the line with these numbers as well as using them as
+      -- screen columns, so they have to be byte offsets. Without `range` it
+      -- treats the rest of the notation as text sitting after the image, which
+      -- costs the padded layout and adds an inline anchor glyph.
+      local placement_opts = vim.tbl_extend('force', {
+        pos = { geom.row, geom.byte_col },
+        range = { geom.row, geom.byte_col, geom.row, geom.byte_end },
+        inline = true,
+      }, opts or {})
       local ok, p = pcall(image.placement.new, bufnr, path, placement_opts)
       if not ok or not p then
         return nil
@@ -208,36 +218,41 @@ local function build_targets(bufnr, project, origin, border, images)
   for _, img in ipairs(images) do
     local line = lines[img.line + 1]
     if line then
-      local ok, byte_col = pcall(vim.str_byteindex, line, 'utf-16', img.startChar, false)
-      if ok then
+      local ok_start, byte_col = pcall(vim.str_byteindex, line, 'utf-16', img.startChar, false)
+      local ok_end, byte_end = pcall(vim.str_byteindex, line, 'utf-16', img.endChar, false)
+      if ok_start and ok_end then
         local indent = #(line:match('^[ \t]*') or '')
-        local col = screen_col(line, byte_col, indent)
-        local row = img.line + 1
+        local geom = {
+          row = img.line + 1,
+          byte_col = byte_col,
+          byte_end = byte_end,
+          screen_col = screen_col(line, byte_col, indent),
+        }
 
         if img.kind == 'icon' then
           targets[#targets + 1] = {
             url = icon_url(origin, project, img.iconUser),
-            row = row,
-            col = col,
+            geom = geom,
             opts = { height = 1 },
             standalone = img.standalone,
           }
         elseif img.standalone then
           targets[#targets + 1] = {
             url = img.src,
-            row = row,
-            col = col,
+            geom = geom,
             -- Capped at the room left of the right edge, so a wide image
             -- scales down instead of being clipped.
-            opts = { max_height = config.options.image_height, max_width = math.max(1, text_width(bufnr) - col) },
+            opts = {
+              max_height = config.options.image_height,
+              max_width = math.max(1, text_width(bufnr) - geom.screen_col),
+            },
             border = border,
             standalone = true,
           }
         else
           targets[#targets + 1] = {
             url = img.src,
-            row = row,
-            col = col,
+            geom = geom,
             opts = { height = 1 },
             standalone = false,
           }
@@ -271,7 +286,7 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
   -- constantly, and re-placing on every such edit would just flash.
   local counts = {}
   for _, target in ipairs(targets) do
-    local key = target.url .. (target.standalone and ('\0' .. target.col) or '')
+    local key = target.url .. (target.standalone and ('\0' .. target.geom.screen_col) or '')
     counts[key] = (counts[key] or 0) + 1
   end
   local parts = {}
@@ -293,11 +308,11 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
   local new_placements = {}
   placements_by_bufnr[bufnr] = new_placements
 
-  local function place(path, row, col, opts)
+  local function place(path, geom, opts)
     if epoch_by_bufnr[bufnr] ~= epoch or not vim.api.nvim_buf_is_valid(bufnr) then
       return
     end
-    local p = active.place(bufnr, path, row, col, opts)
+    local p = active.place(bufnr, path, geom, opts)
     if p then
       new_placements[#new_placements + 1] = p
     end
@@ -306,12 +321,12 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
   --- Resolve url to a local path (via the fetchAsset cache, or a fresh LSP
   --- request) and place it. Fetch failures are silent -- this is a
   --- cosmetic feature, matching the previous curl-based behavior.
-  local function place_url(url, row, col, opts, target_border)
+  local function place_url(url, geom, opts, target_border)
     -- Bordered and plain variants of the same url are different files.
     local key = url .. (target_border and '\0border' or '')
     local cached_path = path_by_key[key]
     if cached_path then
-      place(cached_path, row, col, opts)
+      place(cached_path, geom, opts)
       return
     end
     lsp.request(
@@ -323,13 +338,13 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
           return
         end
         path_by_key[key] = result.path
-        place(result.path, row, col, opts)
+        place(result.path, geom, opts)
       end
     )
   end
 
   for _, target in ipairs(targets) do
-    place_url(target.url, target.row, target.col, target.opts, target.border)
+    place_url(target.url, target.geom, target.opts, target.border)
   end
 end
 

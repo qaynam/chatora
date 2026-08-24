@@ -11,6 +11,8 @@ import { parseOptions } from './notations'
 export interface ImageTarget {
   readonly line: number
   readonly startChar: number
+  /** End of the notation, so a client can tell a backend the image's whole span. */
+  readonly endChar: number
   /** For `kind: 'icon'` this is the raw icon user (same value as `iconUser`), not a URL — the caller builds the icon URL itself. */
   readonly src: string
   readonly kind: 'image' | 'icon'
@@ -52,16 +54,18 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
 
   visit(page, ['image', 'icon'], (node, ancestors) => {
     const { line, column } = node.position.start
+    const endChar = node.position.end.column
     const standalone = isStandalone(ancestors)
     if (node.type === 'image') {
       const src = asImageSrc(node.src) ?? node.src
       if (isFetchableImage(src)) {
-        out.push({ line, startChar: column, src, kind: 'image', standalone })
+        out.push({ line, startChar: column, endChar, src, kind: 'image', standalone })
       }
     } else {
       out.push({
         line,
         startChar: column,
+        endChar,
         src: node.user,
         kind: 'icon',
         iconUser: node.user,

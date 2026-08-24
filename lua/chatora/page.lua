@@ -333,7 +333,6 @@ vim.api.nvim_create_autocmd('QuitPre', {
   end,
 })
 
---- Windows currently showing a cosense page.
 local function page_windows()
   local wins = {}
   for _, w in ipairs(vim.api.nvim_list_wins()) do
