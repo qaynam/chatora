@@ -4,13 +4,13 @@ import {
   buildCandidateIndex,
   type Candidate,
   candidateItemFields,
-  toCompletionItems,
   detectCompletion,
   detectCompletionInDocument,
   mergeCandidates,
   normalizeForMatch,
   rankCandidates,
   type TitleEntryLike,
+  toCompletionItems,
   vectorCandidates,
 } from './completion'
 
@@ -410,5 +410,27 @@ describe('toCompletionItems', () => {
       range: { start: { line: 2, character: 4 }, end: { line: 2, character: 15 } },
       newText: '[foo bar]',
     })
+  })
+})
+
+describe('fuzzy tier is a fallback', () => {
+  const index = buildCandidateIndex(
+    Array.from({ length: 40 }, (_, i) => ({ title: `report ${i}`, updated: i })),
+  )
+
+  test('does not add near-misses when the literal tiers already filled the list', () => {
+    // 'report' matches 40 titles by prefix; nothing fuzzy should be appended.
+    const titles = rankCandidates(index, 'report').map((c) => c.title)
+    expect(titles).toHaveLength(40)
+    expect(titles.every((t) => t.startsWith('report'))).toBe(true)
+  })
+
+  test('still rescues a typo when the literal tiers find nothing', () => {
+    expect(rankCandidates(index, 'reprot 7').map((c) => c.title)).toContain('report 7')
+  })
+
+  test('a single character never triggers a fuzzy scan', () => {
+    // 'z' matches no title literally, and fuzzy on one char would match everything.
+    expect(rankCandidates(index, 'z')).toEqual([])
   })
 })

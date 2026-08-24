@@ -309,6 +309,47 @@ const applyBorder = (
 }
 
 // ---------------------------------------------------------------------------
+// SVG rasterization
+// ---------------------------------------------------------------------------
+
+/**
+ * Terminal graphics protocols (Kitty/iTerm2, driven here by image.nvim/snacks.nvim) composite
+ * raster formats only, so an `image/svg+xml` asset is unusable as-is. Rasterized once and
+ * cached under an `r`-prefixed name — same reasoning as `withBorder`'s `b` prefix: it must
+ * never collide with the plain `findCached(hash)` lookup for the original `.svg`. `-density`
+ * is set before ImageMagick reads the file, since SVG has no native pixel size and rasterizing
+ * at the default 72 DPI comes out blurry.
+ */
+const rasterizeSvg = (cacheDir: string, hash: string, svgPath: string): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const rasterName = `r${hash}`
+    const rasterPath = join(cacheDir, `${rasterName}.png`)
+    const existing = yield* findCached(cacheDir, rasterName)
+    if (Option.isSome(existing)) return existing.value
+
+    const magick = yield* Effect.promise(resolveMagick)
+    if (magick === null) return svgPath
+
+    const args = ['-density', '192', '-background', 'none', svgPath, rasterPath]
+    return yield* Effect.tryPromise(() => execFileAsync(magick, args)).pipe(
+      Effect.as(rasterPath),
+      Effect.orElseSucceed(() => svgPath),
+    )
+  })
+
+const applySvgRaster = (
+  cacheDir: string,
+  hash: string,
+  result: FetchAssetResult,
+): Effect.Effect<FetchAssetResult> => {
+  if (!result.ok || !result.path.endsWith('.svg')) return Effect.succeed(result)
+  return Effect.map(rasterizeSvg(cacheDir, hash, result.path), (path) => ({
+    ok: true as const,
+    path,
+  }))
+}
+
+// ---------------------------------------------------------------------------
 // in-flight dedupe
 // ---------------------------------------------------------------------------
 
@@ -405,11 +446,12 @@ export const fetchAsset = (params: {
     const hash = cacheKey(params.url)
     const border = params.border === undefined ? null : sanitizeBorder(params.border)
 
-    // The bordered variant is derived from the plain cached original, so the plain lookup
-    // short-circuits the network either way.
+    // The bordered/rasterized variants are derived from the plain cached original, so the
+    // plain lookup short-circuits the network either way.
     const cached = yield* findCached(cacheDir, hash)
     if (Option.isSome(cached)) {
-      return yield* applyBorder(cacheDir, hash, { ok: true, path: cached.value }, border)
+      const rasterized = yield* applySvgRaster(cacheDir, hash, { ok: true, path: cached.value })
+      return yield* applyBorder(cacheDir, hash, rasterized, border)
     }
 
     const credential = yield* session.getCredential()
@@ -422,5 +464,6 @@ export const fetchAsset = (params: {
       params.url,
       fetchAndCache(http.fetch, headersFor, cacheDir, hash, params.url),
     )
-    return yield* applyBorder(cacheDir, hash, fetched, border)
+    const rasterized = yield* applySvgRaster(cacheDir, hash, fetched)
+    return yield* applyBorder(cacheDir, hash, rasterized, border)
   })

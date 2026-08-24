@@ -16,6 +16,9 @@ local defaults = {
     { label = 'すべて' },
     { label = '未読', filter = 'me', unread_only = true },
   },
+  -- Hairline under every sidebar row, so the unread bars read as one border
+  -- per page instead of a single unbroken stripe. false disables.
+  sidebar_separator = true,
   related_height = 8,
   -- Open the related-pages panel automatically when a page is opened. Closing
   -- it with q suppresses reopening until the next gR / :Chatora related.
@@ -44,6 +47,9 @@ local defaults = {
   -- Render backend: 'auto' prefers 3rd/image.nvim, falling back to
   -- folke/snacks.nvim's image module. 'image_nvim' / 'snacks' force one.
   image_backend = 'auto',
+  -- Rows in a standalone image's placement. Inline images (written mid-line)
+  -- always render one row tall so the sentence keeps its shape.
+  image_height = 20,
   -- Frame composited into standalone images themselves (ImageMagick,
   -- server-side): a transparent padding ring + a border line, so an image
   -- reads as embedded content instead of blending into the page. false

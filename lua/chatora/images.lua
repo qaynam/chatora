@@ -4,12 +4,15 @@
 -- folke/snacks.nvim's image module. A no-op whenever no backend is usable
 -- or config.images == false -- every backend call is pcall-guarded.
 --
--- The rendered src is always a *local* file path, never a remote URL: every
--- target is resolved through the `chatora/fetchAsset` LSP request first,
--- which the server fetches with session credential headers when (and only
--- when) the URL is same-origin, so private-project icons work instead of
--- 404ing the way an unauthenticated curl would. See docs/ARCHITECTURE.md's
--- chatora/* request list and packages/server/src/assets.ts.
+-- Targets (which lines hold an image/icon, and whether it's the line's only
+-- content) come from the `chatora/images` LSP request, which walks the
+-- parser AST -- see docs/ARCHITECTURE.md's chatora/* request list and
+-- packages/server/src/images.ts. The rendered src is always a *local* file
+-- path, never a remote URL: every target is resolved through the
+-- `chatora/fetchAsset` LSP request first, which the server fetches with
+-- session credential headers when (and only when) the URL is same-origin,
+-- so private-project icons work instead of 404ing the way an
+-- unauthenticated curl would. See packages/server/src/assets.ts.
 local M = {}
 
 local config = require('chatora.config')
@@ -20,14 +23,14 @@ local uv = vim.uv or vim.loop
 local timers_by_bufnr = {}
 local placements_by_bufnr = {} -- values are lists of { close = fn } wrappers
 local project_by_bufnr = {}
-local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async fetchAsset replies
+local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async replies (chatora/images and chatora/fetchAsset alike)
 local path_by_key = {} -- fetch key -> local file path, resolved once via fetchAsset and reused
 local signature_by_bufnr = {} -- target multiset of the last applied refresh (flicker guard)
 
 --- Border params for chatora/fetchAsset, or nil. The frame is composited into
 --- the image file itself server-side (ImageMagick) — the only way to hug the
 --- image's actual pixel edges; cell-grid extmarks can't. Standalone images
---- only: icons are 1 cell tall.
+--- only: icons and inline images are 1 cell tall, too short to frame.
 local function border_params()
   local opt = config.options.image_border
   if opt == false or opt == nil then
@@ -42,8 +45,6 @@ local function border_params()
     padding = opt.padding or 12,
   }
 end
-
-local IMAGE_EXTENSIONS = { png = true, jpg = true, jpeg = true, gif = true, webp = true }
 
 --- Cells available for text in the window showing bufnr (window width minus
 --- the number/sign/fold gutter), or a conservative default when it isn't
@@ -167,57 +168,18 @@ local function encode_path_segment(name)
   end))
 end
 
--- [name.icon] or [name.icon*3] (the repeat count is a Cosense display hint
--- only; the icon src doesn't change, so it's parsed but ignored).
-local ICON_PATTERN = '%[([^%[%]]-)%.icon%*?%d*%]'
-
---- Every icon notation occurrence on a line: { col (0-based byte), name }.
-local function icon_targets(line)
-  local out = {}
-  local from = 1
-  while true do
-    local s, e, name = line:find(ICON_PATTERN, from)
-    if not s then
-      break
+--- Icon endpoint URL for a `chatora/images` icon target's `iconUser`. A
+--- leading `/` means a cross-project icon (`/project/title`, from
+--- `[/project/name.icon]`); every path segment is encoded independently.
+local function icon_url(origin, project, icon_user)
+  if icon_user:sub(1, 1) == '/' then
+    local segments = {}
+    for segment in icon_user:gmatch('[^/]+') do
+      segments[#segments + 1] = encode_path_segment(segment)
     end
-    if name ~= '' then
-      out[#out + 1] = { col = s - 1, name = name }
-    end
-    from = e + 1
+    return origin .. '/api/pages/' .. table.concat(segments, '/') .. '/icon'
   end
-  return out
-end
-
-local function has_image_extension(url)
-  local ext = url:match('%.(%a+)$')
-  return ext ~= nil and IMAGE_EXTENSIONS[ext:lower()] == true
-end
-
---- Resolve a standalone image line (the whole trimmed line matches) to a
---- src url, or nil.
-local function standalone_image_src(line)
-  local trimmed = vim.trim(line)
-
-  local double_bracket_url = trimmed:match('^%[%[(https?://[^%[%]%s]+)%]%]$')
-  if double_bracket_url then
-    return double_bracket_url
-  end
-
-  local single_bracket_url = trimmed:match('^%[(https?://[^%[%]%s]+)%]$')
-  if not single_bracket_url then
-    return nil
-  end
-
-  local gyazo_hash = single_bracket_url:match('^https?://[%w.]*gyazo%.com/(%x+)/?$')
-  if gyazo_hash then
-    return 'https://i.gyazo.com/' .. gyazo_hash .. '.png'
-  end
-
-  if has_image_extension(single_bracket_url) then
-    return single_bracket_url
-  end
-
-  return nil
+  return origin .. '/api/pages/' .. project .. '/' .. encode_path_segment(icon_user) .. '/icon'
 end
 
 local function clear_placements(bufnr)
@@ -231,70 +193,96 @@ local function clear_placements(bufnr)
   placements_by_bufnr[bufnr] = nil
 end
 
---- Clear and re-render every image placement in bufnr. Placement itself is
---- asynchronous (each target's local file path comes back from a
---- `chatora/fetchAsset` request), so this kicks off requests and returns
---- immediately; placements land as replies arrive.
-function M.refresh(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr) then
+--- Screen column for a target whose notation starts at byte column
+--- byte_col on a line with `indent` leading whitespace bytes: shifted right
+--- by however many cells the pads module's inline spacing inserted before
+--- that point (pads only touches the indent region, so every column past it
+--- shifts by the same fixed amount). Both standalone and inline targets need
+--- this correction.
+local function screen_col(byte_col, indent)
+  return byte_col + require('chatora.pads').extra_cells(indent)
+end
+
+--- Build this refresh's placement targets from a `chatora/images` reply,
+--- keyed the same way the old regex-based scan was: dedupe-friendly for the
+--- flicker-guard signature (see apply_images below). Skips a target whose
+--- line went missing (buffer edited between request and reply) or whose
+--- UTF-16 column doesn't land on a valid boundary.
+local function build_targets(bufnr, project, origin, border, images)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local targets = {}
+  for _, img in ipairs(images) do
+    local line = lines[img.line + 1]
+    if line then
+      local ok, byte_col = pcall(vim.str_byteindex, line, 'utf-16', img.startChar, false)
+      if ok then
+        local indent = #(line:match('^[ \t]*') or '')
+        local col = screen_col(byte_col, indent)
+        local row = img.line + 1
+
+        if img.kind == 'icon' then
+          targets[#targets + 1] = {
+            url = icon_url(origin, project, img.iconUser),
+            row = row,
+            col = col,
+            opts = { height = 1 },
+            standalone = img.standalone,
+          }
+        elseif img.standalone then
+          targets[#targets + 1] = {
+            url = img.src,
+            row = row,
+            col = col,
+            -- Capped at the room left of the right edge, so a wide image
+            -- scales down instead of being clipped.
+            opts = { max_height = config.options.image_height, max_width = math.max(1, text_width(bufnr) - col) },
+            border = border,
+            standalone = true,
+          }
+        else
+          targets[#targets + 1] = {
+            url = img.src,
+            row = row,
+            col = col,
+            opts = { height = 1 },
+            standalone = false,
+          }
+        end
+      end
+    end
+  end
+  return targets
+end
+
+--- Apply a `chatora/images` reply for `epoch`: build targets, skip the
+--- teardown/re-place cycle when the target multiset hasn't actually changed
+--- (placements are extmark-bound and follow ordinary edits on their own, so
+--- redoing it would only flash), then kick off fetchAsset + placement.
+local function apply_images(bufnr, project, origin, border, epoch, images)
+  if epoch_by_bufnr[bufnr] ~= epoch or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
   local active = backend()
   if not active then
     return
   end
-  local project = project_by_bufnr[bufnr]
-  if not project then
-    return
-  end
 
-  -- Collect targets first and compare against the last applied set:
-  -- placements are extmark-bound and follow ordinary edits by themselves, so
-  -- when the target multiset is unchanged, tearing everything down and
-  -- re-placing it would only make the images flash. Rows are deliberately
-  -- NOT part of the signature (they shift on every line inserted above).
-  local origin = config.options.origin
-  local border = border_params()
-  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local targets = {}
+  local targets = build_targets(bufnr, project, origin, border, images)
+
+  -- Rows are deliberately NOT part of the signature (they shift on every
+  -- line inserted above). Standalone targets keep their column: their
+  -- position only changes when the line itself is rewritten, which should
+  -- re-place. Non-standalone targets (icons, inline images) drop their
+  -- column: ordinary text edits elsewhere on the same line shift it
+  -- constantly, and re-placing on every such edit would just flash.
   local counts = {}
-  for i, line in ipairs(lines) do
-    for _, target in ipairs(icon_targets(line)) do
-      local url = origin
-        .. '/api/pages/'
-        .. project
-        .. '/'
-        .. encode_path_segment(target.name)
-        .. '/icon'
-      targets[#targets + 1] = { url = url, row = i, col = target.col, opts = { height = 1 } }
-      counts[url] = (counts[url] or 0) + 1
-    end
-    local standalone_src = standalone_image_src(line)
-    if standalone_src then
-      -- The image sits where the text sits: at the line's indent, shifted by
-      -- however many cells the pads' inline spacing added before it.
-      local indent = #(line:match('^[ \t]*'))
-      local col = indent + require('chatora.pads').extra_cells(indent)
-      targets[#targets + 1] = {
-        url = standalone_src,
-        row = i,
-        col = col,
-        -- Capped at the room left of the right edge, so a wide image scales
-        -- down instead of being clipped.
-        opts = { max_height = 20, max_width = math.max(1, text_width(bufnr) - col) },
-        border = border,
-      }
-      -- Placements pin their x at creation, so a changed indent must defeat
-      -- the flicker guard and re-place (icons stay col-free: mid-line text
-      -- edits shift their col constantly and re-placing would flash).
-      local key = standalone_src .. '\0' .. col
-      counts[key] = (counts[key] or 0) + 1
-    end
+  for _, target in ipairs(targets) do
+    local key = target.url .. (target.standalone and ('\0' .. target.col) or '')
+    counts[key] = (counts[key] or 0) + 1
   end
-
   local parts = {}
-  for url, n in pairs(counts) do
-    parts[#parts + 1] = url .. '\0' .. n
+  for key, n in pairs(counts) do
+    parts[#parts + 1] = key .. '\0' .. n
   end
   table.sort(parts)
   -- Width is part of the signature: placements bake in their scale, so a
@@ -307,13 +295,6 @@ function M.refresh(bufnr)
   signature_by_bufnr[bufnr] = signature
 
   clear_placements(bufnr)
-
-  -- Bumped so a fetchAsset reply for a target this refresh no longer has
-  -- (buffer edited again, or detached, before the reply arrived) is
-  -- dropped instead of placing an extmark against a stale position --
-  -- the next debounced refresh already supersedes it.
-  local epoch = (epoch_by_bufnr[bufnr] or 0) + 1
-  epoch_by_bufnr[bufnr] = epoch
 
   local new_placements = {}
   placements_by_bufnr[bufnr] = new_placements
@@ -355,6 +336,41 @@ function M.refresh(bufnr)
   for _, target in ipairs(targets) do
     place_url(target.url, target.row, target.col, target.opts, target.border)
   end
+end
+
+--- Clear and re-render every image placement in bufnr. Both the target scan
+--- (`chatora/images`) and each target's local file path (`chatora/fetchAsset`)
+--- are asynchronous, so this kicks off requests and returns immediately;
+--- placements land as replies arrive.
+function M.refresh(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  if not images_enabled() then
+    return
+  end
+  local project = project_by_bufnr[bufnr]
+  if not project then
+    return
+  end
+
+  local origin = config.options.origin
+  local border = border_params()
+  local uri = vim.api.nvim_buf_get_name(bufnr)
+
+  -- Bumped so a reply for a refresh the buffer has since moved past (edited
+  -- again, or detached, before the reply arrived) is dropped instead of
+  -- acting on stale positions -- the next debounced refresh already
+  -- supersedes it.
+  local epoch = (epoch_by_bufnr[bufnr] or 0) + 1
+  epoch_by_bufnr[bufnr] = epoch
+
+  lsp.request('chatora/images', { uri = uri }, function(err, result)
+    if err or not result or result.ok == false then
+      return
+    end
+    apply_images(bufnr, project, origin, border, epoch, result.images or {})
+  end)
 end
 
 local function schedule_refresh(bufnr)

@@ -24,6 +24,7 @@ import { type AssetCache, AssetCacheLive, type BorderParams, fetchAsset } from '
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
 import { definitionLocation, findDefinitionTarget } from './definition'
+import { computeImageTargets } from './images'
 import * as handlers from './pages'
 import { makeSessionStateLayer, type SessionState } from './state'
 import { computeTokens, encodeTokens, type RawToken, TOKEN_TYPES } from './tokens'
@@ -200,6 +201,14 @@ connection.onRequest(
     return { ok: true, conceal: computeConcealRanges(doc.getText()) }
   },
 )
+type ImagesResult =
+  | { ok: true; images: ReturnType<typeof computeImageTargets> }
+  | { ok: false; code: string; message: string }
+connection.onRequest('chatora/images', async (params: { uri: string }): Promise<ImagesResult> => {
+  const doc = documents.get(params.uri)
+  if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
+  return { ok: true, images: computeImageTargets(doc.getText()) }
+})
 connection.onRequest(
   'chatora/search',
   (params: { project: string; query: string; mode?: 'fulltext' | 'vector' }) =>

@@ -2,7 +2,7 @@ import type { HttpClient } from '@chatora/core'
 import type { Page } from '@cosense-toolbox/parser'
 import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
-import { Effect } from 'effect'
+import { Duration, Effect, Fiber } from 'effect'
 import {
   type CompletionItem,
   CompletionItemKind,
@@ -121,6 +121,26 @@ export const normalizeForMatch = (s: string): string =>
 
 const MAX_COMPLETION_ITEMS = 50
 
+/** Results below which the fuzzy tier is worth its full scan of the pool. */
+const FUZZY_FALLBACK_THRESHOLD = 10
+
+// Keyed by the titles array *identity*: SessionState hands back the same array for the life
+// of its cache entry, so the index is rebuilt exactly when the titles are refetched — not on
+// every keystroke, which for a large project cost more than the search itself.
+const indexByTitles = new WeakMap<readonly TitleEntryLike[], Candidate[]>()
+
+const candidateIndex = (titles: readonly TitleEntryLike[]): Candidate[] => {
+  const cached = indexByTitles.get(titles)
+  if (cached !== undefined) return cached
+  const built = buildCandidateIndex(titles)
+  indexByTitles.set(titles, built)
+  return built
+}
+
+// How long a completion will wait on vector search before answering from the
+// local index alone. Short enough that a keystroke never visibly stalls.
+const VECTOR_BUDGET = Duration.millis(120)
+
 /**
  * Permissive shape for what `/search/titles` actually sends. @chatora/core's `TitleEntry`
  * declares `id`/`titleLc`/`updated`/`image` as required, but the real payload is parsed with
@@ -203,12 +223,22 @@ export const rankCandidates = (
   if (result.length < MAX_COMPLETION_ITEMS) {
     take(pool.filter((c) => !c.key.startsWith(q) && c.key.includes(q)))
   }
-  if (result.length < MAX_COMPLETION_ITEMS) {
+  // Fuzzy is typo tolerance, not a way to pad the list: it only runs when the
+  // literal tiers came up short, since it costs a full scan of the pool. A
+  // 1-character query is excluded outright — it matches nearly everything.
+  // Both error budgets are collected in one pass; two `filter`s over a large
+  // pool measurably outweighed the search itself.
+  if (result.length < FUZZY_FALLBACK_THRESHOLD && q.length >= 2) {
     const matcher = Asearch(q)
-    take(pool.filter((c) => !seen.has(c.key) && matcher(c.key, 1)))
-    if (result.length < MAX_COMPLETION_ITEMS) {
-      take(pool.filter((c) => !seen.has(c.key) && matcher(c.key, 2)))
+    const oneError: Candidate[] = []
+    const twoErrors: Candidate[] = []
+    for (const c of pool) {
+      if (seen.has(c.key)) continue
+      if (matcher(c.key, 1)) oneError.push(c)
+      else if (matcher(c.key, 2)) twoErrors.push(c)
     }
+    take(oneError)
+    if (result.length < MAX_COMPLETION_ITEMS) take(twoErrors)
   }
 
   return result
@@ -319,14 +349,23 @@ export const buildCompletionItems = (
     const session = yield* SessionState
     const noSpaces = detection.kind === 'hashtag'
     const titles = yield* session.getTitles(project).pipe(Effect.catchAll(() => Effect.succeed([])))
-    const candidates = buildCandidateIndex(titles)
-    const local = rankCandidates(candidates, detection.query, { noSpaces })
+    const local = rankCandidates(candidateIndex(titles), detection.query, { noSpaces })
 
     let matches = local
     if (detection.query !== '') {
-      const vectorPages = yield* session
-        .searchVectorCached(project, detection.query)
-        .pipe(Effect.catchAll(() => Effect.succeed([])))
+      // Vector search is a network round-trip on a keystroke path. Run it as a
+      // daemon so a slow one can't hold up the menu — it still finishes and
+      // fills the cache, and `isIncomplete` means the next keystroke re-asks
+      // and gets it instantly.
+      const fiber = yield* Effect.forkDaemon(
+        session
+          .searchVectorCached(project, detection.query)
+          .pipe(Effect.catchAll(() => Effect.succeed([] as readonly VectorPageLike[]))),
+      )
+      const vectorPages = yield* Fiber.join(fiber).pipe(
+        Effect.timeout(VECTOR_BUDGET),
+        Effect.catchAll(() => Effect.succeed([] as readonly VectorPageLike[])),
+      )
       let vector = vectorCandidates(vectorPages)
       if (noSpaces) vector = vector.filter((c) => !/\s/.test(c.title))
       if (vector.length > 0) matches = mergeCandidates(vector, local)

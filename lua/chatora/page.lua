@@ -88,6 +88,9 @@ local function finalize_buffer(bufnr, project, title)
   apply_title_margin(bufnr)
   lsp.ensure_start(bufnr)
   related.on_page_opened(project, title)
+  -- The load is over, so drop 'loading' before syncing: sync deliberately
+  -- refuses to overwrite a pending state.
+  status.set(bufnr, 'clean')
   status.sync(bufnr)
   -- on_lines is the only change notification that fires for every kind of
   -- edit (typing, API, :normal); TextChanged/BufModifiedSet miss scripted
@@ -161,6 +164,7 @@ local function handle_read(ev)
   vim.bo[bufnr].softtabstop = 1
   vim.bo[bufnr].tabstop = 2
 
+  status.set(bufnr, 'loading')
   lsp.request_ok('chatora/openPage', { project = project, title = title }, function(result)
     if not vim.api.nvim_buf_is_valid(bufnr) then
       return

@@ -69,7 +69,7 @@ alias chatora='/path/to/chatora/bin/chatora'
 ## 使い方
 
 1. `:Chatora` — 初回は PAT の入力を求められる（発行: https://scrapbox.io/settings/personal-access-tokens ）。検証後 macOS Keychain に保存される。`COSENSE_PAT` 環境変数があればそちらが優先される。
-2. 左サイドバー: `<CR>` 開く / `R` 再読込 / `s` 検索 / `n` 新規ページ / `P` プロジェクト切替 / `q` 閉じる。
+2. 左サイドバー: `<CR>` または `l` 開く / `R` 再読込 / `s` 検索 / `n` 新規ページ / `P` プロジェクト切替 / `q` 閉じる。
    上部に neo-tree 風のタブ（`<Tab>` / `<S-Tab>` / `1`..`9` / クリックで切替）があり、既定は「すべて」と
    「未読」（自分の Cosense 保存フィルタで絞った未読ページ）。`sidebar_tabs` で自由に定義できる。
    行頭は保存状態（`✓`/`●`）と未読バー（`▍`= 最後に見たあとに更新された。Cosense のグリッドの青ボーダーと同じ判定）

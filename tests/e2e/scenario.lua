@@ -311,10 +311,32 @@ local ok, err = pcall(function()
 
   require('chatora.sidebar').open('testproj')
 
-  --- Strip the sidebar's decoration columns, leaving the page title.
+  --- Strip the sidebar's leading border column, leaving the page title. The
+  --- save-state icon is virtual text, not buffer text (see sidebar_mark).
   local function sidebar_title(line)
-    local rest = line:match('^%s%s(.*)$') or line:match('^%S+%s(.*)$') or line
-    return rest:match('^▍(.*)$') or rest:match('^%s(.*)$') or rest
+    return line:match('^▍(.*)$') or line:match('^%s(.*)$') or line
+  end
+
+  --- The save-state icon rendered for `title`, or nil. It lives in a
+  --- right-aligned extmark so it never shifts the titles around.
+  local function sidebar_mark(title)
+    local b = vim.fn.bufnr('chatora://sidebar')
+    if b == -1 then
+      return nil
+    end
+    local ns = vim.api.nvim_get_namespaces()['chatora_sidebar']
+    for i, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
+      if sidebar_title(l) == title then
+        for _, m in ipairs(vim.api.nvim_buf_get_extmarks(b, ns, { i - 1, 0 }, { i - 1, -1 }, { details = true })) do
+          local vt = m[4].virt_text
+          if vt and vt[1] then
+            return vim.trim(vt[1][1])
+          end
+        end
+        return nil
+      end
+    end
+    return nil
   end
 
   local sidebar_buf = nil
@@ -323,8 +345,7 @@ local ok, err = pcall(function()
     if b == -1 then
       return false
     end
-    -- Sidebar lines carry a save-state mark (icon + space, or two spaces) and
-    -- then the unread bar ('▍' or a space) before the title.
+    -- Column 0 is the unread border ('▍' or a space); the title follows.
     local has_home, has_memo = false, false
     for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
       local title = sidebar_title(l)
@@ -352,19 +373,6 @@ local ok, err = pcall(function()
   -- ===================================================================================
   step('sidebar-mark')
 
-  local function sidebar_has_line(wanted)
-    local b = vim.fn.bufnr('chatora://sidebar')
-    if b == -1 then
-      return false
-    end
-    for _, l in ipairs(vim.api.nvim_buf_get_lines(b, 0, -1, false)) do
-      if l == wanted then
-        return true
-      end
-    end
-    return false
-  end
-
   -- Type into the page buffer the way a user would (focused window + feedkeys),
   -- so the TextChanged/BufModifiedSet autocmds fire for real.
   local page_win = vim.fn.bufwinid(page_buf)
@@ -374,9 +382,9 @@ local ok, err = pcall(function()
   vim.api.nvim_set_current_win(page_win)
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('Goマークテスト<Esc>', true, false, true), 'x', false)
   if not wait_for(10000, function()
-    return sidebar_has_line('●  ホーム')
+    return sidebar_mark('ホーム') == '●'
   end) then
-    fail('timed out waiting for the ● unsaved mark on ホーム')
+    fail('timed out waiting for the ● unsaved mark on ホーム, got ' .. tostring(sidebar_mark('ホーム')))
   end
 
   -- Clearing modified via the API fires no autocmd; the plugin's save path
@@ -384,9 +392,9 @@ local ok, err = pcall(function()
   vim.bo[page_buf].modified = false
   require('chatora.status').sync(page_buf)
   if not wait_for(10000, function()
-    return sidebar_has_line('✓  ホーム')
+    return sidebar_mark('ホーム') == '✓'
   end) then
-    fail('timed out waiting for the unsaved mark to turn back into ✓')
+    fail('timed out waiting for the unsaved mark to turn back into ✓, got ' .. tostring(sidebar_mark('ホーム')))
   end
   log('sidebar unsaved mark OK (appears and clears)')
 

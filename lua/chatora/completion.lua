@@ -4,6 +4,9 @@
 -- server's fuzzy ranking away — is handled server-side in completion.ts.)
 local M = {}
 
+local uv = vim.uv or vim.loop
+local REOPEN_DEBOUNCE_MS = 120
+
 --- Mirrors the server's detectLink: true only when the cursor sits inside a
 --- *closed* bracket pair `[...|...]` (and not inside `[[`).
 local function in_link_context(line, col)
@@ -119,24 +122,52 @@ function M.attach(bufnr)
     return
   end
   vim.b[bufnr].chatora_completion_attached = true
+
+  -- Debounced: re-opening on every keystroke would put a request (and a
+  -- server-side search) behind each one, and the client does its own
+  -- isIncomplete re-query anyway once a menu is up. The delay only ever costs
+  -- the first character after the menu closed.
+  local timer = nil
+  local function stop()
+    if timer then
+      timer:stop()
+      timer:close()
+      timer = nil
+    end
+  end
+
   vim.api.nvim_create_autocmd('TextChangedI', {
     buffer = bufnr,
     callback = function()
-      -- A visible menu is already re-querying itself (isIncomplete), so only
-      -- step in once it has closed — typing a space, or a keystroke that left
-      -- the client with nothing to show.
+      -- A visible menu is already re-querying itself, so only step in once it
+      -- has closed — typing a space, or a keystroke that left the client with
+      -- nothing to show.
       if tonumber(vim.fn.pumvisible()) == 1 then
+        stop()
         return
       end
       local col = vim.api.nvim_win_get_cursor(0)[2]
-      if col == 0 then
+      if col == 0 or not in_link_context(vim.api.nvim_get_current_line(), col) then
+        stop()
         return
       end
-      if in_link_context(vim.api.nvim_get_current_line(), col) then
-        show_menu(bufnr)
+      if not timer then
+        timer = uv.new_timer()
       end
+      timer:stop()
+      timer:start(
+        REOPEN_DEBOUNCE_MS,
+        0,
+        vim.schedule_wrap(function()
+          if vim.api.nvim_get_current_buf() == bufnr and tonumber(vim.fn.pumvisible()) ~= 1 then
+            show_menu(bufnr)
+          end
+        end)
+      )
     end,
   })
+
+  vim.api.nvim_create_autocmd({ 'InsertLeave', 'BufUnload' }, { buffer = bufnr, callback = stop })
 end
 
 return M

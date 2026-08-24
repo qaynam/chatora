@@ -195,7 +195,15 @@ decoration ノードは bold/italic/strike/underline のうち該当するもの
    // conceallevel/concealcursor に任せる。外部リンクは `[label url]` / `[url label]` の
    // URL 部分と区切りの空白も隠し、本家 Cosense と同じく label だけを表示する
    // （`[url]` 単体はクリック対象が消えるので隠さない）。
-'chatora/fetchAsset'  { project, url, border? }   → { ok, path }  // url を取得しローカルキャッシュ（$XDG_CACHE_HOME/chatora/assets）のファイルパスを返す。資格情報ヘッダーは url が session origin と同一のときのみ付与し、リダイレクトで origin を離れた時点で外す。border = { width, color, padding } を渡すと ImageMagick（magick/convert、無ければ素通し）で透明パディング + 枠線を画像自体に合成した PNG 変体を返す（数値は 0–64 px にクランプ、color は色リテラルのみ許可、いずれも argv 配列渡しで shell を経由しない）
+'chatora/images'      { uri }                     → { ok, images: ImageTarget[] }
+   // ImageTarget = { line, startChar, src, kind: 'image'|'icon', iconUser?, standalone }
+   // （line/startChar は UTF-16 列、chatora/decorations と同じ単位）。パーサーの image/icon
+   // ノードを visit で収集する。image は asImageSrc で解決した src（gyazo の裸 URL は
+   // https://i.gyazo.com/<hash>.png に正規化、#.svg 等のフラグメントはそのまま）。icon は
+   // URL を組み立てず iconUser（`[/proj/name.icon]` は '/proj/name' 形式のまま）だけを返す。
+   // standalone は、そのノードが行（または title 行）の直接の子として唯一の非空白コンテンツ
+   // であるとき true（decoration 記法にネストしている場合は false）。
+'chatora/fetchAsset'  { project, url, border? }   → { ok, path }  // url を取得しローカルキャッシュ（$XDG_CACHE_HOME/chatora/assets）のファイルパスを返す。資格情報ヘッダーは url が session origin と同一のときのみ付与し、リダイレクトで origin を離れた時点で外す。content-type が image/svg+xml のときは ImageMagick で density 192 で PNG にラスタライズしてから返す（端末のグラフィックプロトコルは raster しか描けないため。失敗時/ImageMagick 不在時は元の .svg パスを返す）。border = { width, color, padding } を渡すと ImageMagick（magick/convert、無ければ素通し）で透明パディング + 枠線を画像自体に合成した PNG 変体を返す（数値は 0–64 px にクランプ、color は色リテラルのみ許可、いずれも argv 配列渡しで shell を経由しない）
 ```
 
 ### URI スキーム

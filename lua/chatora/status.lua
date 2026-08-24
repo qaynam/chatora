@@ -6,19 +6,33 @@ local M = {}
 
 local config = require('chatora.config')
 
---- bufnr -> 'clean' | 'dirty' | 'saving' | 'error'
+--- bufnr -> 'clean' | 'dirty' | 'loading' | 'saving' | 'error'
 local state_by_bufnr = {}
+
+-- Braille spinner: the whole cycle lives in one cell, so it fits the same slot
+-- the settled icons use in the statusline and the sidebar's mark column.
+local SPINNER_FRAMES = { '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏' }
+local SPINNER_INTERVAL_MS = 90
+
+local PENDING = { loading = true, saving = true }
+
+local uv = vim.uv or vim.loop
+local spinner_timer, spinner_frame = nil, 1
+
+local placeholder_ns = vim.api.nvim_create_namespace('chatora_status_placeholder')
 
 -- The page whose state chatora's own chrome reports. Tracked separately from
 -- the current buffer so the sidebar's winbar keeps showing the page you are
 -- editing while the cursor sits in the sidebar.
 local last_page_bufnr = nil
 
-local DEFAULT_ICONS = { clean = '✓', dirty = '●', saving = '◍', error = '✗' }
+-- `loading` and `saving` have no icon of their own: they animate.
+local DEFAULT_ICONS = { clean = '✓', dirty = '●', error = '✗' }
 
 local HL_GROUP = {
   clean = 'ChatoraStatusOk',
   dirty = 'ChatoraStatusDirty',
+  loading = 'ChatoraStatusPending',
   saving = 'ChatoraStatusPending',
   error = 'ChatoraStatusError',
 }
@@ -49,6 +63,72 @@ function M.get(bufnr)
   return state_by_bufnr[bufnr]
 end
 
+--- A page buffer has no text until its content arrives, which looks identical
+--- to a broken one — so say so, in the buffer, next to the spinner.
+local function render_placeholder(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  vim.api.nvim_buf_clear_namespace(bufnr, placeholder_ns, 0, -1)
+  if state_by_bufnr[bufnr] ~= 'loading' then
+    return
+  end
+  ensure_hl()
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, placeholder_ns, 0, 0, {
+    virt_text = { { SPINNER_FRAMES[spinner_frame] .. ' 読み込み中…', 'ChatoraStatusPending' } },
+    virt_text_pos = 'overlay',
+  })
+end
+
+local function stop_spinner()
+  if spinner_timer then
+    spinner_timer:stop()
+    spinner_timer:close()
+    spinner_timer = nil
+  end
+end
+
+--- Drive the spinner while any buffer is mid-request. Neovim has no repaint
+--- loop of its own, so an animation is a libuv timer that advances a frame and
+--- asks for a redraw; the timer only exists while something is pending.
+local function sync_spinner()
+  local pending = {}
+  for bufnr, state in pairs(state_by_bufnr) do
+    if PENDING[state] then
+      pending[#pending + 1] = bufnr
+    end
+  end
+  if #pending == 0 then
+    stop_spinner()
+    return
+  end
+  if spinner_timer then
+    return
+  end
+  spinner_timer = uv.new_timer()
+  spinner_timer:start(
+    SPINNER_INTERVAL_MS,
+    SPINNER_INTERVAL_MS,
+    vim.schedule_wrap(function()
+      spinner_frame = (spinner_frame % #SPINNER_FRAMES) + 1
+      local still_pending = false
+      for bufnr, state in pairs(state_by_bufnr) do
+        if state == 'loading' then
+          render_placeholder(bufnr)
+        end
+        if PENDING[state] then
+          still_pending = true
+        end
+      end
+      require('chatora.sidebar').refresh_marks()
+      vim.cmd('redrawstatus')
+      if not still_pending then
+        stop_spinner()
+      end
+    end)
+  )
+end
+
 --- Icon + highlight group for a buffer, or nil when it has no tracked state
 --- (never opened as a page, or the indicator is disabled).
 function M.icon(bufnr)
@@ -59,6 +139,9 @@ function M.icon(bufnr)
   local state = state_by_bufnr[bufnr]
   if not state then
     return nil
+  end
+  if PENDING[state] then
+    return SPINNER_FRAMES[spinner_frame], HL_GROUP[state]
   end
   return opts.icons[state], HL_GROUP[state]
 end
@@ -94,6 +177,8 @@ function M.set(bufnr, state, message)
   if message then
     echo(message, HL_GROUP[state])
   end
+  render_placeholder(bufnr)
+  sync_spinner()
   if previous ~= state then
     require('chatora.sidebar').refresh_marks()
     vim.cmd('redrawstatus')
@@ -101,10 +186,10 @@ function M.set(bufnr, state, message)
 end
 
 --- Re-derive 'clean'/'dirty' from the buffer's own modified flag. A no-op while
---- a save is in flight, so the pending icon survives the edit events that
---- writing the server's normalized text back into the buffer generates.
+--- a request is in flight, so the spinner survives the edit events that
+--- filling the buffer from a response generates.
 function M.sync(bufnr)
-  if state_by_bufnr[bufnr] == 'saving' then
+  if PENDING[state_by_bufnr[bufnr]] then
     return
   end
   if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -119,6 +204,7 @@ function M.forget(bufnr)
   if last_page_bufnr == bufnr then
     last_page_bufnr = nil
   end
+  sync_spinner()
 end
 
 --- Statusline component for `bufnr` (default: the current buffer if it's a

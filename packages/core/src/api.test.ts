@@ -71,7 +71,12 @@ describe('CosenseApi happy paths', () => {
       json({ id: 'u1', name: 'qaynam', displayName: 'Qaynam', pageFilters: [] }),
     )
     const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
-    expect(await run(api.me(), layer)).toEqual({ id: 'u1', name: 'qaynam', displayName: 'Qaynam', pageFilters: [] })
+    expect(await run(api.me(), layer)).toEqual({
+      id: 'u1',
+      name: 'qaynam',
+      displayName: 'Qaynam',
+      pageFilters: [],
+    })
   })
 
   test('projects()', async () => {
@@ -250,7 +255,9 @@ describe('CosenseApi error handling', () => {
   })
 
   test('CosenseApi requests redirect: manual so credential headers never follow a redirect', async () => {
-    const { layer, calls } = testHttpClient(() => json({ id: 'u1', name: 'a', displayName: 'a', pageFilters: [] }))
+    const { layer, calls } = testHttpClient(() =>
+      json({ id: 'u1', name: 'a', displayName: 'a', pageFilters: [] }),
+    )
     const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
     await run(api.me(), layer)
     expect(calls[0]?.init.redirect).toBe('manual')

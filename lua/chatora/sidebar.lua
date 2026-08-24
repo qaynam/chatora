@@ -17,12 +17,20 @@ local ns = vim.api.nvim_create_namespace('chatora_sidebar')
 
 local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTitle', { link = 'Title', default = true })
-  -- Cosense's web grid marks unread pages with a blue top border; a list has no
-  -- card edge to colour, so the bar sits between the save mark and the title.
+  -- Cosense's web grid marks unread pages with a blue border along the card
+  -- edge; the list's leftmost column is the closest thing it has to one.
   vim.api.nvim_set_hl(0, 'ChatoraSidebarUnread', { fg = '#2d7ff9', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarUnreadTitle', { bold = true, default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabActive', { link = 'TabLineSel', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabInactive', { link = 'TabLine', default = true })
+  -- Underline spans the full row width, so it separates rows without spending
+  -- a line on a rule. Colour comes from the theme's own window separator.
+  local sep = vim.api.nvim_get_hl(0, { name = 'WinSeparator', link = false })
+  vim.api.nvim_set_hl(0, 'ChatoraSidebarRow', {
+    underline = true,
+    sp = sep and sep.fg or nil,
+    default = true,
+  })
 end
 
 local winutil = require('chatora.winutil')
@@ -124,73 +132,71 @@ end
 -- rendering
 -- ---------------------------------------------------------------------------
 
-local BLANK_MARK = '  '
-
---- The save-state glyph for a listed page, padded to the 2-cell mark column.
---- Pages with no open buffer get blanks.
-local function mark_for(entry)
-  if not (project and entry.title) then
-    return BLANK_MARK, nil
-  end
-  local icon, hl_group = require('chatora.status').icon_for_uri(uri.format(project, entry.title))
-  if not icon then
-    return BLANK_MARK, nil
-  end
-  return icon .. ' ', hl_group
-end
-
+-- Column 0 is the unread border, so a page's own text starts at column 1 and
+-- nothing indents rows that carry no marks.
 local UNREAD_BAR = '▍'
 local READ_BAR = ' '
+
+--- The save-state glyph for a page, or nil when it has no open buffer.
+local function status_of(entry)
+  if not (project and entry.title) then
+    return nil
+  end
+  return require('chatora.status').icon_for_uri(uri.format(project, entry.title))
+end
 
 --- True while `entry` is listed as unread and has no open buffer. Opening a
 --- page marks it read server-side, but the list is only refetched on demand,
 --- so the bar clears locally the moment its buffer exists.
 local function is_unread(entry)
-  if not (entry.unread and project and entry.title) then
-    return false
-  end
-  return require('chatora.status').icon_for_uri(uri.format(project, entry.title)) == nil
+  return entry.unread == true and status_of(entry) == nil
 end
 
 local function render()
   if not (buf and vim.api.nvim_buf_is_valid(buf)) then
     return
   end
+  local separators = config.options.sidebar_separator ~= false
   local state = tabs[active] and tabs[active].state or new_state()
   line_pages = {}
   local lines = {}
-  local marks = {}
+  local rows = {}
   for i, p in ipairs(state.pages) do
-    local mark, hl_group = mark_for(p)
     local unread = is_unread(p)
-    local bar = unread and UNREAD_BAR or READ_BAR
-    lines[i] = mark .. bar .. (p.title or '(untitled)')
-    marks[i] = { mark_width = #mark, bar_width = #bar, hl_group = hl_group, unread = unread }
+    local icon, hl_group = status_of(p)
+    lines[i] = (unread and UNREAD_BAR or READ_BAR) .. (p.title or '(untitled)')
+    rows[i] = { unread = unread, icon = icon, hl_group = hl_group }
     line_pages[i] = p
   end
   if #lines == 0 then
-    lines = { state.loading and '   読み込み中…' or '   (該当なし)' }
+    lines = { ' ' .. (state.loading and '読み込み中…' or '(該当なし)') }
+    rows = {}
   end
 
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-  for i, mark in ipairs(marks) do
+  for i, row_info in ipairs(rows) do
     local row = i - 1
-    if mark.hl_group then
-      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
-        end_col = mark.mark_width,
-        hl_group = mark.hl_group,
-      })
+    if separators then
+      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { line_hl_group = 'ChatoraSidebarRow' })
     end
-    if mark.unread then
-      vim.api.nvim_buf_set_extmark(buf, ns, row, mark.mark_width, {
-        end_col = mark.mark_width + mark.bar_width,
+    if row_info.unread then
+      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+        end_col = #UNREAD_BAR,
         hl_group = 'ChatoraSidebarUnread',
       })
-      vim.api.nvim_buf_set_extmark(buf, ns, row, mark.mark_width + mark.bar_width, {
+      vim.api.nvim_buf_set_extmark(buf, ns, row, #UNREAD_BAR, {
         end_line = row + 1,
         hl_group = 'ChatoraSidebarUnreadTitle',
+      })
+    end
+    if row_info.icon then
+      -- Right-aligned so the save state never pushes titles around, and the
+      -- left edge stays reserved for the unread border.
+      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+        virt_text = { { row_info.icon .. ' ', row_info.hl_group } },
+        virt_text_pos = 'right_align',
       })
     end
   end
@@ -362,6 +368,8 @@ local function setup_keymaps()
     return { buffer = buf, nowait = true, silent = true, desc = desc }
   end
   vim.keymap.set('n', '<CR>', function() M.open_current() end, opts('chatora: ページを開く'))
+  -- neo-tree parity: l descends into the row under the cursor.
+  vim.keymap.set('n', 'l', function() M.open_current() end, opts('chatora: ページを開く'))
   vim.keymap.set('n', 'R', function() M.reload() end, opts('chatora: 一覧を再読込'))
   vim.keymap.set('n', 's', function() M.search() end, opts('chatora: ページ検索'))
   vim.keymap.set('n', 'n', function() M.new_page() end, opts('chatora: 新規ページ'))
@@ -416,6 +424,11 @@ function M.open(proj)
 
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
+  -- Every gutter off: a sign/fold/number column would indent the list away
+  -- from the window edge, and column 0 is the unread border.
+  vim.wo[win].signcolumn = 'no'
+  vim.wo[win].foldcolumn = '0'
+  vim.wo[win].statuscolumn = ''
   vim.wo[win].cursorline = true
   vim.wo[win].winfixwidth = true
   -- Pin the window to its buffer: opening a file while the sidebar is
