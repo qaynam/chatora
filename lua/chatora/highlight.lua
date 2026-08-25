@@ -51,7 +51,9 @@ end
 --- colorscheme; borrowing CursorLine instead would make the badge vanish on the cursor line.
 local SHADE_RATIO = 0.14
 
-local function badge_bg()
+local badge_bg
+
+badge_bg = function()
   local base = bg_of('Normal')
   if not base then
     return bg_of('CursorLine')
@@ -68,6 +70,12 @@ end
 
 -- Used only when a colorscheme has no hue left that some other token has not taken.
 local EMPHASIS_FALLBACK = { level2 = 0xd78700, level3 = 0xaf5fd7 }
+
+--- The badge background, for the non-LSP groups that have to match the `code` token: the
+--- marker line of a code block wears both, and two different greys read as a broken span.
+function M.badge_bg()
+  return badge_bg()
+end
 
 local function specs()
   local link = fg_of('Function')

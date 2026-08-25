@@ -154,8 +154,48 @@ function M.on_page_opened(project, title)
   end
 end
 
+-- Which edge the panel takes. A bottom strip suits a page you are reading through; a tall
+-- column on the right suits one with many links, and neither is right for everyone.
+local side_override = nil
+
+--- 'bottom' or 'right'.
+function M.side()
+  return side_override or (config.options.related_position == 'right' and 'right' or 'bottom')
+end
+
+--- Move the panel to the other edge, reopening it there when it is on screen. The choice
+--- outlives the panel but not the session; `related_position` is what makes it stick.
+function M.flip()
+  side_override = M.side() == 'right' and 'bottom' or 'right'
+  if is_open() then
+    M.close()
+    M.open()
+  end
+  vim.notify('[chatora] 関連ページ: ' .. (M.side() == 'right' and '右' or '下'))
+end
+
+--- Every window showing the panel buffer. More than one means a previous open leaked, so
+--- close() has something to sweep: the panel is one window by construction.
+local function panel_wins()
+  local found = {}
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    if buf and vim.api.nvim_win_is_valid(w) and vim.api.nvim_win_get_buf(w) == buf then
+      found[#found + 1] = w
+    end
+  end
+  return found
+end
+
 function M.open()
   ensure_buf()
+  -- Idempotent: auto-open and an explicit toggle can both fire for one page, and splitting
+  -- again would leave a second panel that nothing tracks and nothing closes.
+  if is_open() then
+    if cur_project and cur_title then
+      M.refresh(cur_project, cur_title)
+    end
+    return
+  end
   local cur = vim.api.nvim_get_current_win()
   if is_plugin_win(cur) then
     cur = find_editor_win() or cur
@@ -163,13 +203,19 @@ function M.open()
   end
   parent_win = cur
 
-  vim.cmd('belowright ' .. tostring(config.options.related_height) .. 'split')
+  if M.side() == 'right' then
+    vim.cmd('botright ' .. tostring(config.options.related_width) .. 'vsplit')
+  else
+    vim.cmd('belowright ' .. tostring(config.options.related_height) .. 'split')
+  end
   win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, buf)
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].cursorline = true
-  vim.wo[win].winfixheight = true
+  -- Pin the dimension the panel owns, so a later split resizes the page instead of it.
+  vim.wo[win].winfixheight = M.side() == 'bottom'
+  vim.wo[win].winfixwidth = M.side() == 'right'
   -- Same as the sidebar: never let another buffer take over this window.
   vim.wo[win].winfixbuf = true
   -- Label + panel background so the split is visibly chrome, not page content.
@@ -187,8 +233,10 @@ function M.open()
 end
 
 function M.close(opts)
-  if is_open() then
-    vim.api.nvim_win_close(win, true)
+  -- Closes every window showing the panel, not just the tracked one: an older build could
+  -- leak a second, and leaving it behind makes the panel look like it moved on its own.
+  for _, w in ipairs(panel_wins()) do
+    pcall(vim.api.nvim_win_close, w, true)
   end
   win = nil
   if opts and opts.by_user then

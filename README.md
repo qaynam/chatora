@@ -40,7 +40,9 @@ lazy.nvim（GitHub から直接）:
 | `sidebar_tabs` | すべて / 未読 | サイドバー上部のタブ。各要素は `{ label, filter?, unread_only? }`。`filter` は `'me'`（自分の保存済み Cosense フィルタ、無ければ自分の名前の icon フィルタ）か `{ type = 'icon', value = 'name' }`。`false` でタブなしの単一リスト |
 | `sidebar_separator` | `true` | 行ごとの区切り下線。未読バーが一本線に見えるのを防ぐ |
 | `sidebar_poll` | `60` | サイドバーを n 秒ごとに自動更新（更新順で先頭が入れ替わったときだけ再描画）。`false` で無効、最短 5 秒 |
-| `related_height` | `8` | 関連ページパネルの高さ。各行に被リンク数、見出しに件数、winbar にそのページ自身の被リンク数が出る |
+| `related_height` | `8` | 関連ページパネルの高さ（`related_position = 'bottom'` のとき）。各行に被リンク数、見出しに件数、winbar にそのページ自身の被リンク数が出る |
+| `related_position` | `'bottom'` | 関連ページパネルの位置。`'right'` にすると全高の縦カラムになる。`<leader>cR` でその場でも切り替えられる（設定が既定、キーはセッション内だけ） |
+| `related_width` | `40` | `related_position = 'right'` のときの幅 |
 | `related_auto_open` | `true` | ページを開いたら関連パネルも開く。`q` で閉じると次の `gR` まで抑制 |
 | `status` | `true` | 保存状態アイコン。`{ icons = { clean='✓', dirty='●', error='✗' }, echo = false }` で調整、`false` で無効 |
 | `autosave` | `false` | 編集停止から n 秒後に自動保存 |
@@ -113,6 +115,7 @@ blink.cmp / nvim-cmp / 組み込み補完のどれでも動く（選択中の候
 | `<leader>cs` | ページを検索 | `search` |
 | `<leader>cn` | 新規ページ | `new` |
 | `<leader>cr` | 関連ページを開閉 | `related` |
+| `<leader>cR` | 関連ページを下／右に切り替え | `related_side` |
 | `<leader>ci` | ページ情報（作成者・最終更新者とアイコン、相対時刻、被リンク、閲覧数ほか） | `info` |
 | `<leader>cf` | サーバーの変更を取り込む（`git pull` 相当。未保存の変更はマージされる） | `pull` |
 | `<leader>cc` | 次の競合行へ移動（ページバッファでは `]c` も） | `next_conflict` |

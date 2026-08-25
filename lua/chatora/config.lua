@@ -17,6 +17,11 @@ local defaults = {
   sidebar_poll = 60,
 
   related_height = 8,
+  -- Used when related_position is 'right'.
+  related_width = 40,
+  -- 'bottom' (a strip under the page) or 'right' (a full-height column). <leader>cR flips
+  -- it for the session.
+  related_position = 'bottom',
   related_auto_open = true,
 
   status = true,

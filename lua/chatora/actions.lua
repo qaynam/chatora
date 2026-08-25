@@ -67,6 +67,11 @@ function M.pull()
   end)
 end
 
+--- Move the related-pages panel between the bottom and the right edge.
+function M.related_side()
+  require('chatora.related').flip()
+end
+
 --- Jump to the next line the last sync found a conflict on.
 function M.next_conflict()
   require('chatora.sync').next_conflict()

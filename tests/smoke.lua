@@ -461,6 +461,56 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- related panel: one window however often it is opened, and it can change edge.
+  do
+    local related = require('chatora.related')
+    local page = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(page, 'cosense://proj/' .. vim.uri_encode('関連テスト'))
+    vim.bo[page].buftype = 'acwrite'
+    local prev = vim.api.nvim_get_current_buf()
+    vim.api.nvim_win_set_buf(0, page)
+
+    local function panel_wins()
+      local found = {}
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
+        if name:match('^chatora://related') then
+          found[#found + 1] = w
+        end
+      end
+      return found
+    end
+
+    -- Auto-open and an explicit toggle both fire for one page, so opening twice must not
+    -- leave a second panel that nothing tracks.
+    related.open()
+    related.open()
+    assert(#panel_wins() == 1, 'expected one panel window, got ' .. #panel_wins())
+    assert(related.side() == 'bottom', 'the shipped default is a bottom strip')
+
+    related.flip()
+    assert(related.side() == 'right', 'flip must change edge')
+    local wins = panel_wins()
+    assert(#wins == 1, 'flipping must not leave the old panel behind, got ' .. #wins)
+    local opts = require('chatora.config').options
+    assert(
+      vim.api.nvim_win_get_width(wins[1]) == opts.related_width,
+      'a right-hand panel takes related_width'
+    )
+    assert(
+      vim.api.nvim_win_get_height(wins[1]) > opts.related_height,
+      'a right-hand panel is a column, not the bottom strip'
+    )
+
+    related.flip()
+    assert(related.side() == 'bottom', 'flip must go back')
+    related.close()
+    assert(#panel_wins() == 0, 'close must leave nothing behind')
+
+    vim.api.nvim_win_set_buf(0, prev)
+    vim.api.nvim_buf_delete(page, { force = true })
+  end
+
   -- picker: module loads and exposes its API (opening it would spawn the LSP
   -- server, which the smoke test must not do).
   do

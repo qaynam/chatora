@@ -172,9 +172,10 @@ local function highlight_block(bufnr, lines, block)
 end
 
 local function ensure_hl()
-  local normal = vim.api.nvim_get_hl(0, { name = 'Normal', link = false })
-  local cursorline = vim.api.nvim_get_hl(0, { name = 'CursorLine', link = false })
-  local block_bg = cursorline and cursorline.bg or (normal and normal.bg) or nil
+  -- The same shade the `code` token uses, not CursorLine's: the marker line wears the
+  -- semantic token *and* this label, so two different greys would split it in half — which
+  -- is exactly what shows once the cursor lands on the line and unconceals `code:`.
+  local block_bg = require('chatora.highlight').badge_bg()
   vim.api.nvim_set_hl(0, 'ChatoraCodeBlock', { bg = block_bg, default = true })
   -- The filename reads as a tab above the block, the way Cosense's web UI
   -- draws it, so it takes the block's own background.

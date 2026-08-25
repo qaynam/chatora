@@ -31,6 +31,7 @@ local GLOBAL_ACTIONS = {
   s = { 'search', 'ページを検索' },
   n = { 'new', '新規ページ' },
   r = { 'related', '関連ページを開閉' },
+  R = { 'related_side', '関連ページを下／右に切り替え' },
   i = { 'info', 'ページ情報（作成者・更新者・被リンクなど）' },
   f = { 'pull', 'サーバーの変更を取り込む（マージ）' },
   c = { 'next_conflict', '次の競合へ' },
