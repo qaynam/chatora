@@ -110,7 +110,52 @@ function M.relative_time(seconds)
   return os.date('%Y-%m-%d', seconds)
 end
 
---- Float showing everything Cosense records about the current page.
+local info_ns = vim.api.nvim_create_namespace('chatora_page_info')
+
+--- Reserved at the head of every value, so an author's picture has somewhere to land and
+--- the column stays straight on a terminal that draws nothing there.
+local ICON_GUTTER = '   '
+
+local function ensure_info_hl()
+  vim.api.nvim_set_hl(0, 'ChatoraInfoLabel', { link = 'Comment', default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraInfoRule', { link = 'WinSeparator', default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraInfoName', { link = 'Identifier', default = true })
+end
+
+local function author_label(author)
+  if not author then
+    return '—'
+  end
+  local name = author.displayName ~= '' and author.displayName or author.name
+  return name ~= '' and name or author.id
+end
+
+--- The panel's rows, grouped the way Cosense's own page menu groups them: who and when
+--- first, then where the page sits, then the numbers nobody opens this for. `false` is a
+--- horizontal rule. Times are relative — a page's age is what the eye wants, and the exact
+--- stamp is a hover away in the web UI.
+local function info_rows(project, title, meta)
+  return {
+    { 'URL', uri.web_url(config.options.origin, project, title) },
+    { '作成', author_label(meta.createdBy), M.relative_time(meta.created) or '—', meta.createdBy },
+    { '更新', author_label(meta.updatedBy), M.relative_time(meta.updated) or '—', meta.updatedBy },
+    false,
+    { 'プロジェクト', project },
+    { 'ページ履歴', tostring(meta.snapshotCount) },
+    { '被リンク', tostring(meta.linked) },
+    false,
+    { '閲覧数', tostring(meta.views) },
+    { 'ページランク', string.format('%.2f', meta.pageRank) },
+    { '行数 / 文字数', meta.linesCount .. ' / ' .. meta.charsCount },
+    { 'ピン留め', meta.pin > 0 and 'あり' or 'なし' },
+    { '最終閲覧', M.relative_time(meta.accessed) or '—' },
+  }
+end
+
+--- Float showing what Cosense records about the current page.
+---
+--- Author icons are drawn over the gutter each of their rows reserves, so a terminal that
+--- cannot render pictures simply shows the names — the layout does not depend on them.
 function M.info()
   local project, title, bufnr = current_page()
   if not project then
@@ -121,32 +166,44 @@ function M.info()
     vim.notify('[chatora] このページの情報はまだ読み込まれていません', vim.log.levels.WARN)
     return
   end
+  ensure_info_hl()
 
-  local rows = {
-    { 'プロジェクト', project },
-    { 'タイトル', title },
-    { '更新', timestamp(meta.updated) .. ' (' .. (M.relative_time(meta.updated) or '—') .. ')' },
-    { '作成', timestamp(meta.created) },
-    { '最終閲覧', timestamp(meta.accessed) },
-    { '閲覧数', tostring(meta.views) },
-    { '被リンク', tostring(meta.linked) },
-    { 'ページ履歴', tostring(meta.snapshotCount) },
-    { 'ページランク', string.format('%.2f', meta.pageRank) },
-    { '行数 / 文字数', meta.linesCount .. ' / ' .. meta.charsCount },
-    { 'ピン留め', meta.pin > 0 and 'あり' or 'なし' },
-    { 'URL', uri.web_url(config.options.origin, project, title) },
-  }
-
-  local label_width = 0
+  local rows = info_rows(project, title, meta)
+  -- Every value carries the icon gutter, not just the rows that will fill it: the column
+  -- has to be straight whether or not this terminal can draw a picture.
+  local label_width, named_width = 0, 0
   for _, row in ipairs(rows) do
-    label_width = math.max(label_width, vim.fn.strdisplaywidth(row[1]))
+    if row then
+      label_width = math.max(label_width, vim.fn.strdisplaywidth(row[1]))
+      -- Only the rows that carry a trailing time set that column's position, so it sits
+      -- next to the name rather than out past the width of the URL.
+      if row[3] then
+        named_width = math.max(named_width, vim.fn.strdisplaywidth(row[2]))
+      end
+    end
   end
-  local lines, width = {}, 0
+
+  local lines, marks, width = {}, {}, 0
   for _, row in ipairs(rows) do
-    local pad = string.rep(' ', label_width - vim.fn.strdisplaywidth(row[1]))
-    local line = '  ' .. row[1] .. pad .. '  ' .. row[2]
-    lines[#lines + 1] = line
-    width = math.max(width, vim.fn.strdisplaywidth(line))
+    if not row then
+      lines[#lines + 1] = ''
+      marks[#marks + 1] = { rule = true, line = #lines - 1 }
+    else
+      local label = row[1] .. string.rep(' ', label_width - vim.fn.strdisplaywidth(row[1]))
+      local prefix = '  ' .. label .. ICON_GUTTER
+      local line = prefix .. row[2]
+      if row[3] then
+        line = line .. string.rep(' ', named_width - vim.fn.strdisplaywidth(row[2]) + 3) .. row[3]
+      end
+      lines[#lines + 1] = line
+      marks[#marks + 1] = {
+        line = #lines - 1,
+        label_end = #('  ' .. label),
+        value_at = #prefix,
+        author = row[4],
+      }
+      width = math.max(width, vim.fn.strdisplaywidth(line))
+    end
   end
 
   local buf = vim.api.nvim_create_buf(false, true)
@@ -154,21 +211,62 @@ function M.info()
   vim.bo[buf].modifiable = false
   vim.bo[buf].bufhidden = 'wipe'
 
+  width = math.min(width + 4, vim.o.columns - 4)
   local win = vim.api.nvim_open_win(buf, true, {
     relative = 'editor',
-    width = math.min(width + 4, vim.o.columns - 4),
+    width = width,
     height = #lines,
     row = math.floor((vim.o.lines - #lines) / 2),
     col = math.floor((vim.o.columns - width) / 2),
     style = 'minimal',
     border = 'rounded',
-    title = ' ページ情報 ',
+    title = ' ' .. title .. ' ',
     title_pos = 'center',
   })
+
+  local images = require('chatora.images')
+  local placements = {}
+  for _, mark in ipairs(marks) do
+    if mark.rule then
+      -- The separator is an empty line wearing a full-width underline: a row of box glyphs
+      -- would be text the reader could put a cursor in the middle of.
+      vim.api.nvim_buf_set_extmark(buf, info_ns, mark.line, 0, {
+        line_hl_group = 'ChatoraInfoRule',
+      })
+    else
+      vim.api.nvim_buf_set_extmark(buf, info_ns, mark.line, 0, {
+        end_col = mark.label_end,
+        hl_group = 'ChatoraInfoLabel',
+      })
+      if mark.author then
+        vim.api.nvim_buf_set_extmark(buf, info_ns, mark.line, mark.value_at, {
+          end_col = #lines[mark.line + 1],
+          hl_group = 'ChatoraInfoName',
+        })
+      end
+      if mark.author and mark.author.name ~= '' then
+        images.place_one(
+          buf,
+          project,
+          images.icon_url(config.options.origin, project, mark.author.name),
+          mark.line,
+          mark.value_at,
+          function(placement)
+            placements[#placements + 1] = placement
+          end
+        )
+      end
+    end
+  end
+
+  local function close()
+    for _, placement in ipairs(placements) do
+      pcall(placement.close)
+    end
+    pcall(vim.api.nvim_win_close, win, true)
+  end
   for _, key in ipairs({ 'q', '<Esc>' }) do
-    vim.keymap.set('n', key, function()
-      pcall(vim.api.nvim_win_close, win, true)
-    end, { buffer = buf, nowait = true, silent = true })
+    vim.keymap.set('n', key, close, { buffer = buf, nowait = true, silent = true })
   end
 end
 

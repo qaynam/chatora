@@ -374,6 +374,76 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- page info: tiers separated by rules, relative times, and a gutter every value shares
+  -- so the icon a terminal may not draw cannot shift the column.
+  do
+    local actions = require('chatora.actions')
+    local now = os.time()
+    assert(actions.relative_time(now - 30) == '30秒前', 'seconds')
+    assert(actions.relative_time(now - 60 * 12) == '12分前', 'minutes')
+    assert(actions.relative_time(now - 3600 * 5) == '5時間前', 'hours')
+    assert(actions.relative_time(now - 86400 * 3) == '3日前', 'days')
+    assert(actions.relative_time(nil) == nil, 'a page with no such timestamp has no age')
+    assert(actions.relative_time(0) == nil, 'epoch 0 means never, not 1970')
+
+    local buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(buf, 'cosense://proj/' .. vim.uri_encode('情報テスト'))
+    vim.bo[buf].buftype = 'acwrite'
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '情報テスト' })
+    local prev = vim.api.nvim_get_current_buf()
+    vim.api.nvim_win_set_buf(0, buf)
+    vim.b[buf].chatora_meta = {
+      created = now - 86400 * 3,
+      updated = now - 60 * 12,
+      accessed = now - 3600 * 5,
+      views = 128,
+      linked = 6,
+      linesCount = 42,
+      charsCount = 1980,
+      pin = 0,
+      pageRank = 1.2345,
+      snapshotCount = 12,
+      createdBy = { id = 'u1', name = 'taro', displayName = 'taro' },
+      updatedBy = { id = 'u2', name = 'hanako', displayName = 'はなこ' },
+    }
+
+    actions.info()
+    local info_buf = vim.api.nvim_get_current_buf()
+    assert(info_buf ~= buf, 'expected the info float to be focused')
+    local lines = vim.api.nvim_buf_get_lines(info_buf, 0, -1, false)
+    local text = table.concat(lines, '\n')
+
+    assert(text:find('taro', 1, true), 'the author must be named')
+    assert(text:find('はなこ', 1, true), 'the last editor must be named, by display name')
+    assert(text:find('3日前', 1, true), 'times are relative, not stamps')
+    assert(not text:find('%d%d%d%d%-%d%d%-%d%d'), 'no absolute dates in the panel')
+
+    -- Two rules, drawn as empty lines wearing a highlight rather than as box characters
+    -- the cursor could land inside.
+    local rules = 0
+    for _, line in ipairs(lines) do
+      if line == '' then
+        rules = rules + 1
+      end
+    end
+    assert(rules == 2, 'expected two separators, got ' .. rules)
+
+    -- Every value starts at the same column, gutter included, whatever the row.
+    local ns = vim.api.nvim_create_namespace('chatora_page_info')
+    local value_col = nil
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(info_buf, ns, 0, -1, { details = true })) do
+      if mark[4].hl_group == 'ChatoraInfoName' then
+        value_col = value_col or mark[3]
+        assert(mark[3] == value_col, 'author values must share one column')
+      end
+    end
+    assert(value_col ~= nil, 'expected the author rows to be marked')
+
+    vim.api.nvim_win_close(0, true)
+    vim.api.nvim_win_set_buf(0, prev)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- picker: module loads and exposes its API (opening it would spawn the LSP
   -- server, which the smoke test must not do).
   do

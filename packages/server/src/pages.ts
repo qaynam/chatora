@@ -370,7 +370,51 @@ export interface PageMeta {
   readonly pin: number
   readonly pageRank: number
   readonly snapshotCount: number
+  readonly createdBy?: PageAuthor
+  readonly updatedBy?: PageAuthor
 }
+
+/**
+ * Someone a page can be attributed to. The page body names them by id alone, so `name` and
+ * `displayName` are empty when the project roster could not be read — `name` is also what
+ * the `.icon` notation is keyed by, which is how the client draws their picture.
+ */
+export interface PageAuthor {
+  readonly id: string
+  readonly name: string
+  readonly displayName: string
+}
+
+/**
+ * `toPageMeta` plus the two authors, resolved through the project's cached roster. The
+ * roster is one request per project per ten minutes and never fails the caller, so an
+ * unreadable one costs the names and nothing else.
+ */
+const toPageMetaWithAuthors = (
+  project: string,
+  page: PageDetail,
+): Effect.Effect<PageMeta, never, SessionState | HttpClient> =>
+  Effect.gen(function* () {
+    const meta = toPageMeta(page)
+    const ids = [page.user?.id, page.lastUpdateUser?.id].filter(
+      (id): id is string => typeof id === 'string' && id !== '',
+    )
+    if (ids.length === 0) return meta
+    const session = yield* SessionState
+    const { users } = yield* session.getProjectUsers(project)
+    const author = (id: string | undefined): PageAuthor | undefined => {
+      if (id === undefined || id === '') return undefined
+      const found = users.find((user) => user.id === id)
+      return { id, name: found?.name ?? '', displayName: found?.displayName ?? '' }
+    }
+    const createdBy = author(page.user?.id)
+    const updatedBy = author(page.lastUpdateUser?.id)
+    return {
+      ...meta,
+      ...(createdBy ? { createdBy } : {}),
+      ...(updatedBy ? { updatedBy } : {}),
+    }
+  })
 
 const toPageMeta = (page: PageDetail): PageMeta => ({
   created: page.created,
@@ -430,7 +474,7 @@ export const openPage = (params: {
           exists: true as const,
           pageId: page.id,
           commitId: page.commitId,
-          meta: toPageMeta(page),
+          meta: yield* toPageMetaWithAuthors(params.project, page),
         }
       }
 
@@ -514,7 +558,7 @@ export const syncPage = (
         changed: text !== before,
         text,
         conflicts,
-        meta: toPageMeta(page),
+        meta: yield* toPageMetaWithAuthors(base.project, page),
       }
     }),
   )

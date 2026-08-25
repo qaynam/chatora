@@ -208,7 +208,9 @@ end
 --- Icon endpoint URL for a `chatora/images` icon target's `iconUser`. A
 --- leading `/` means a cross-project icon (`/project/title`, from
 --- `[/project/name.icon]`); every path segment is encoded independently.
-local function icon_url(origin, project, icon_user)
+--- A Cosense user's picture is the icon of their own page, so this is also how a page's
+--- author is drawn.
+function M.icon_url(origin, project, icon_user)
   if icon_user:sub(1, 1) == '/' then
     local segments = {}
     for segment in icon_user:gmatch('[^/]+') do
@@ -281,7 +283,7 @@ local function build_targets(bufnr, project, origin, border, images)
           -- An icon stands in for a face in running text, so it is one row even when it
           -- has the line to itself.
           targets[#targets + 1] = {
-            url = icon_url(origin, project, img.iconUser),
+            url = M.icon_url(origin, project, img.iconUser),
             geom = geom,
             opts = { height = 1 },
             standalone = img.standalone,
@@ -400,6 +402,43 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
   for _, target in ipairs(targets) do
     place_url(target.url, target.geom, target.opts, target.border)
   end
+end
+
+--- Draw one picture, one text row tall, at a 0-based (row, col) of `bufnr`.
+---
+--- For chrome that is not a page buffer, where none of the bookkeeping above applies:
+--- there is no notation to conceal, no signature to compare and no epoch to invalidate,
+--- because the caller owns the buffer and throws it away wholesale. The returned closer is
+--- theirs to call; nil means nothing was drawn, which callers treat as cosmetic and ignore.
+--- `on_placed` runs after the asset resolves, since that takes a round trip.
+function M.place_one(bufnr, project, url, row, col, on_placed)
+  local active = images_enabled() and backend() or nil
+  if not active then
+    return
+  end
+  local geom = { row = row + 1, byte_col = col, byte_end = col, screen_col = col }
+  local function draw(path)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    local placement = active.place(bufnr, path, geom, { height = 1 })
+    if placement and on_placed then
+      on_placed(placement)
+    end
+  end
+
+  local cached = path_by_key[url]
+  if cached then
+    draw(cached)
+    return
+  end
+  lsp.request('chatora/fetchAsset', { project = project, url = url }, function(err, result)
+    if err or not result or result.ok == false then
+      return
+    end
+    path_by_key[url] = result.path
+    draw(result.path)
+  end)
 end
 
 --- Forget that the current placements were applied, so the next refresh

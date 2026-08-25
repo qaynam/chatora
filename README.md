@@ -113,7 +113,7 @@ blink.cmp / nvim-cmp / 組み込み補完のどれでも動く（選択中の候
 | `<leader>cs` | ページを検索 | `search` |
 | `<leader>cn` | 新規ページ | `new` |
 | `<leader>cr` | 関連ページを開閉 | `related` |
-| `<leader>ci` | ページ情報（更新日時・閲覧数・被リンク・ピン留め・URL） | `info` |
+| `<leader>ci` | ページ情報（作成者・最終更新者とアイコン、相対時刻、被リンク、閲覧数ほか） | `info` |
 | `<leader>cf` | サーバーの変更を取り込む（`git pull` 相当。未保存の変更はマージされる） | `pull` |
 | `<leader>cc` | 次の競合行へ移動（ページバッファでは `]c` も） | `next_conflict` |
 | `<leader>cv` | クリップボードの画像をアップロードして記法を挿入 | `paste_image` |
@@ -349,8 +349,31 @@ vim.o.statusline = "%f %{%v:lua.require'chatora.status'.component()%} %{v:lua.re
 | 保存中 | `◍ 保存中 · …` | `ChatoraStatusPending` |
 | 保存失敗 | `✗ 保存失敗 · …` | `ChatoraStatusError` |
 
-更新時刻だけなら `require('chatora.status').updated(bufnr)`。全項目（作成日・ページ履歴・
-ページランク・ピン留め）は `<leader>ci` のページ情報パネルに出る。
+更新時刻だけなら `require('chatora.status').updated(bufnr)`。
+
+### ページ情報（`<leader>ci`）
+
+Cosense のページメニューと同じ並び。よく見るものが上、横線で区切って下に行くほど細かくなる:
+
+```
+  URL          https://scrapbox.io/my-project/設計メモ
+  作成         ◍ taro   3日前
+  更新         ◍ はなこ        12分前
+  ─────────────────────────────────────
+  プロジェクト my-project
+  ページ履歴   12
+  被リンク     6
+  ─────────────────────────────────────
+  閲覧数       128
+  ページランク 1.23
+  行数 / 文字数 42 / 1980
+  ピン留め     なし
+  最終閲覧     5時間前
+```
+
+日時は Cosense web と同じく相対表記に丸める。作成者・最終更新者の**アイコンが名前の左に描かれる**
+（画像を描けるターミナルのみ。描けなくても名前は出るし桁もずれない）。ページ本文には著者の id しか
+入っていないので、名前は `/api/projects/<name>/users` で解決してプロジェクト単位に 10 分キャッシュする。
 
 lualine など「色は自前で付ける」系のプラグインにはアイコンだけ返す
 `require('chatora.status').icon(bufnr)`（戻り値: アイコン, ハイライト名）が使える。
