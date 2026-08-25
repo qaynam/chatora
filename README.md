@@ -578,3 +578,7 @@ bun test                 # core + server の単体テスト
 nvim --headless --clean -u NORC -c "luafile tests/smoke.lua"
 bun tests/e2e/run.ts     # 偽 Cosense サーバー + headless nvim
 ```
+
+## ライセンス
+
+[MIT](LICENSE)
