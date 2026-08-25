@@ -152,6 +152,22 @@ local function rule_spec(notation)
   return rule
 end
 
+-- apply() re-runs on every :colorscheme, so a rejected spec is reported the first time and
+-- then stays quiet rather than warning on every theme switch.
+local reported = {}
+
+--- Define `group`, reporting a spec Neovim rejects instead of leaving the group undefined.
+--- `hl` reaches nvim_set_hl verbatim, so an unknown key — `textColor` for `fg`, say — is a
+--- config mistake worth naming: the whole notation would otherwise just not be colored.
+local function set_hl(group, hl)
+  local ok, err = pcall(vim.api.nvim_set_hl, 0, group, hl)
+  if ok or reported[group] then
+    return
+  end
+  reported[group] = true
+  vim.notify(('[chatora] %s のハイライトを適用できません: %s'):format(group, err), vim.log.levels.WARN)
+end
+
 local function apply()
   for token, spec in pairs(specs()) do
     spec.default = true
@@ -160,9 +176,9 @@ local function apply()
   for _, notation in pairs(config.options.notations) do
     local hl = vim.deepcopy(notation.hl or {})
     hl.default = true
-    pcall(vim.api.nvim_set_hl, 0, '@lsp.type.' .. notation.name .. '.cosense', hl)
+    set_hl('@lsp.type.' .. notation.name .. '.cosense', hl)
     if notation.rule then
-      pcall(vim.api.nvim_set_hl, 0, config.notation_rule_hl(notation.name), rule_spec(notation))
+      set_hl(config.notation_rule_hl(notation.name), rule_spec(notation))
     end
   end
   pcall(require('chatora.quote').ensure_hl)

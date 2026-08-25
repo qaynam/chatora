@@ -99,6 +99,33 @@ local ok, err = pcall(function()
       'expected notation_icon to return nil when no icon is configured'
     )
 
+    -- An `hl` Neovim rejects (a misspelled key, say) must say so: the group is left
+    -- undefined either way, and silence reads as "chatora ignored my notation".
+    do
+      local warned = nil
+      local orig = vim.notify
+      vim.notify = function(msg, level)
+        if type(msg) == 'string' and msg:find('ハイライトを適用できません', 1, true) then
+          warned = msg
+        end
+        return orig(msg, level)
+      end
+      chatora.setup({
+        notations = { ['!'] = { name = 'bad_hl', hl = { bg = '#ff0000', textColor = '#fff' } } },
+      })
+      vim.notify = orig
+      assert(warned ~= nil, 'expected a warning for a highlight spec Neovim rejects')
+      assert(warned:find('textColor', 1, true), 'the warning must name the offending key')
+      chatora.setup({
+        notations = {
+          ['|'] = { name = 'highlight', icon = '📌', hl = { bg = '#3a3a00', bold = true } },
+          ['='] = { name = 'boxed', hl = { link = 'WarningMsg' } },
+          ['@'] = { name = 'bad_icon', icon = 'ab', hl = {} },
+          ['??'] = { name = 'bad', hl = {} },
+        },
+      })
+    end
+
     local list = require('chatora.config').notation_list()
     assert(#list == 3, 'expected 3 valid notations in the wire list, got ' .. #list)
     assert(list[1].marker == '=' and list[1].name == 'boxed', 'expected marker-ascending order')
