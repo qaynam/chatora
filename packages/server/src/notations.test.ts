@@ -85,6 +85,52 @@ describe('setNotations / parseOptions', () => {
     setNotations([])
   })
 
+  test('a marker run mixing a notation with official markers keeps both, in either order', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    for (const src of ['[|* 特徴]', '[*| 特徴]']) {
+      const node = parseLine(src, parseOptions()).children[0]
+      expect(node?.type).toBe('decoration')
+      if (node?.type !== 'decoration') continue
+      expect(node.bold).toBe(true)
+      expect(node.value).toBe('特徴')
+      expect(notationNameForDecoration(node, [src])).toBe('highlight')
+    }
+    setNotations([])
+  })
+
+  test('asterisk count in a mixed run still grades sizeLevel, capped like the official parser', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    const sizeOf = (src: string) => {
+      const node = parseLine(src, parseOptions()).children[0]
+      if (node?.type !== 'decoration') throw new Error('expected a decoration node')
+      return node.sizeLevel
+    }
+    expect(sizeOf('[|* a]')).toBe(0)
+    expect(sizeOf('[|** a]')).toBe(1)
+    expect(sizeOf('[|******* a]')).toBe(4)
+    setNotations([])
+  })
+
+  test('a run of official markers only is left to the base parser', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    const node = parseLine('[-_ a]', parseOptions()).children[0]
+    expect(node?.type).toBe('decoration')
+    if (node?.type === 'decoration') {
+      expect(node.strike).toBe(true)
+      expect(node.underline).toBe(true)
+      expect(notationNameForDecoration(node, ['[-_ a]'])).toBeUndefined()
+    }
+    setNotations([])
+  })
+
+  test('child column accounts for the whole marker run', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    const node = parseLine('[|** 特徴]', parseOptions()).children[0]
+    if (node?.type !== 'decoration') throw new Error('expected a decoration node')
+    expect(node.children[0]?.position.start.column).toBe('[|** '.length)
+    setNotations([])
+  })
+
   test('notationSpecs is canonicalized to marker-ascending order regardless of input order', () => {
     setNotations([
       { marker: '~', name: 'z' },

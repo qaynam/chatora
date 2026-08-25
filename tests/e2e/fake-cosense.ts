@@ -43,6 +43,9 @@ const makeFixturePages = (): Map<string, FixturePage> => {
       { id: 'l1', text: 'ホーム' },
       { id: 'l2', text: 'これは[メモ]へのリンク' },
       { id: 'l3', text: '#tag もある' },
+      // A marker run mixing the harness's custom `|` notation with the official `*`.
+      { id: 'l4', text: '[|* 特徴]' },
+      { id: 'l5', text: '> 引用された行' },
     ],
   })
   pages.set('メモ', {
@@ -209,7 +212,10 @@ export const startFakeCosense = (): FakeCosenseHandle => {
       // GET /api/pages/testproj/search/query?q=...
       if (path === `/api/pages/${PROJECT}/search/query` && method === 'GET') {
         return respond(
-          { count: 1, pages: [{ title: 'メモ', lines: ['メモ', '検索ヒット行'] }] },
+          {
+            count: 1,
+            pages: [{ title: 'メモ', lines: ['メモ', '検索ヒット行'], words: ['ヒット'] }],
+          },
           200,
         )
       }
@@ -231,7 +237,7 @@ export const startFakeCosense = (): FakeCosenseHandle => {
       // POST /api/pages/v2/testproj/page-edit-for-ai/submit
       if (path === `/api/pages/v2/${PROJECT}/page-edit-for-ai/submit` && method === 'POST') {
         const reqBody = body as { previewId?: string } | undefined
-        if (!reqBody || reqBody.previewId !== 'pv1' || !pendingPreview) {
+        if (reqBody?.previewId !== 'pv1' || !pendingPreview) {
           return respond({ error: 'InvalidPreview' }, 422)
         }
         // Mutate the in-memory ホーム page so a post-submit refetch sees consistent data —
@@ -279,7 +285,7 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         }
 
         if (hop === 'links1hop') {
-          const links1hop = title === 'ホーム' ? [{ id: 'pg2', title: 'メモ' }] : []
+          const links1hop = title === 'ホーム' ? [{ id: 'pg2', title: 'メモ', linked: 3 }] : []
           return respond({ links1hop }, 200)
         }
         if (hop === 'links2hop') {
@@ -295,6 +301,9 @@ export const startFakeCosense = (): FakeCosenseHandle => {
               commitId: page.commitId,
               persistent: true,
               lines: page.lines,
+              updated: 1700000000,
+              views: 42,
+              linked: 6,
             },
             200,
           )

@@ -24,13 +24,17 @@ local defaults = {
   completion = 'auto',
   external_link = 'confirm',
   keymaps = true,
+  log = false,
 
   images = 'auto',
   image_backend = 'auto',
   image_height = 20,
+  image_height_large = nil,
+  image_gallery = true,
   image_border = true,
 
   pads = true,
+  quote = true,
   conceal = true,
   codeblock_numbers = true,
   tables = true,
@@ -49,7 +53,7 @@ local function file_exists(path)
   return stat ~= nil and stat.type == 'file'
 end
 
--- Markers reserved by official notation ([* ], [/ ], [- ], [_ ], [$ ], [[ ]], [# ]).
+-- Markers reserved by official notation ([* ], [/ ], [- ], [_ ], [$ ], [[ ]]).
 local RESERVED_MARKERS = {
   ['*'] = true,
   ['/'] = true,
@@ -57,7 +61,6 @@ local RESERVED_MARKERS = {
   ['_'] = true,
   ['$'] = true,
   ['['] = true,
-  ['#'] = true,
 }
 
 -- Drops malformed entries (with a vim.notify warning) rather than erroring setup(): a typo in
@@ -104,7 +107,12 @@ local function plugin_root()
   return vim.fn.fnamemodify(source, ':p:h:h:h')
 end
 
+--- The table setup() was last called with, kept unmerged so `:Chatora reload` re-applies
+--- the user's configuration rather than a copy of it merged with defaults.
+M.user_opts = nil
+
 function M.setup(opts)
+  M.user_opts = opts
   M.options = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
   M.options.notations = validate_notations(M.options.notations)
 end
@@ -131,12 +139,23 @@ function M.notation_list()
 end
 
 function M.notation_icon(name)
+  local spec = M.notation_spec(name)
+  return spec and spec.icon or nil
+end
+
+--- The configured spec behind a notation's semantic token `name`, or nil.
+function M.notation_spec(name)
   for _, spec in pairs(M.options.notations) do
     if spec.name == name then
-      return spec.icon
+      return spec
     end
   end
   return nil
+end
+
+--- Highlight group carrying a notation's full-row rule (`rule = true`).
+function M.notation_rule_hl(name)
+  return 'ChatoraNotationRule_' .. name
 end
 
 --- Resolve the server command to launch.

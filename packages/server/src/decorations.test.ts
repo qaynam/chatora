@@ -15,6 +15,17 @@ describe('computeConcealRanges', () => {
     ])
   })
 
+  test('a link nested in a decoration loses its own brackets too', () => {
+    // '[* [nuclear]]' — '[* ' then the link's '[', then its ']' and the decoration's.
+    const text = 'タイトル\n[* [nuclear]]'
+    expect(rangesOnLine(text, 1)).toEqual([
+      { line: 1, startChar: 0, endChar: 3 },
+      { line: 1, startChar: 12, endChar: 13 },
+      { line: 1, startChar: 3, endChar: 4 },
+      { line: 1, startChar: 11, endChar: 12 },
+    ])
+  })
+
   test('internal link: hides only the brackets', () => {
     const text = 'タイトル\nsee [ページ名] here'
     const ranges = rangesOnLine(text, 1)

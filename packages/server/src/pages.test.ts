@@ -390,6 +390,8 @@ describe('openPage / newPage', () => {
           { id: 'l1', text: 'My Page' },
           { id: 'l2', text: 'body' },
         ],
+        updated: 1700000000,
+        views: 7,
       }),
     )
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
@@ -405,6 +407,20 @@ describe('openPage / newPage', () => {
       exists: true,
       pageId: 'pg1',
       commitId: 'c1',
+      // Rides along on the open, so the status line and the info panel never need a
+      // second round-trip.
+      meta: {
+        created: 0,
+        updated: 1700000000,
+        accessed: 0,
+        views: 7,
+        linked: 0,
+        linesCount: 0,
+        charsCount: 0,
+        pin: 0,
+        pageRank: 0,
+        snapshotCount: 0,
+      },
     })
   })
 

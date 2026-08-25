@@ -10,6 +10,8 @@ local M = {}
 local config = require('chatora.config')
 local lsp = require('chatora.lsp')
 
+M.ns = vim.api.nvim_create_namespace('chatora_images')
+
 local DEBOUNCE_MS = 300
 local uv = vim.uv or vim.loop
 local timers_by_bufnr = {}
@@ -48,6 +50,28 @@ local function border_params()
   }
 end
 
+--- Row cap for a standalone image. Cosense's `[[url]]` form asks for a bigger
+--- rendering than `[url]`; unset, `image_height_large` follows image_height so
+--- one setting still scales both.
+local function standalone_height(large)
+  if not large then
+    return config.options.image_height
+  end
+  return config.options.image_height_large or config.options.image_height * 2
+end
+
+--- Row cap for an image on a line that holds nothing but pictures, or nil to leave such
+--- images in the text line at one row tall. A backend draws either inline virtual *text*
+--- (one row, side by side) or virtual *lines* below (any height, stacked) — there is no
+--- third mode, so such a line is either small and side by side, or readable and stacked.
+local function gallery_rows()
+  local opt = config.options.image_gallery
+  if opt == false then
+    return nil
+  end
+  return type(opt) == 'number' and opt or config.options.image_height
+end
+
 --- Cells available for text in the window showing bufnr, or a conservative
 --- default when it isn't displayed.
 local function text_width(bufnr)
@@ -78,6 +102,10 @@ end
 -- backends disagree about: `row` (1-based), `byte_col`/`byte_end` (0-based byte
 -- offsets into the line) and `screen_col` (display cells, which is what the
 -- indent actually looks like once pads' virtual text is counted).
+--
+-- `indent_col`/`indent_screen_col` are the same two numbers for the line's indent, which
+-- `align_indent` asks for instead: stacked pictures placed under their own notation would
+-- step across the screen.
 
 --- 3rd/image.nvim. Geometry x/y are 0-based, and an inline placement only
 --- follows the buffer when bound to both a window and a buffer.
@@ -97,7 +125,7 @@ local function image_nvim_backend()
         buffer = bufnr,
         inline = true,
         with_virtual_padding = true,
-        x = geom.screen_col,
+        x = geom.align_indent and geom.indent_screen_col or geom.screen_col,
         y = geom.row - 1,
         height = opts and opts.height or nil,
         max_height = opts and opts.max_height or nil,
@@ -123,13 +151,15 @@ local function snacks_backend()
   end
   return {
     place = function(bufnr, path, geom, opts)
-      -- snacks slices the line with these numbers as well as using them as
-      -- screen columns, so they have to be byte offsets. Without `range` it
-      -- treats the rest of the notation as text sitting after the image, which
-      -- costs the padded layout and adds an inline anchor glyph.
+      -- snacks slices the line with these numbers as well as using them as screen columns,
+      -- so they have to be byte offsets. Without `range` it treats the rest of the
+      -- notation as text sitting after the image, which costs the padded layout and adds
+      -- an inline anchor glyph. range[2] drives both the overlay column and the virt_lines
+      -- padding (snacks.image.placement), so it is also what lines a gallery up.
+      local col = geom.align_indent and geom.indent_col or geom.byte_col
       local placement_opts = vim.tbl_extend('force', {
-        pos = { geom.row, geom.byte_col },
-        range = { geom.row, geom.byte_col, geom.row, geom.byte_end },
+        pos = { geom.row, col },
+        range = { geom.row, col, geom.row, geom.byte_end },
         inline = true,
       }, opts or {})
       local ok, p = pcall(image.placement.new, bufnr, path, placement_opts)
@@ -190,6 +220,7 @@ local function icon_url(origin, project, icon_user)
 end
 
 local function clear_placements(bufnr)
+  pcall(vim.api.nvim_buf_clear_namespace, bufnr, M.ns, 0, -1)
   local list = placements_by_bufnr[bufnr]
   if not list then
     return
@@ -198,6 +229,20 @@ local function clear_placements(bufnr)
     p.close()
   end
   placements_by_bufnr[bufnr] = nil
+end
+
+--- Hide the notation behind a picture that is actually on screen. Applied per
+--- placement rather than from `chatora/decorations`, because the server cannot know
+--- whether this terminal drew anything: hiding a link that never became an image
+--- would leave the line blank.
+local function conceal_notation(bufnr, geom)
+  if config.options.conceal == false then
+    return
+  end
+  pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, geom.row - 1, geom.byte_col, {
+    end_col = geom.byte_end,
+    conceal = '',
+  })
 end
 
 --- Screen column of the notation starting at byte column `byte_col`. Backends
@@ -227,27 +272,34 @@ local function build_targets(bufnr, project, origin, border, images)
           byte_col = byte_col,
           byte_end = byte_end,
           screen_col = screen_col(line, byte_col, indent),
+          indent_col = indent,
+          indent_screen_col = screen_col(line, indent, indent),
         }
 
         if img.kind == 'icon' then
+          -- An icon stands in for a face in running text, so it is one row even when it
+          -- has the line to itself.
           targets[#targets + 1] = {
             url = icon_url(origin, project, img.iconUser),
             geom = geom,
             opts = { height = 1 },
             standalone = img.standalone,
           }
-        elseif img.standalone then
+        elseif img.standalone or (img.gallery and gallery_rows() ~= nil) then
+          -- Several pictures share the line, so they stack; aligning them to the line's
+          -- indent keeps that stack a column rather than a staircase.
+          geom.align_indent = not img.standalone
           targets[#targets + 1] = {
             url = img.src,
             geom = geom,
             -- Capped at the room left of the right edge, so a wide image
             -- scales down instead of being clipped.
             opts = {
-              max_height = config.options.image_height,
+              max_height = img.standalone and standalone_height(img.large) or gallery_rows(),
               max_width = math.max(1, text_width(bufnr) - geom.screen_col),
             },
             border = border,
-            standalone = true,
+            standalone = img.standalone,
           }
         else
           targets[#targets + 1] = {
@@ -315,6 +367,7 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
     local p = active.place(bufnr, path, geom, opts)
     if p then
       new_placements[#new_placements + 1] = p
+      conceal_notation(bufnr, geom)
     end
   end
 

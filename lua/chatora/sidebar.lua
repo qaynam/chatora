@@ -6,6 +6,7 @@ local M = {}
 local config = require('chatora.config')
 local lsp = require('chatora.lsp')
 local page = require('chatora.page')
+local spinner = require('chatora.spinner')
 local search = require('chatora.search')
 local uri = require('chatora.uri')
 
@@ -79,19 +80,41 @@ local active = 1
 local me = nil
 
 local function new_state()
-  return { pages = {}, count = nil, scanned = 0, loading = false, exhausted = false, cursor = 1 }
+  return {
+    pages = {},
+    count = nil,
+    scanned = 0,
+    loading = false,
+    exhausted = false,
+    cursor = 1,
+    -- `loading` cannot answer "is this empty or just early?": it is false before a
+    -- request starts, between batches, and for the whole time a `me` tab waits on
+    -- authStatus. Without this an empty list reads as "no results" from the first frame.
+    fetched = false,
+  }
 end
 
-local function build_tabs()
+--- Rebuild the tab list from config, carrying each tab's already-fetched pages over when
+--- it is recognisably the same tab. Closing and reopening the sidebar must not cost a full
+--- refetch — the poll loop is what keeps the list current.
+---
+--- @param keep_state boolean False when the project changed: another project's list is
+---   not this one's.
+local function build_tabs(keep_state)
   local specs = config.options.sidebar_tabs
   if specs == false then
     specs = { DEFAULT_TABS[1] }
   elseif type(specs) ~= 'table' or #specs == 0 then
     specs = DEFAULT_TABS
   end
+  local previous = tabs
   tabs = {}
   for i, spec in ipairs(specs) do
-    tabs[i] = vim.tbl_extend('force', { label = spec.label or ('#' .. i) }, spec, { state = new_state() })
+    local label = spec.label or ('#' .. i)
+    -- Same position *and* same label: a reordered or renamed tab is a different query,
+    -- so its old pages would be the wrong ones to show.
+    local carried = keep_state and previous[i] and previous[i].label == label and previous[i].state
+    tabs[i] = vim.tbl_extend('force', { label = label }, spec, { state = carried or new_state() })
   end
   if active > #tabs then
     active = 1
@@ -146,6 +169,9 @@ end
 -- rendering
 -- ---------------------------------------------------------------------------
 
+-- Forward declaration: sync_spinner's tick calls render, which is defined after it.
+local render
+
 local UNREAD_BAR = '▍'
 local READ_BAR = ' '
 local PIN_MARK = '󰐃 '
@@ -165,7 +191,20 @@ local function is_unread(entry)
   return entry.unread == true and status_of(entry) == nil
 end
 
-local function render()
+--- Animate only while the tab on screen has nothing to show yet: a tab with rows
+--- already listed refreshes in place, and a settled empty tab is just empty.
+local function sync_spinner()
+  local state = tabs[active] and tabs[active].state
+  if is_open() and state and not state.fetched and #state.pages == 0 then
+    spinner.subscribe('sidebar', function()
+      render()
+    end)
+  else
+    spinner.release('sidebar')
+  end
+end
+
+function render()
   if not (buf and vim.api.nvim_buf_is_valid(buf)) then
     return
   end
@@ -185,9 +224,10 @@ local function render()
     line_pages[i] = p
   end
   if #lines == 0 then
-    lines = { ' ' .. (state.loading and '読み込み中…' or '(該当なし)') }
+    lines = { ' ' .. (state.fetched and '(該当なし)' or (spinner.frame() .. ' 読み込み中…')) }
     rows = {}
   end
+  sync_spinner()
 
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
@@ -223,6 +263,9 @@ local function render()
     end
   end
   vim.bo[buf].modifiable = false
+  -- Rendering marks an acwrite buffer modified, which makes Neovim offer to save it on
+  -- exit. This is a view; there is nothing to save.
+  vim.bo[buf].modified = false
   apply_winbar()
 end
 
@@ -279,6 +322,7 @@ function M.load_more()
 
   lsp.request_ok('chatora/listPages', params, function(result)
     state.loading = false
+    state.fetched = true
     if not (buf and vim.api.nvim_buf_is_valid(buf)) then
       return
     end
@@ -408,24 +452,34 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Show tab `index` (1-based, clamped), fetching its first batch on demand.
+--- Put the cursor back where this tab left it, so returning to a list — by switching
+--- tabs or by reopening the sidebar — lands where the reader was, not at the top.
+local function restore_cursor()
+  if not (win and vim.api.nvim_win_is_valid(win) and tabs[active]) then
+    return
+  end
+  local line = math.min(tabs[active].state.cursor or 1, vim.api.nvim_buf_line_count(buf))
+  pcall(vim.api.nvim_win_set_cursor, win, { math.max(1, line), 0 })
+end
+
+--- Record the cursor for the tab currently showing, before something replaces it.
+local function remember_cursor()
+  if win and vim.api.nvim_win_is_valid(win) and tabs[active] then
+    tabs[active].state.cursor = vim.api.nvim_win_get_cursor(win)[1]
+  end
+end
+
 function M.select_tab(index)
   if #tabs == 0 or not (buf and vim.api.nvim_buf_is_valid(buf)) then
     return
   end
   index = math.max(1, math.min(#tabs, index))
   if index ~= active then
-    -- Remember where the cursor was so switching back feels like returning to
-    -- the same list rather than to its top.
-    if win and vim.api.nvim_win_is_valid(win) then
-      tabs[active].state.cursor = vim.api.nvim_win_get_cursor(win)[1]
-    end
+    remember_cursor()
     active = index
   end
   render()
-  if win and vim.api.nvim_win_is_valid(win) then
-    local line = math.min(tabs[active].state.cursor or 1, vim.api.nvim_buf_line_count(buf))
-    pcall(vim.api.nvim_win_set_cursor, win, { math.max(1, line), 0 })
-  end
+  restore_cursor()
   M.load_more()
 end
 
@@ -475,6 +529,7 @@ end
 
 function M.close()
   if is_open() then
+    remember_cursor()
     vim.api.nvim_win_close(win, true)
   end
   win = nil
@@ -514,9 +569,10 @@ end
 
 --- Open (or focus) the sidebar for project, listing its pages.
 function M.open(proj)
+  local same_project = project == proj
   project = proj
   ensure_hl()
-  build_tabs()
+  build_tabs(same_project)
 
   if not (buf and vim.api.nvim_buf_is_valid(buf)) then
     buf = vim.api.nvim_create_buf(false, true)
@@ -568,17 +624,33 @@ function M.open(proj)
   apply_winbar()
 
   lsp.ensure_start(buf)
-  M.reload()
+  -- Reopening shows what is already loaded; the poll loop below brings it up to date in
+  -- the background. Only a first open (or a project switch) has nothing to show.
+  if #tabs > 0 and #tabs[active].state.pages > 0 then
+    render()
+    restore_cursor()
+  else
+    M.reload()
+  end
   start_polling()
 
   -- The filtered tabs need the user's saved pageFilters; fetch once, then let
   -- whichever tab is showing pick up its now-resolvable query.
   if not me then
-    lsp.request_ok('chatora/authStatus', {}, function(result)
-      me = result.user
+    lsp.request('chatora/authStatus', {}, function(err, result)
+      me = (not err) and result and result.ok ~= false and result.user or nil
       if me then
         M.load_more()
+        return
       end
+      -- A tab whose filter needs `me` can never query now. Settle it to its empty state
+      -- rather than leaving a spinner running for a request that will not arrive.
+      for _, tab in ipairs(tabs) do
+        if tab.filter == 'me' then
+          tab.state.fetched = true
+        end
+      end
+      render()
     end)
   end
 end

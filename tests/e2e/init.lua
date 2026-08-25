@@ -28,4 +28,7 @@ require('chatora').setup({
   origin = origin,
   project = 'testproj',
   server_cmd = { 'node', repo_root .. '/packages/server/dist/main.js', '--stdio' },
+  notations = {
+    ['|'] = { name = 'pinned', icon = '📌', hl = { bold = true, underline = true } },
+  },
 })

@@ -9,15 +9,9 @@ local config = require('chatora.config')
 --- bufnr -> 'clean' | 'dirty' | 'loading' | 'saving' | 'error'
 local state_by_bufnr = {}
 
--- Braille spinner: the whole cycle lives in one cell, so it fits the same slot
--- the settled icons use in the statusline and the sidebar's mark column.
-local SPINNER_FRAMES = { '⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏' }
-local SPINNER_INTERVAL_MS = 90
-
 local PENDING = { loading = true, saving = true }
 
-local uv = vim.uv or vim.loop
-local spinner_timer, spinner_frame = nil, 1
+local spinner = require('chatora.spinner')
 
 local placeholder_ns = vim.api.nvim_create_namespace('chatora_status_placeholder')
 
@@ -42,6 +36,7 @@ local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraStatusDirty', { link = 'Comment', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraStatusPending', { link = 'DiagnosticWarn', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraStatusError', { link = 'DiagnosticError', default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraStatusMuted', { link = 'Comment', default = true })
 end
 
 local function settings()
@@ -75,58 +70,39 @@ local function render_placeholder(bufnr)
   end
   ensure_hl()
   pcall(vim.api.nvim_buf_set_extmark, bufnr, placeholder_ns, 0, 0, {
-    virt_text = { { SPINNER_FRAMES[spinner_frame] .. ' 読み込み中…', 'ChatoraStatusPending' } },
+    virt_text = { { spinner.frame() .. ' 読み込み中…', 'ChatoraStatusPending' } },
     virt_text_pos = 'overlay',
   })
 end
 
-local function stop_spinner()
-  if spinner_timer then
-    spinner_timer:stop()
-    spinner_timer:close()
-    spinner_timer = nil
-  end
-end
-
---- Drive the spinner while any buffer is mid-request. Neovim has no repaint
---- loop of its own, so an animation is a libuv timer that advances a frame and
---- asks for a redraw; the timer only exists while something is pending.
+--- Animate for as long as any buffer is mid-request.
 local function sync_spinner()
-  local pending = {}
-  for bufnr, state in pairs(state_by_bufnr) do
+  local pending = false
+  for _, state in pairs(state_by_bufnr) do
     if PENDING[state] then
-      pending[#pending + 1] = bufnr
+      pending = true
     end
   end
-  if #pending == 0 then
-    stop_spinner()
+  if not pending then
+    spinner.release('status')
     return
   end
-  if spinner_timer then
-    return
-  end
-  spinner_timer = uv.new_timer()
-  spinner_timer:start(
-    SPINNER_INTERVAL_MS,
-    SPINNER_INTERVAL_MS,
-    vim.schedule_wrap(function()
-      spinner_frame = (spinner_frame % #SPINNER_FRAMES) + 1
-      local still_pending = false
-      for bufnr, state in pairs(state_by_bufnr) do
-        if state == 'loading' then
-          render_placeholder(bufnr)
-        end
-        if PENDING[state] then
-          still_pending = true
-        end
+  spinner.subscribe('status', function()
+    local still_pending = false
+    for bufnr, state in pairs(state_by_bufnr) do
+      if state == 'loading' then
+        render_placeholder(bufnr)
       end
-      require('chatora.sidebar').refresh_marks()
-      vim.cmd('redrawstatus')
-      if not still_pending then
-        stop_spinner()
+      if PENDING[state] then
+        still_pending = true
       end
-    end)
-  )
+    end
+    require('chatora.sidebar').refresh_marks()
+    vim.cmd('redrawstatus')
+    if not still_pending then
+      spinner.release('status')
+    end
+  end)
 end
 
 --- Icon + highlight group for a buffer, or nil when it has no tracked state
@@ -141,7 +117,7 @@ function M.icon(bufnr)
     return nil
   end
   if PENDING[state] then
-    return SPINNER_FRAMES[spinner_frame], HL_GROUP[state]
+    return spinner.frame(), HL_GROUP[state]
   end
   return opts.icons[state], HL_GROUP[state]
 end
@@ -226,6 +202,73 @@ function M.component(bufnr)
     return ''
   end
   return '%#' .. hl_group .. '#' .. icon .. '%*'
+end
+
+--- Cosense's own numbers for the page in `bufnr` (default: the current buffer), or nil
+--- for a buffer that is not a page and before its metadata has arrived.
+local function page_meta(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return nil
+  end
+  return require('chatora.page').meta(bufnr)
+end
+
+--- How long ago Cosense last saw a change to the page, e.g. `更新 3時間前`.
+function M.updated(bufnr)
+  local meta = page_meta(bufnr)
+  if not meta then
+    return nil
+  end
+  local relative = require('chatora.actions').relative_time(meta.updated)
+  return relative and ('更新 ' .. relative) or nil
+end
+
+-- Cosense's timestamps describe the copy on the *server*. An unsaved buffer makes them
+-- quietly wrong — this badge is what says so, in the same place the reader is already
+-- looking for "how fresh is this".
+local BADGE = { dirty = '● 未保存', saving = '◍ 保存中', error = '✗ 保存失敗' }
+
+--- The page's numbers as one statusline string, matching what Cosense's web page menu
+--- shows: `更新 43分前 · 閲覧 39 · 被リンク 6`, led by the unsaved badge when there is one.
+--- Empty for a non-page buffer, so it can be dropped straight into lualine without a
+--- condition. Plain text — pair it with `page_info_hl()` for colour.
+function M.page_info(bufnr)
+  local meta = page_meta(bufnr)
+  if not meta then
+    return ''
+  end
+  local parts = {}
+  local badge = BADGE[state_by_bufnr[bufnr or vim.api.nvim_get_current_buf()]]
+  if badge then
+    parts[#parts + 1] = badge
+  end
+  local relative = require('chatora.actions').relative_time(meta.updated)
+  if relative then
+    parts[#parts + 1] = '更新 ' .. relative
+  end
+  if meta.views > 0 then
+    parts[#parts + 1] = '閲覧 ' .. meta.views
+  end
+  if meta.linked > 0 then
+    parts[#parts + 1] = '被リンク ' .. meta.linked
+  end
+  return table.concat(parts, ' · ')
+end
+
+--- Highlight group for `page_info()`: the save state's colour while the buffer differs
+--- from the server, else the muted one the rest of the statusline uses. nil when
+--- `page_info()` is empty.
+---
+--- For lualine: `{ require('chatora.status').page_info, color = function() return { fg = ... } end }`
+--- is one way, but the group name works directly as lualine's `color`.
+function M.page_info_hl(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  if not page_meta(bufnr) then
+    return nil
+  end
+  local state = state_by_bufnr[bufnr]
+  return BADGE[state] and HL_GROUP[state] or 'ChatoraStatusMuted'
 end
 
 return M

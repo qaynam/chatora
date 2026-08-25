@@ -103,10 +103,33 @@ describe('computeTokens', () => {
     expect(findAll(underline, 'underline')).toHaveLength(1)
   })
 
-  test('decoration does not also emit tokens for nested link children (no overlap)', () => {
-    const tokens = computeTokens('Title\n[* bold with [Nested] link]')
-    expect(findAll(tokens, 'link')).toHaveLength(0)
+  test('a link nested in a decoration keeps its own token, overlapping the decoration', () => {
+    const src = 'Title\n[* bold with [Nested] link]'
+    const line = src.split('\n')[1] as string
+    const tokens = computeTokens(src)
+
+    expect(findAll(tokens, 'bold')).toEqual([
+      { line: 1, char: 0, length: line.length, type: 'bold' },
+    ])
+    expect(findAll(tokens, 'link')).toEqual([
+      { line: 1, char: line.indexOf('[Nested]'), length: '[Nested]'.length, type: 'link' },
+    ])
+  })
+
+  test('a decoration wrapping only a link still emits both', () => {
+    const tokens = computeTokens('Title\n[* [nuclear]]')
     expect(findAll(tokens, 'bold')).toHaveLength(1)
+    expect(findAll(tokens, 'link')).toHaveLength(1)
+  })
+
+  test('encodeTokens keeps the outer decoration ahead of the child it contains', () => {
+    const src = 'Title\n[* [nuclear]]'
+    const legend = [...TOKEN_TYPES]
+    const data = encodeTokens(computeTokens(src))
+    // The client sets marks in this order, so the child's color wins the overlap.
+    const types: string[] = []
+    for (let i = 0; i < data.length; i += 5) types.push(legend[data[i + 3] as number] as string)
+    expect(types.slice(1)).toEqual(['bold', 'link'])
   })
 
   test('quote marker token covers only the leading `> ` marker, not the content', () => {
@@ -130,7 +153,7 @@ describe('computeTokens', () => {
     'My Page Title',
     '#intro this page is about [Cosense] and #testing',
     '> a quoted line with `inline code` and a [Link]',
-    '[* bold] [/ italic] [- strike] [_ underline]',
+    '[* bold] [/ italic] [- strike] [_ underline] [** [Nested] link]',
     'code:example.ts',
     '  const x = 1',
     '  const y = 2',
@@ -139,7 +162,10 @@ describe('computeTokens', () => {
     'plain text after everything',
   ].join('\n')
 
-  test('invariant: tokens never overlap within the same line', () => {
+  // Two tokens on a line are either disjoint or properly nested — a decoration wrapping a
+  // link overlaps it, but never partially. That is what lets the client set marks in
+  // encodeTokens' order and get the inner token drawn on top of the outer one.
+  test('invariant: same-line tokens are disjoint or nested, never partially overlapping', () => {
     const tokens = computeTokens(complexSource)
     const byLine = new Map<number, RawToken[]>()
     for (const t of tokens) {
@@ -148,11 +174,13 @@ describe('computeTokens', () => {
       byLine.set(t.line, list)
     }
     for (const list of byLine.values()) {
-      const sorted = [...list].sort((a, b) => a.char - b.char)
+      const sorted = [...list].sort((a, b) => a.char - b.char || b.length - a.length)
       for (let i = 1; i < sorted.length; i++) {
         const prev = sorted[i - 1] as RawToken
         const cur = sorted[i] as RawToken
-        expect(cur.char).toBeGreaterThanOrEqual(prev.char + prev.length)
+        const disjoint = cur.char >= prev.char + prev.length
+        const nested = cur.char + cur.length <= prev.char + prev.length
+        expect(disjoint || nested).toBe(true)
       }
     }
   })
@@ -244,7 +272,7 @@ describe('encodeTokens', () => {
       'My Page Title',
       '#intro this page is about [Cosense] and #testing',
       '> a quoted line with `inline code` and a [Link]',
-      '[* bold] [/ italic] [- strike] [_ underline]',
+      '[* bold] [/ italic] [- strike] [_ underline] [** [Nested] link]',
     ].join('\n')
     const tokens = computeTokens(src)
     const encoded = encodeTokens(tokens)

@@ -2,6 +2,7 @@ import type { AnyNode, AnyNodeType, Decoration, Position } from '@cosense-toolbo
 import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
 import { notationNameForDecoration, notationSpecs, parseOptions } from './notations'
+import { quoteMarkerLength } from './quote'
 
 /**
  * Legend order is a contract with the Lua side (lua/chatora/highlight.lua defines
@@ -66,14 +67,6 @@ const INLINE_TOKEN_TYPE: Partial<Record<AnyNodeType, TokenType>> = {
   formula: 'formula',
 }
 
-// Mirrors parser src/block/classify.ts QUOTE_RE (`/^>\s?/`) — the AST's LineBlock doesn't
-// expose the marker's own length, only `quote: boolean`, so we re-derive it from the raw
-// line text (indent already known from LineBlock.indent).
-const QUOTE_MARKER_RE = /^>\s?/
-
-const quoteMarkerLength = (lineText: string, indent: number): number =>
-  QUOTE_MARKER_RE.exec(lineText.slice(indent))?.[0].length ?? 0
-
 const spanToken = (type: TokenType, position: Position): RawToken => ({
   line: position.start.line,
   char: position.start.column,
@@ -130,9 +123,14 @@ export const computeTokens = (text: string): RawToken[] => {
         }
         return undefined
       case 'decoration': {
-        const type = decorationTokenType(node) ?? notationNameForDecoration(node, docLines) ?? null
+        // A marker run can hold both kinds (`[|* x]`) but a span carries one token type,
+        // so the user-defined notation wins: it is what the user explicitly configured.
+        const type = notationNameForDecoration(node, docLines) ?? decorationTokenType(node)
         if (type) tokens.push(spanToken(type, node.position))
-        return 'skip'
+        // Descend: a decoration can wrap a link, code span or image (`[* [nuclear]]`), and
+        // that child needs its own token. encodeTokens' sort emits the child last, so its
+        // mark is set on top and the decoration's bold/italic combines underneath.
+        return undefined
       }
       default: {
         const mapped = INLINE_TOKEN_TYPE[node.type]

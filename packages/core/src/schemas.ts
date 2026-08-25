@@ -47,6 +47,17 @@ export const ProjectSummarySchema = Schema.Struct({
   updated: optionalNumber,
 })
 
+// `/api/projects/<name>` — everything `/api/projects` returns plus the project's own
+// settings. `uploadImageTo` is the one that decides where a pasted image goes.
+export const ProjectDetailSchema = Schema.Struct({
+  id: optionalString,
+  name: optionalString,
+  displayName: optionalString,
+  uploadImageTo: optionalString,
+  uploadFileTo: optionalString,
+  gyazoTeamsName: optionalNullableString,
+})
+
 export const UserRefSchema = Schema.Struct({
   id: optionalString,
   name: Schema.optionalWith(Schema.String, { exact: true }),
@@ -146,6 +157,18 @@ export const PageV2ResponseSchema = Schema.Struct({
   commitId: optionalString,
   persistent: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   lines: Schema.optionalWith(Schema.Array(PageDetailLineSchema), { default: () => [] }),
+  created: optionalNumber,
+  updated: optionalNumber,
+  accessed: optionalNumber,
+  views: optionalNumber,
+  linked: optionalNumber,
+  linesCount: optionalNumber,
+  charsCount: optionalNumber,
+  // Sort weight for pinned pages; 0 means not pinned.
+  pin: optionalNumber,
+  pageRank: optionalNumber,
+  snapshotCount: optionalNumber,
+  lastUpdateUser: Schema.optionalWith(Schema.NullOr(UserRefSchema), { exact: true }),
 })
 
 export const Links1HopResponseSchema = Schema.Struct({

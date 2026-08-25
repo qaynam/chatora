@@ -9,6 +9,7 @@ import {
   MeSchema,
   PageV2ResponseSchema,
   PreviewResponseSchema,
+  ProjectDetailSchema,
   ProjectsResponseSchema,
   SearchFullTextResponseSchema,
   SearchVectorResponseSchema,
@@ -22,6 +23,7 @@ import type {
   PageSummary,
   PreviewEditBody,
   PreviewResponse,
+  ProjectDetail,
   ProjectSummary,
   RelatedPages,
   SearchResult,
@@ -45,6 +47,10 @@ const encodeTitleForUrl = (title: string): string =>
 const REDIRECT_STATUS_MIN = 300
 const REDIRECT_STATUS_MAX = 400
 const VECTOR_SEARCH_DISABLED_STATUS = 490
+
+// Same page cap the web client asks for. The picker renders whatever comes back, so this
+// is the only thing bounding a broad query.
+const FULL_TEXT_SEARCH_LIMIT = 100
 const NOT_FOUND_STATUS = 404
 
 const parseErrorCode = (bodyText: string): string | undefined => {
@@ -162,6 +168,10 @@ const decode = <A, I>(
 export interface CosenseApiShape {
   readonly me: () => Effect.Effect<Me, CosenseApiError, HttpClient>
   readonly projects: () => Effect.Effect<readonly ProjectSummary[], CosenseApiError, HttpClient>
+  /** One project's own settings, including where it wants uploaded images to go. */
+  readonly projectDetail: (
+    project: string,
+  ) => Effect.Effect<ProjectDetail, CosenseApiError, HttpClient>
   readonly listPages: (
     project: string,
     opts?: {
@@ -226,6 +236,11 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
       Effect.map((data) => data.projects),
     )
 
+  const projectDetail: CosenseApiShape['projectDetail'] = (project) =>
+    request(`/api/projects/${encodeURIComponent(project)}`).pipe(
+      Effect.flatMap((res) => decode(ProjectDetailSchema, res)),
+    )
+
   const listPages: CosenseApiShape['listPages'] = (project, opts = {}) => {
     const params = new URLSearchParams()
     if (opts.sort !== undefined) params.set('sort', opts.sort)
@@ -254,6 +269,17 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
                 title: data.title ?? title,
                 commitId: data.commitId,
                 lines: data.lines,
+                created: data.created,
+                updated: data.updated,
+                accessed: data.accessed,
+                views: data.views,
+                linked: data.linked,
+                linesCount: data.linesCount,
+                charsCount: data.charsCount,
+                pin: data.pin,
+                pageRank: data.pageRank,
+                snapshotCount: data.snapshotCount,
+                ...(data.lastUpdateUser ? { lastUpdateUser: data.lastUpdateUser } : {}),
               }),
       ),
       Effect.catchAll((err) =>
@@ -280,9 +306,18 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
   }
 
   const searchFullText: CosenseApiShape['searchFullText'] = (project, query) =>
-    request(`/api/pages/${project}/search/query?q=${encodeURIComponent(query)}`).pipe(
-      Effect.flatMap((res) => decode(SearchFullTextResponseSchema, res)),
-    )
+    request(
+      `/api/pages/${project}/search/query?${new URLSearchParams({
+        q: query,
+        // The web client's own parameters. `field=lines` is the load-bearing one: without
+        // it the response carries titles only, which reads as a title search. `pageRank`
+        // is what puts the page you meant near the top.
+        skip: '0',
+        limit: String(FULL_TEXT_SEARCH_LIMIT),
+        sort: 'pageRank',
+        field: 'lines',
+      })}`,
+    ).pipe(Effect.flatMap((res) => decode(SearchFullTextResponseSchema, res)))
 
   const searchVector: CosenseApiShape['searchVector'] = (project, query) =>
     request(`/api/pages/${project}/search/vector/titles?q=${encodeURIComponent(query)}`).pipe(
@@ -334,6 +369,7 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
   return {
     me,
     projects,
+    projectDetail,
     listPages,
     getPage,
     relatedPages,

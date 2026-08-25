@@ -1,20 +1,55 @@
 -- Cosense's own insert-mode editing shortcuts, reproduced in page buffers:
 -- timestamp insertion, self-icon insertion, tab-separated table cells, and
--- bracket auto-pairing. Plus the one global mapping chatora installs, for
--- toggling the sidebar.
+-- bracket auto-pairing. Plus the <leader>c namespace, which is every chatora
+-- mapping that lives outside a page buffer.
 local M = {}
 
 local config = require('chatora.config')
 local lsp = require('chatora.lsp')
 
+local function as_list(value)
+  return type(value) == 'table' and value or { value }
+end
+
 local DEFAULTS = {
   insert_date = '<C-t>',
-  insert_icon = '<C-i>',
+  -- <C-i> is Cosense's own shortcut, but a terminal only sends it as a distinct key when
+  -- it speaks the kitty keyboard protocol (kitty/Ghostty natively; tmux needs
+  -- `set -g extended-keys on`). Everywhere else it arrives as <Tab>, which the completion
+  -- plugin owns — hence the <M-i> alternative, which nothing contends for.
+  insert_icon = { '<C-i>', '<M-i>' },
   date_format = '%Y-%m-%d %H:%M:%S',
   autopair = true,
   table_tab = true,
-  toggle_sidebar = '<leader>ct',
+  prefix = '<leader>c',
 }
+
+-- The <leader>c namespace, as suffix -> { action, description }. `prefix = false`
+-- installs none of them; a suffix set to `false` drops just that one.
+local GLOBAL_ACTIONS = {
+  t = { 'toggle', 'サイドバーを開閉' },
+  s = { 'search', 'ページを検索' },
+  n = { 'new', '新規ページ' },
+  r = { 'related', '関連ページを開閉' },
+  i = { 'info', 'ページ情報' },
+  f = { 'pull', 'サーバーから取り直す' },
+  v = { 'paste_image', 'クリップボードの画像を貼り付け' },
+  y = { 'copy_url', 'ページ URL をコピー' },
+  Y = { 'copy_link', 'リンク記法をコピー' },
+  o = { 'open_in_browser', 'ブラウザで開く' },
+  a = { 'account', 'アカウント切り替え' },
+  p = { 'project', 'プロジェクト切り替え' },
+  ['?'] = { 'help', 'ヘルプ' },
+}
+
+local function run(action)
+  local actions = require('chatora.actions')
+  if actions[action] then
+    actions[action]()
+  else
+    require('chatora').dispatch(action, '')
+  end
+end
 
 local function settings()
   local raw = config.options.keymaps
@@ -87,36 +122,65 @@ local function in_table_row(bufnr, row)
   return false
 end
 
---- <C-i> and <Tab> are the same byte unless the terminal speaks the kitty
---- keyboard protocol, so one handler serves both and picks by cursor position.
---- A table row needs a *real* tab: page buffers use expandtab, so a plain Tab
---- would type a space and the row would parse as a single cell.
+local TAB_DESC = 'chatora: テーブル行だけ本物のタブ（他は元のマッピングに委譲）'
+
+--- The `<Tab>` mapping chatora is about to displace. nil when nothing claims the key, and
+--- when chatora's own mapping is the one in place — re-attaching must not make chatora
+--- delegate to itself.
+local function foreign_tab_map()
+  local map = vim.fn.maparg('<Tab>', 'i', false, true)
+  if vim.tbl_isempty(map) or map.desc == TAB_DESC then
+    return nil
+  end
+  return map
+end
+
+--- Hand `<Tab>` back to whoever had it. Feeding the resolved keys (rather than calling
+--- through) keeps an expr mapping's result going through Neovim's own key handling, which
+--- is what a completion plugin expects to happen on the key it mapped.
+local function replay_tab(map)
+  local keys = map.rhs
+  if map.callback then
+    local ok, produced = pcall(map.callback)
+    if not ok then
+      return
+    end
+    -- A non-expr callback did its own work and has nothing left to feed.
+    if map.expr ~= 1 then
+      return
+    end
+    keys = produced
+  end
+  if type(keys) ~= 'string' or keys == '' then
+    return
+  end
+  vim.api.nvim_feedkeys(
+    vim.api.nvim_replace_termcodes(keys, true, true, true),
+    map.noremap == 1 and 'n' or 'm',
+    false
+  )
+end
+
+--- Claim `<Tab>` only inside a table row, where it must insert a *real* tab: page buffers
+--- use expandtab, so a plain Tab would type a space and the row would parse as one cell.
+--- Every other keystroke goes back to the mapping chatora displaced — `<Tab>` belongs to
+--- the completion plugin, and taking it outright is what made <C-i> stop working.
 local function tab_map(bufnr, opts)
+  if not opts.table_tab then
+    return
+  end
+  local displaced = foreign_tab_map()
   vim.keymap.set('i', '<Tab>', function()
-    local row, col = unpack(vim.api.nvim_win_get_cursor(0))
-    local line = vim.api.nvim_get_current_line()
-    local indent = #(line:match('^%s*'))
-    if col <= indent then
-      return '<Tab>'
+    local row = vim.api.nvim_win_get_cursor(0)[1]
+    if in_table_row(bufnr, row - 1) then
+      return vim.api.nvim_replace_termcodes('<C-v><Tab>', true, true, true)
     end
-    if opts.table_tab and in_table_row(bufnr, row - 1) then
-      return '<C-v><Tab>'
-    end
-    if opts.insert_icon then
-      vim.schedule(function()
-        with_own_name(function(name)
-          insert_at_cursor(bufnr, '[' .. name .. '.icon]')
-        end)
-      end)
+    if displaced then
+      replay_tab(displaced)
       return ''
     end
-    return '<Tab>'
-  end, {
-    buffer = bufnr,
-    expr = true,
-    silent = true,
-    desc = 'chatora: テーブル内はタブ / 行頭はインデント / それ以外はアイコン',
-  })
+    return vim.api.nvim_replace_termcodes('<Tab>', true, true, true)
+  end, { buffer = bufnr, expr = true, silent = true, desc = TAB_DESC })
 end
 
 local function autopair_maps(bufnr)
@@ -165,30 +229,73 @@ function M.attach(bufnr)
     -- Warm the cache so the first press inserts immediately instead of after a
     -- round-trip.
     with_own_name(function() end, { silent = true })
-    vim.keymap.set('i', opts.insert_icon, function()
-      with_own_name(function(name)
-        insert_at_cursor(bufnr, '[' .. name .. '.icon]')
-      end)
-    end, { buffer = bufnr, silent = true, desc = 'chatora: 自分のアイコンを挿入' })
+    for _, key in ipairs(as_list(opts.insert_icon)) do
+      vim.keymap.set('i', key, function()
+        with_own_name(function(name)
+          insert_at_cursor(bufnr, '[' .. name .. '.icon]')
+        end)
+      end, { buffer = bufnr, silent = true, desc = 'chatora: 自分のアイコンを挿入' })
+    end
   end
 
-  -- Last, so it wins the byte <C-i> shares with <Tab>.
+  -- Also on InsertEnter: completion plugins map <Tab> per buffer when insert mode starts,
+  -- so a mapping set at buffer-load time is already displaced by the first keystroke.
   tab_map(bufnr, opts)
+  vim.api.nvim_create_autocmd('InsertEnter', {
+    buffer = bufnr,
+    group = vim.api.nvim_create_augroup('ChatoraKeymaps' .. bufnr, { clear = true }),
+    callback = function()
+      tab_map(bufnr, opts)
+    end,
+  })
 
   if opts.autopair then
     autopair_maps(bufnr)
   end
 end
 
---- The one mapping chatora sets outside a page buffer.
+--- Install the global <prefix> namespace. These are the only mappings chatora sets
+--- outside a page buffer.
 function M.setup_global()
   local opts = settings()
-  if not (opts and opts.toggle_sidebar) then
+  if not (opts and opts.prefix) then
     return
   end
-  vim.keymap.set('n', opts.toggle_sidebar, function()
-    require('chatora').toggle()
-  end, { silent = true, desc = 'chatora: サイドバーを開閉' })
+  local overrides = type(config.options.keymaps) == 'table' and config.options.keymaps or {}
+  for suffix, spec in pairs(GLOBAL_ACTIONS) do
+    local key = overrides[spec[1]]
+    if key == nil then
+      key = opts.prefix .. suffix
+    end
+    if key then
+      vim.keymap.set('n', key, function()
+        run(spec[1])
+      end, { silent = true, desc = 'chatora: ' .. spec[2] })
+    end
+  end
+end
+
+--- The global namespace as { key, description } rows, for the help sheet.
+function M.global_rows()
+  local opts = settings()
+  if not (opts and opts.prefix) then
+    return {}
+  end
+  local overrides = type(config.options.keymaps) == 'table' and config.options.keymaps or {}
+  local rows = {}
+  for suffix, spec in pairs(GLOBAL_ACTIONS) do
+    local key = overrides[spec[1]]
+    if key == nil then
+      key = opts.prefix .. suffix
+    end
+    if key then
+      rows[#rows + 1] = { key, spec[2] }
+    end
+  end
+  table.sort(rows, function(a, b)
+    return a[1] < b[1]
+  end)
+  return rows
 end
 
 return M

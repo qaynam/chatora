@@ -111,16 +111,30 @@ describe('CosenseApi happy paths', () => {
         commitId: 'commit1',
         persistent: true,
         lines: [{ id: 'line1', text: 'hello' }],
+        updated: 1700000000,
+        views: 12,
       }),
     )
     const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
     const page = await run(api.getPage('myproject', 'My Page'), layer)
+    // Absent metadata decodes to 0 rather than undefined, so the client never has to
+    // distinguish "the API omitted it" from "it is zero".
     expect(page).toEqual(
       Option.some({
         id: 'page1',
         title: 'My Page',
         commitId: 'commit1',
         lines: [{ id: 'line1', text: 'hello' }],
+        created: 0,
+        updated: 1700000000,
+        accessed: 0,
+        views: 12,
+        linked: 0,
+        linesCount: 0,
+        charsCount: 0,
+        pin: 0,
+        pageRank: 0,
+        snapshotCount: 0,
       }),
     )
     expect(calls[0]?.url).toBe('https://scrapbox.io/api/pages/v2/myproject/My_Page')
@@ -176,8 +190,9 @@ describe('CosenseApi happy paths', () => {
     const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
     const result = await run(api.searchFullText('myproject', 'hello world'), layer)
     expect(result.count).toBe(1)
+    // field=lines is what makes this a full-text search rather than a title search.
     expect(calls[0]?.url).toBe(
-      'https://scrapbox.io/api/pages/myproject/search/query?q=hello%20world',
+      'https://scrapbox.io/api/pages/myproject/search/query?q=hello+world&skip=0&limit=100&sort=pageRank&field=lines',
     )
   })
 

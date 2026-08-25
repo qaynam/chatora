@@ -88,10 +88,12 @@ local ok, err = pcall(function()
       return false
     end
     local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
-    if #lines ~= 3 then
-      return false
-    end
-    if lines[1] ~= 'ホーム' or lines[2] ~= 'これは[メモ]へのリンク' or lines[3] ~= '#tag もある' then
+    if
+      not vim.deep_equal(
+        lines,
+        { 'ホーム', 'これは[メモ]へのリンク', '#tag もある', '[|* 特徴]', '> 引用された行' }
+      )
+    then
       return false
     end
     page_buf = b
@@ -250,6 +252,95 @@ local ok, err = pcall(function()
   log('semantic tokens OK: title(line0) / link(line1) / hashtag(line2) all found')
 
   -- ===================================================================================
+  -- STEP: custom-notation
+  -- ===================================================================================
+  step('custom-notation')
+
+  -- A marker run carrying both the configured `|` notation (init.lua) and the official
+  -- `*`: the notation must win the token type, and its icon must replace the whole
+  -- opening run rather than just the first marker character.
+  local NOTATION_ROW = 3
+  local NOTATION_OPENING = '[|* '
+  local notation_line = vim.api.nvim_buf_get_lines(page_buf, NOTATION_ROW, NOTATION_ROW + 1, false)[1]
+  if notation_line ~= NOTATION_OPENING .. '特徴]' then
+    fail('fixture drift: line ' .. NOTATION_ROW .. ' is ' .. vim.inspect(notation_line))
+  end
+
+  if not wait_for(10000, function()
+    return has_token_type(page_buf, NOTATION_ROW, 'pinned')
+  end) then
+    fail('custom notation token missing on ' .. notation_line)
+  end
+
+  local render_ns = require('chatora.render').ns
+  local function icon_mark()
+    local marks = vim.api.nvim_buf_get_extmarks(
+      page_buf,
+      render_ns,
+      { NOTATION_ROW, 0 },
+      { NOTATION_ROW, -1 },
+      { details = true }
+    )
+    for _, mark in ipairs(marks) do
+      if mark[4].conceal == '📌' then
+        return mark
+      end
+    end
+    return nil
+  end
+
+  local opening = nil
+  if not wait_for(10000, function()
+    opening = icon_mark()
+    return opening ~= nil
+  end) then
+    fail('no 📌 conceal extmark on ' .. notation_line)
+  end
+  if opening[3] ~= 0 or opening[4].end_col ~= #NOTATION_OPENING then
+    fail('📌 conceal covers the wrong span: ' .. vim.inspect(opening))
+  end
+  log('custom notation OK ([|* ] tokenized as pinned, opening run concealed to 📌)')
+
+  -- ===================================================================================
+  -- STEP: quote-bar
+  -- ===================================================================================
+  step('quote-bar')
+
+  -- The `>` marker is overlaid with the bar glyph and the text after it is dimmed.
+  local QUOTE_ROW = 4
+  local quote_ns = require('chatora.quote').ns
+  local bar, dim = nil, nil
+  if not wait_for(10000, function()
+    bar, dim = nil, nil
+    local marks = vim.api.nvim_buf_get_extmarks(
+      page_buf,
+      quote_ns,
+      { QUOTE_ROW, 0 },
+      { QUOTE_ROW, -1 },
+      { details = true }
+    )
+    for _, mark in ipairs(marks) do
+      if mark[4].virt_text then
+        bar = mark
+      elseif mark[4].hl_group == 'ChatoraQuoteText' then
+        dim = mark
+      end
+    end
+    return bar ~= nil and dim ~= nil
+  end) then
+    fail('quote decorations missing on line ' .. QUOTE_ROW .. ': bar=' .. vim.inspect(bar) .. ' dim=' .. vim.inspect(dim))
+  end
+
+  if bar[3] ~= 0 or bar[4].virt_text[1][1] ~= '▌' or bar[4].virt_text_pos ~= 'overlay' then
+    fail('quote bar is not an overlay at the marker: ' .. vim.inspect(bar))
+  end
+  -- The dimming must start past the marker, or it would wash out the bar's own color.
+  if dim[3] ~= #'> ' then
+    fail('quote dimming does not start at the quoted text: ' .. vim.inspect(dim))
+  end
+  log('quote bar OK (▌ overlay on the marker, ChatoraQuoteText over the text)')
+
+  -- ===================================================================================
   -- STEP: related
   -- ===================================================================================
   step('related')
@@ -275,6 +366,12 @@ local ok, err = pcall(function()
     local lines = (b ~= -1) and vim.api.nvim_buf_get_lines(b, 0, -1, false) or nil
     fail('timed out waiting for related panel to show メモ; lines=' .. vim.inspect(lines))
   end
+  -- The winbar carries the subject page's own incoming-link count.
+  if require('chatora.related').winbar_count() ~= '  被リンク 6' then
+    fail('related winbar count is wrong: ' .. vim.inspect(require('chatora.related').winbar_count()))
+  end
+  log('related winbar count OK (被リンク 6)')
+
   log('related panel OK (buf ' .. related_buf .. ' contains メモ)')
 
   -- ===================================================================================
@@ -299,7 +396,7 @@ local ok, err = pcall(function()
   end
 
   local saved_lines = vim.api.nvim_buf_get_lines(page_buf, 0, -1, false)
-  if #saved_lines ~= 4 or saved_lines[4] ~= 'あたらしい行' then
+  if #saved_lines ~= 6 or saved_lines[6] ~= 'あたらしい行' then
     fail('unexpected buffer content after save: ' .. vim.inspect(saved_lines))
   end
   log('save OK (modified=false, buffer has the new line)')
@@ -366,6 +463,22 @@ local ok, err = pcall(function()
     local lines = (b ~= -1) and vim.api.nvim_buf_get_lines(b, 0, -1, false) or nil
     fail('timed out waiting for sidebar to list both pages; lines=' .. vim.inspect(lines))
   end
+  -- Closing and reopening must show the cached list, not refetch it: run.ts asserts the
+  -- request count below, and here we only check the list survived the round trip.
+  require('chatora.sidebar').close()
+  require('chatora.sidebar').open('testproj')
+  local reopened = vim.api.nvim_buf_get_lines(sidebar_buf, 0, -1, false)
+  local still_listed = false
+  for _, l in ipairs(reopened) do
+    if l:find('ホーム', 1, true) then
+      still_listed = true
+    end
+  end
+  if not still_listed then
+    fail('sidebar lost its list on reopen: ' .. vim.inspect(reopened))
+  end
+  log('sidebar reopen OK (list served from cache)')
+
   log('sidebar OK (buf ' .. sidebar_buf .. ' lists ホーム and メモ)')
 
   -- ===================================================================================
@@ -434,6 +547,27 @@ local ok, err = pcall(function()
     fail('picker: timed out waiting for search results; items=' .. vim.inspect(picker.get_items()))
   end
   log('picker live query OK')
+
+  -- The preview pane loads the selected page's own text, not the search snippet.
+  if not wait_for(10000, function()
+    local preview = picker.get_preview() or {}
+    return vim.tbl_contains(preview, '検索ヒット行')
+  end) then
+    fail('picker: preview never loaded メモ; preview=' .. vim.inspect(picker.get_preview()))
+  end
+  -- The preview is painted from the decorations previewPage ships with the text, so
+  -- it reads like a page rather than a plain dump. メモ's first line is its title.
+  if not wait_for(10000, function()
+    for _, mark in ipairs(picker.get_preview_marks() or {}) do
+      if mark[4].hl_group == '@lsp.type.title.cosense' then
+        return true
+      end
+    end
+    return false
+  end) then
+    fail('picker: preview has no semantic highlighting; marks=' .. vim.inspect(picker.get_preview_marks()))
+  end
+  log('picker preview OK')
 
   -- Move the selection onto メモ (bounded — the item list is fixed here).
   local items = picker.get_items() or {}

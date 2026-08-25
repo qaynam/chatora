@@ -6,12 +6,14 @@
 local M = {}
 
 --- Each section is a title plus rows. A row is { key, description }, or a bare
---- string for a full-width note.
+--- string for a full-width note. `rows = 'global'` stands for the configured
+--- <leader>c namespace, which is only known once setup() has run.
 local SECTIONS = {
   {
     title = 'コマンド',
     rows = {
       { ':Chatora [open]', 'サイドバーを開く（初回は PAT 認証 → プロジェクト選択）' },
+      { ':Chatora <url>', 'Cosense のページ URL を直接開く（bin/chatora <url> も同じ）' },
       { ':Chatora toggle', 'サイドバーを開閉（既定 <leader>ct）' },
       { ':Chatora new [title]', '新規ページを作成（title 省略時は入力プロンプト）' },
       { ':Chatora search [q]', 'ページを検索（q 省略時は入力プロンプト）' },
@@ -19,8 +21,14 @@ local SECTIONS = {
       { ':Chatora project', 'プロジェクトを切り替え' },
       { ':Chatora account', 'アカウントを切り替え / 追加（複数 PAT 対応）' },
       { ':Chatora logout', 'ログアウト（Keychain から PAT を削除）' },
+      { ':Chatora log', '診断ログを開く（log オプションが必要）' },
+      { ':Chatora reload', 'nvim を閉じずにプラグインを再読み込み（開発用）' },
       { ':Chatora help', 'このヘルプを開く' },
     },
+  },
+  {
+    title = 'グローバルキーマップ',
+    rows = 'global',
   },
   {
     title = 'サイドバー',
@@ -44,11 +52,13 @@ local SECTIONS = {
       { ':q', '閉じる（未保存なら保存するか確認）' },
       { 'gd', 'リンク先へジャンプ（外部 URL は確認してブラウザで開く）' },
       { 'gR', '関連ページパネルをトグル' },
+      { '<leader>cf', 'サーバーから取り直す（git pull 相当。未保存なら確認）' },
+      { '<leader>cv', 'クリップボードの画像を Gyazo にアップロードして貼り付け' },
       { 'gs', 'ページを検索' },
       { '[ / #', 'リンク・ハッシュタグを補完（[ は ] を自動で補う）' },
       { '<C-t>', '日時を挿入（insert モード）' },
-      { '<C-i>', '自分のアイコンを挿入（insert モード）' },
-      { '<Tab>', '行頭ならインデント / テーブル行ならセル区切り / それ以外はアイコン' },
+      { '<C-i> / <M-i>', '自分のアイコンを挿入（<C-i> は kitty protocol 対応端末のみ）' },
+      { '<Tab>', 'テーブル行だけ本物のタブ。他は元のマッピング（補完など）に委譲' },
     },
   },
   {
@@ -65,6 +75,7 @@ local SECTIONS = {
     rows = {
       { '<CR>', 'ページを開く' },
       { 'q', 'パネルを閉じる' },
+      { '被リンク N', '各行の右端はそのページの被リンク数（winbar は今開いているページの分）' },
       '既定でページを開くと自動表示。q で閉じると次の gR まで出ない。',
     },
   },
@@ -87,6 +98,7 @@ local SECTIONS = {
       { 'keymaps = false', '<C-t> / <C-i> / [ の自動ペアをやめる' },
       { 'external_link = "open"', 'gd で確認なしにブラウザを開く' },
       { 'sidebar_poll = false', 'サイドバーの自動更新を止める（既定 60 秒間隔）' },
+      { 'quote = { bar = "┃" }', '引用の縦棒を変える（false で無効）' },
       { 'notations = {...}', '独自の [記号 本文] 記法を定義する' },
       '全オプションと statusline 連携は README を参照。',
     },
@@ -96,10 +108,17 @@ local SECTIONS = {
 local INDENT = '  '
 local GAP = '  '
 
-local function key_column_width()
+local function rows_of(section)
+  if section.rows == 'global' then
+    return require('chatora.keymaps').global_rows()
+  end
+  return section.rows
+end
+
+local function key_column_width(sections)
   local width = 0
-  for _, section in ipairs(SECTIONS) do
-    for _, row in ipairs(section.rows) do
+  for _, section in ipairs(sections) do
+    for _, row in ipairs(rows_of(section)) do
       if type(row) == 'table' then
         width = math.max(width, vim.fn.strdisplaywidth(row[1]))
       end
@@ -109,12 +128,12 @@ local function key_column_width()
 end
 
 local function build_lines()
-  local width = key_column_width()
+  local width = key_column_width(SECTIONS)
   local lines = { ' chatora 🐈' }
   for _, section in ipairs(SECTIONS) do
     lines[#lines + 1] = ''
     lines[#lines + 1] = ' ' .. section.title
-    for _, row in ipairs(section.rows) do
+    for _, row in ipairs(rows_of(section)) do
       if type(row) == 'string' then
         lines[#lines + 1] = INDENT .. row
       else

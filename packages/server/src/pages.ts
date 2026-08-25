@@ -5,6 +5,7 @@ import type {
   HttpClient,
   KeychainError,
   Me,
+  PageDetail,
   PageFilter,
   PageSummary,
   ProjectSummary,
@@ -13,9 +14,12 @@ import type {
 } from '@chatora/core'
 import { AccountStore, computeChanges, createNewLineId } from '@chatora/core'
 import { Effect, Option } from 'effect'
+import { type ConcealRange, computeConcealRanges } from './decorations'
 import { textToLines } from './lines'
+import { computeQuoteRanges, type QuoteRange } from './quote'
 import { ReadState } from './readState'
 import { type BasePageState, SessionState } from './state'
+import { computeTokens, type RawToken } from './tokens'
 import { formatUri } from './uriScheme'
 
 export type ErrCode = 'unauthorized' | 'notFastForward' | 'error'
@@ -345,6 +349,37 @@ export const listPages = (params: {
     }),
   )
 
+/**
+ * A page's own numbers, for the status line and the info panel. All times are Unix
+ * seconds; a page that does not exist yet has none of this.
+ */
+export interface PageMeta {
+  readonly created: number
+  readonly updated: number
+  readonly accessed: number
+  readonly views: number
+  readonly linked: number
+  readonly linesCount: number
+  readonly charsCount: number
+  /** Sort weight for pinned pages; 0 means not pinned. */
+  readonly pin: number
+  readonly pageRank: number
+  readonly snapshotCount: number
+}
+
+const toPageMeta = (page: PageDetail): PageMeta => ({
+  created: page.created,
+  updated: page.updated,
+  accessed: page.accessed,
+  views: page.views,
+  linked: page.linked,
+  linesCount: page.linesCount,
+  charsCount: page.charsCount,
+  pin: page.pin,
+  pageRank: page.pageRank,
+  snapshotCount: page.snapshotCount,
+})
+
 export interface OpenPageResult {
   readonly ok: true
   readonly uri: string
@@ -352,6 +387,7 @@ export interface OpenPageResult {
   readonly exists: boolean
   readonly pageId?: string
   readonly commitId?: string
+  readonly meta?: PageMeta
 }
 
 export const openPage = (params: {
@@ -389,6 +425,7 @@ export const openPage = (params: {
           exists: true as const,
           pageId: page.id,
           commitId: page.commitId,
+          meta: toPageMeta(page),
         }
       }
 
@@ -404,6 +441,51 @@ export const openPage = (params: {
 
 // `chatora/newPage` is a plain alias — the Lua side may call either.
 export const newPage = openPage
+
+export interface PreviewPageResult {
+  readonly ok: true
+  readonly text: string
+  /** Same shape textDocument/semanticTokens carries, minus the LSP delta encoding. */
+  readonly tokens: readonly RawToken[]
+  readonly conceal: readonly ConcealRange[]
+  readonly quotes: readonly QuoteRange[]
+  readonly meta?: PageMeta
+}
+
+/**
+ * A page's text, plus everything needed to draw it the way a real page buffer is drawn.
+ *
+ * Unlike `openPage` this records nothing: no read mark, no `accessed` report, no session
+ * entry — scrolling a picker past a page is not reading it, and a preview buffer must
+ * never be mistaken for one that can be saved.
+ *
+ * `text` is empty and the decorations are empty for a page that does not exist.
+ */
+export const previewPage = (params: {
+  readonly project: string
+  readonly title: string
+}): Effect.Effect<PreviewPageResult | ErrEnvelope, never, SessionState | HttpClient> =>
+  handle(
+    Effect.gen(function* () {
+      const session = yield* SessionState
+      const apiOpt = yield* session.getApi()
+      if (Option.isNone(apiOpt)) return noCredential()
+      const pageOpt = yield* apiOpt.value.getPage(params.project, params.title)
+      if (Option.isNone(pageOpt)) {
+        return { ok: true as const, text: '', tokens: [], conceal: [], quotes: [] }
+      }
+      const page = pageOpt.value
+      const text = page.lines.map((l) => l.text).join('\n')
+      return {
+        ok: true as const,
+        text,
+        tokens: computeTokens(text),
+        conceal: computeConcealRanges(text),
+        quotes: computeQuoteRanges(text),
+        meta: toPageMeta(page),
+      }
+    }),
+  )
 
 // ---------------------------------------------------------------------------
 // savePage

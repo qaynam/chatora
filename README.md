@@ -40,23 +40,96 @@ lazy.nvim（GitHub から直接）:
 | `sidebar_tabs` | すべて / 未読 | サイドバー上部のタブ。各要素は `{ label, filter?, unread_only? }`。`filter` は `'me'`（自分の保存済み Cosense フィルタ、無ければ自分の名前の icon フィルタ）か `{ type = 'icon', value = 'name' }`。`false` でタブなしの単一リスト |
 | `sidebar_separator` | `true` | 行ごとの区切り下線。未読バーが一本線に見えるのを防ぐ |
 | `sidebar_poll` | `60` | サイドバーを n 秒ごとに自動更新（更新順で先頭が入れ替わったときだけ再描画）。`false` で無効、最短 5 秒 |
-| `related_height` | `8` | 関連ページパネルの高さ |
+| `related_height` | `8` | 関連ページパネルの高さ。各行に被リンク数、見出しに件数、winbar にそのページ自身の被リンク数が出る |
 | `related_auto_open` | `true` | ページを開いたら関連パネルも開く。`q` で閉じると次の `gR` まで抑制 |
 | `status` | `true` | 保存状態アイコン。`{ icons = { clean='✓', dirty='●', error='✗' }, echo = false }` で調整、`false` で無効 |
 | `autosave` | `false` | 編集停止から n 秒後に自動保存 |
 | `completion` | `'auto'` | `'auto'` は blink.cmp が無い/無効なときだけ Neovim 内蔵補完を有効化。`'native'` は常に有効、`false` は外部エンジンに任せる |
 | `external_link` | `'confirm'` | 外部 URL 上の `gd`。`'open'` は確認なし、`'ignore'` は何もしない |
-| `keymaps` | `true` | insert モードの Cosense ショートカット。`{ insert_date = '<C-t>', insert_icon = '<C-i>', date_format = '%Y-%m-%d %H:%M:%S', autopair = true, table_tab = true, toggle_sidebar = '<leader>ct' }`。**`<C-i>` は kitty keyboard protocol 対応端末（kitty / Ghostty / WezTerm）以外では `<Tab>` と同一**。そのため `<Tab>` は文脈で分岐する: 行頭の空白内ならインデント、テーブル行ならセル区切りのタブ、それ以外はアイコン挿入。`toggle_sidebar` は chatora が唯一設定するグローバルキーマップ |
+| `log` | `false` | 診断ログ。`true` で `${XDG_STATE_HOME:-~/.local/state}/chatora/chatora.log`、文字列ならそのパス。`:Chatora log` で開く |
+| `keymaps` | `true` | insert モードの Cosense ショートカットと `<leader>c` 名前空間。`{ insert_date = '<C-t>', insert_icon = { '<C-i>', '<M-i>' }, date_format = '%Y-%m-%d %H:%M:%S', autopair = true, table_tab = true, prefix = '<leader>c' }`。個別のグローバルキーは `{ toggle = '<leader>b', info = false }` のようにアクション名で上書き・無効化できる（下表）。**`<C-i>` は kitty keyboard protocol 対応端末以外では `<Tab>` と同一**（下記参照）|
 | `images` | `'auto'` | 描画バックエンドが使えるときだけ画像を描く。`false` で無効 |
 | `image_backend` | `'auto'` | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック。`'image_nvim'` / `'snacks'` で固定 |
 | `image_height` | `20` | 単独行の画像の高さ（行数）。文中のインライン画像は常に 1 行 |
+| `image_height_large` | `image_height * 2` | `[[url]]`（Cosense の大きい画像記法）の高さ |
+| `image_gallery` | `true` | 画像だけの行を大きく描く。行のインデントに揃えて**縦に積む**（横並びは 1 行の高さでしか描けない。下記参照）。数値でその高さ、`false` で従来の行内 1 行 |
 | `image_border` | `true` | 画像自体に合成する枠（ImageMagick）。`{ width = 1, color = '#8888', padding = 12 }`（px、color は ImageMagick の色リテラル） |
 | `pads` | `true` | 箇条書きの中点とガイド線。`{ bullet = '●', guide = '┃', spacing = true, gap = 1 }`。`gap` は中点と本文の間の余白セル数 |
+| `quote` | `true` | `>` 行を GitHub 風の縦棒付きで描く。下記参照 |
 | `conceal` | `true` | 記法マークアップをカーソル行以外で隠す（render-markdown.nvim 方式） |
 | `tables` | `true` | `table:` ブロックの罫線描画。`{ border = false, header = false }` で個別に無効化 |
 | `title_margin` | `1` | タイトル行の下に入れる仮想空行の数 |
 | `spacing` | `{ line = 0, code = 0 }` | 行間として挿入する仮想空行。ターミナルはセル高が固定なので、本当の行高は端末/GUI 側の設定（`linespace` 等） |
 | `notations` | `{}` | ユーザー定義のカスタム装飾記法 `[<記号> 本文]`。下記参照 |
+
+#### `<C-i>` が効かないとき
+
+Cosense のアイコン挿入は `<C-i>` だが、端末は kitty keyboard protocol を話すときだけこれを
+`<Tab>` と別のキーとして送る。それ以外では**同じバイト**で届き、`<Tab>` は補完プラグイン
+（blink.cmp / nvim-cmp）のものなので、アイコンではなく補完メニューが出る。
+
+- **kitty / Ghostty / WezTerm** はそのまま対応。**tmux 越しなら `set -g extended-keys on` が必要**
+- 対応させたくない場合は既定でもう一つ入っている **`<M-i>`（Alt+i）** を使う。どのプラグインとも
+  競合しない
+
+chatora は `<Tab>` を奪わない。**テーブル行のときだけ**本物のタブ（`expandtab` だとセル区切りに
+ならないため）を入れ、それ以外は元々そのキーを持っていたマッピングにそのまま委譲する。
+
+### グローバルキーマップ（`<leader>c`）
+
+`keymaps.prefix`（既定 `<leader>c`）の下に並ぶ。`prefix = false` で全部やめる。
+
+| キー | 動作 | アクション名 |
+|---|---|---|
+| `<leader>ct` | サイドバーを開閉 | `toggle` |
+| `<leader>cs` | ページを検索 | `search` |
+| `<leader>cn` | 新規ページ | `new` |
+| `<leader>cr` | 関連ページを開閉 | `related` |
+| `<leader>ci` | ページ情報（更新日時・閲覧数・被リンク・ピン留め・URL） | `info` |
+| `<leader>cf` | サーバーから取り直す（`git pull` 相当。未保存の変更があれば確認する） | `pull` |
+| `<leader>cv` | クリップボードの画像をアップロードして記法を挿入 | `paste_image` |
+| `<leader>cy` | ページ URL をコピー | `copy_url` |
+| `<leader>cY` | リンク記法 `[タイトル]` をコピー | `copy_link` |
+| `<leader>co` | ブラウザで開く | `open_in_browser` |
+| `<leader>ca` | アカウント切り替え | `account` |
+| `<leader>cp` | プロジェクト切り替え | `project` |
+| `<leader>c?` | ヘルプ | `help` |
+
+個別に変えるならアクション名をキーにする: `keymaps = { info = '<leader>ck', copy_url = false }`。
+
+#### 画像だけの行（`image_gallery`）
+
+`[img1] [img2] [img3]` のように画像しか無い行は、web だと横に流れて折り返す。ターミナルでは
+描画バックエンド（snacks.nvim / image.nvim）が画像を **1 行分のインライン仮想テキスト**か
+**行の下の仮想行**のどちらかでしか描けないため、次の二択になる:
+
+| | 横並び | 大きさ |
+|---|---|---|
+| `image_gallery = false` | ✅ 折り返しも自然 | ❌ 1 行 |
+| `image_gallery = true`（既定） | ❌ 縦に積む | ✅ |
+
+既定は後者。積むときは各画像を**行のインデントに揃える**ので、階段状にならず一列になる。
+
+### 引用（`quote`）
+
+`> 引用` の `>` を縦棒で置き換え、本文を淡く落とす:
+
+```lua
+quote = {
+  bar = '▌',                              -- 太さはグリフで決まる: ▏ ▎ ▍ ▌ ┃ │
+  hl = { fg = '#4493f8' },                -- 縦棒の色（ChatoraQuoteBar）
+  text_hl = { fg = '#9198a1', italic = true }, -- 引用本文（ChatoraQuoteText）
+  dim = false,                            -- 本文はそのままにして縦棒だけ出す
+  wrap = false,                           -- 折り返し行への縦棒の追従をやめる
+}
+```
+
+`hl` / `text_hl` は `nvim_set_hl` にそのまま渡る。省略するとどちらも `Comment` にリンクする。
+縦棒は conceal ではなく overlay なので、カーソルがその行に来ても消えない。
+
+`wrap = true`（既定）のとき、折り返された引用の 2 行目以降にも縦棒が続くよう
+`breakindent` と `breakindentopt=shift:2` をページのウィンドウに設定する。この字下げが無いと
+縦棒が折り返し行の 1 文字目を潰すため、`wrap = false` にすると追従自体をやめる。
 
 ### カスタム装飾記法（`notations`）
 
@@ -66,16 +139,23 @@ lazy.nvim（GitHub から直接）:
 notations = {
   ['|'] = { name = 'highlight', hl = { bg = '#3a3a00', bold = true } },
   ['='] = { name = 'boxed',     hl = { link = 'WarningMsg' } },
-  ['@'] = { name = 'heading', icon = '📌', hl = { bold = true, underline = true } },
+  ['@'] = { name = 'heading', icon = '📌', hl = { bold = true }, rule = true },
 }
 ```
 
-- キー = `[` の直後に来る 1 文字の記号。公式記法の記号（`* / - _ $ [ #`）とは衝突不可
+- キー = 1 文字の記号。公式記法の記号（`* / - _ $ [`）とは衝突不可
 - `name` = 英数字と `_` のみ（semantic token 型名になる）
 - `hl` = `nvim_set_hl` にそのまま渡る（`:colorscheme` 変更後も再適用される）
 - `icon`（任意）= 開きマーカー（`[<記号> ` の部分）をこの 1 文字に置き換えて表示する。カーソル行では
   `concealcursor` により自動的に元の記号が見える。Neovim の conceal 置換は 1 文字までしか使えないため、
   複数文字を指定した場合は警告して無視される（`name`/`hl` は活きたまま）
+- `rule`（任意）= `true` にすると、その行の下に**ウィンドウの右端まで届く**罫線を引く（見出し用）。
+  文字幅の下線が欲しいだけなら `hl = { underline = true }` で足りる。色は `rule_hl`（省略時は
+  `WinSeparator` の色）
+
+Cosense のマーカーは 1 文字ではなく記号の連なりなので、公式記法と混ぜて書ける。
+`[|* 特徴]` は `|`（上の例なら `highlight`）と `*`（太字）の両方を持つ。
+ハイライトは 1 スパンに 1 つしか当たらないため、混在時はカスタム記法の `hl` が勝つ。
 
 不正な設定（記号が1文字でない・`name` が不正・公式記法と衝突）はエントリごと `vim.notify` で警告して無視される。
 `icon` だけが1文字でない場合はエントリは活かしたまま `icon` だけを警告して無視する。
@@ -101,6 +181,47 @@ East Asian Ambiguous 幅の文字を 2 セルで描く設定だと次の 1 文�
 画像の取得は chatora の LSP サーバーが PAT 付きで行いローカルにキャッシュするため、
 プライベートプロジェクトのアイコンも表示できる。
 
+### 画像の貼り付け（`<leader>cv`）
+
+クリップボードの画像をそのまま Cosense に上げて、カーソルの下の行に画像記法を書き込む。
+アップロード中はその行にスピナーが出る。
+
+Neovim のレジスタはテキストしか持てないので、画像のバイト列を取り出すのに外部ツールが要る
+（最初に見つかったものを使う）:
+
+| プラットフォーム | ツール |
+|---|---|
+| macOS | `pngpaste`（`brew install pngpaste`）。無ければ標準の `osascript` にフォールバック |
+| Wayland | `wl-paste` |
+| X11 | `xclip` |
+
+アップロード先を決めるのは chatora ではなくプロジェクト側の設定
+（`/api/projects/<name>` の `uploadImageTo`）で、Cosense web と同じ判定をアップロードごとに
+やり直す。プロジェクトを切り替えれば行き先も切り替わる:
+
+| `uploadImageTo` | 行き先 | 挿入される記法 |
+|---|---|---|
+| `gyazo` | Gyazo（`oauth-upload/token` → `upload.gyazo.com/api/upload`） | `[https://gyazo.com/…]` |
+| `gcs` | プロジェクト自身のファイル領域（`/api/gcs/<id>/upload-request` → 署名付き URL に PUT → `/verify`） | `[https://scrapbox.io/files/….png]` |
+
+プロジェクト設定が読めなかったときは Gyazo に倒す（ファイル領域を持たないプロジェクトでも
+通る方だから）。
+
+### telescope 連携（任意）
+
+同じ全文検索を telescope のピッカーとしても使える:
+
+```lua
+require('telescope').load_extension('chatora')
+```
+
+`:Telescope chatora search`（`:Telescope chatora` も同じ）。並び順は Cosense の pageRank を
+そのまま使い、telescope 側では一致箇所のハイライトだけを行う。プレビューはページ本文で、
+ヒット行に飛んで `TelescopePreviewMatch` でマークする。`dynamic_preview_title = true` を
+設定していればプレビューの枠にページ名が出る。
+
+`:Chatora search` は telescope を入れていなくても動く chatora 内蔵のピッカーで、こちらとは別物。
+
 ### シェルから一発起動（任意）
 
 `bin/chatora` が `nvim +Chatora` のランチャー。PATH に追加するかエイリアスで:
@@ -113,6 +234,7 @@ alias chatora='/path/to/chatora/bin/chatora'
 
 ## 使い方
 
+0. `:Chatora <url>` — Cosense のページ URL をそのまま渡すとそのページを開く（`chatora <url>` も同じ）
 1. `:Chatora` — 初回は PAT の入力を求められる（発行: https://scrapbox.io/settings/personal-access-tokens ）。検証後 macOS Keychain に保存される。`COSENSE_PAT` 環境変数があればそちらが優先される。
 2. 左サイドバー: `<CR>` または `l` 開く / `R` 再読込 / `s` 検索 / `n` 新規ページ / `P` プロジェクト切替 / `q` 閉じる。
    上部に neo-tree 風のタブ（`<Tab>` / `<S-Tab>` / `1`..`9` / クリックで切替）があり、既定は「すべて」と
@@ -121,7 +243,9 @@ alias chatora='/path/to/chatora/bin/chatora'
 3. ページバッファ: 普通に編集して `:w` で保存（preview → submit の公式 API、同期なので `:wq` 一回で閉じられる）。`gR` で関連ページパネル（1-hop / 2-hop）をトグル（既定で自動表示、`q` で閉じると次の `gR` まで出ない）。`[` や `#` でリンク補完、`gd` でリンク先へジャンプ（外部 URL は確認のうえブラウザで開く）。
 4. `:Chatora new [title]` — 新規ページ作成（title 省略時は入力プロンプト）
 5. `:Chatora toggle` — サイドバーの開閉
-6. `:Chatora search [query]` / `:Chatora related` / `:Chatora project` / `:Chatora logout`
+6. `:Chatora log` — 診断ログを開く（`log` オプションが必要）
+7. `:Chatora search [query]` — 全文検索。プロンプトの下に結果、右にそのページの本文（ヒット行に飛んでハイライト）。`<C-d>`/`<C-u>` でプレビューをスクロール
+   `:Chatora related` / `:Chatora project` / `:Chatora logout`
 7. `:Chatora account` — アカウントの切り替え・追加（PAT ごとに 1 アカウント。切り替えるとサイドバーを再読込）
 8. `:Chatora help` — コマンド・キーマップのチートシート
 
@@ -135,11 +259,46 @@ statusline に出すには（例: 素の statusline）:
 vim.o.statusline = "%f %{%v:lua.require'chatora.status'.component()%}"
 ```
 
+`component()` はアイコンだけを返す（サイドバーの winbar でもこれを使っている）。ページの
+数値は `page_info()`:
+
+```lua
+-- 素の statusline
+vim.o.statusline = "%f %{%v:lua.require'chatora.status'.component()%} %{v:lua.require'chatora.status'.page_info()}"
+
+-- lualine
+{ sections = { lualine_x = {
+  { function() return require('chatora.status').page_info() end,
+    color = function() return require('chatora.status').page_info_hl() end },
+} } }
+```
+
+`更新 43分前 · 閲覧 39 · 被リンク 6` のような**プレーン文字列**を返し、ページ以外のバッファでは
+空文字（条件を書かずにそのまま置ける）。色は `page_info_hl()` がハイライトグループ名で返す。
+
+**Cosense の日時はサーバー側のコピーの話**なので、ローカルに未保存の変更があると黙って嘘に
+なる。そのためバッファが未保存のときは先頭にバッジが付き、`page_info_hl()` も警告色を返す:
+
+| 状態 | `page_info()` | `page_info_hl()` |
+|---|---|---|
+| 保存済み | `更新 43分前 · 閲覧 39` | `ChatoraStatusMuted` |
+| 未保存 | `● 未保存 · 更新 43分前 · 閲覧 39` | `ChatoraStatusDirty` |
+| 保存中 | `◍ 保存中 · …` | `ChatoraStatusPending` |
+| 保存失敗 | `✗ 保存失敗 · …` | `ChatoraStatusError` |
+
+更新時刻だけなら `require('chatora.status').updated(bufnr)`。全項目（作成日・ページ履歴・
+ページランク・ピン留め）は `<leader>ci` のページ情報パネルに出る。
+
 lualine など「色は自前で付ける」系のプラグインにはアイコンだけ返す
 `require('chatora.status').icon(bufnr)`（戻り値: アイコン, ハイライト名）が使える。
 アイコンは `✓` 保存済み / `●` 未保存 / `◍` 保存中 / `✗` 失敗（`status.icons` で変更可）。
 
 ## 開発
+
+nvim を再起動せずにプラグインを入れ替えるには `:Chatora reload`。LSP を止め、chatora の
+ウィンドウとバッファを畳み、`package.loaded` から chatora のモジュールを落として同じ
+オプションで `setup()` をやり直す。**サーバー側を変えたときは先に `bun run build`**（クライアントは
+プロセスを起動し直すだけでビルドはしない）。
 
 ```sh
 bun test                 # core + server の単体テスト

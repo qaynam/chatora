@@ -13,6 +13,8 @@ describe('computeImageTargets', () => {
         src: 'https://kanban.qaynam.dev/api/status/xxx?userId=yyy#.svg',
         kind: 'image',
         standalone: true,
+        gallery: true,
+        large: false,
       },
     ])
   })
@@ -28,6 +30,8 @@ describe('computeImageTargets', () => {
         src: 'https://example.com/pic.png',
         kind: 'image',
         standalone: false,
+        gallery: false,
+        large: false,
       },
     ])
   })
@@ -44,6 +48,8 @@ describe('computeImageTargets', () => {
         kind: 'icon',
         iconUser: 'qaynam',
         standalone: false,
+        gallery: false,
+        large: false,
       },
       {
         line: 1,
@@ -53,6 +59,8 @@ describe('computeImageTargets', () => {
         kind: 'icon',
         iconUser: 'foo',
         standalone: false,
+        gallery: false,
+        large: false,
       },
     ])
   })
@@ -69,6 +77,8 @@ describe('computeImageTargets', () => {
         src: `https://i.gyazo.com/${hash}.png`,
         kind: 'image',
         standalone: true,
+        gallery: true,
+        large: false,
       },
     ])
   })
@@ -91,6 +101,8 @@ describe('computeImageTargets', () => {
         kind: 'icon',
         iconUser: 'qaynam',
         standalone: true,
+        gallery: true,
+        large: false,
       },
     ])
   })
@@ -156,5 +168,27 @@ describe('only fetchable image URLs become targets', () => {
 
   test('icons are unaffected — they are resolved to a URL by the client, not carried as one', () => {
     expect(computeImageTargets('T\n[someone.icon]')).toHaveLength(1)
+  })
+
+  test('`[[url]]` is the large form; `[url]` is not', () => {
+    const large = computeImageTargets('タイトル\n[[https://example.com/pic.png]]')
+    expect(large[0]?.large).toBe(true)
+    const plain = computeImageTargets('タイトル\n[https://example.com/pic.png]')
+    expect(plain[0]?.large).toBe(false)
+  })
+
+  test('a line of only pictures is a gallery, whatever the mix of icons and images', () => {
+    const targets = computeImageTargets(
+      'タイトル\n[https://example.com/a.png] [b.icon] [https://example.com/c.png]',
+    )
+    expect(targets.map((t) => t.gallery)).toEqual([true, true, true])
+    expect(targets.map((t) => t.standalone)).toEqual([false, false, false])
+  })
+
+  test('one word of text is enough to stop a line being a gallery', () => {
+    const targets = computeImageTargets(
+      'タイトル\n見て [https://example.com/a.png] [https://example.com/c.png]',
+    )
+    expect(targets.map((t) => t.gallery)).toEqual([false, false])
   })
 })

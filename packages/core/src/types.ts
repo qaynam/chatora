@@ -28,6 +28,17 @@ export interface ProjectSummary {
   readonly updated: number
 }
 
+export interface ProjectDetail {
+  readonly id: string
+  readonly name: string
+  readonly displayName: string
+  /** `'gyazo'` or `'gcs'` — where the web client sends a pasted image. */
+  readonly uploadImageTo: string
+  readonly uploadFileTo: string
+  /** Gyazo Teams the project uploads into; null for a project on plain Gyazo. */
+  readonly gyazoTeamsName: string | null
+}
+
 export interface UserRef {
   readonly id: string
   readonly name?: string
@@ -70,6 +81,22 @@ export interface PageDetail {
   readonly title: string
   readonly commitId: string
   readonly lines: readonly PageDetailLine[]
+  /** Unix seconds. */
+  readonly created: number
+  /** Unix seconds. */
+  readonly updated: number
+  /** Unix seconds of the requesting user's last visit; 0 when never visited. */
+  readonly accessed: number
+  readonly views: number
+  readonly linked: number
+  readonly linesCount: number
+  readonly charsCount: number
+  /** Sort weight for pinned pages; 0 means not pinned. */
+  readonly pin: number
+  readonly pageRank: number
+  /** Stored revisions — the web page menu's ページ履歴. */
+  readonly snapshotCount: number
+  readonly lastUpdateUser?: UserRef | null
 }
 
 export interface RelatedPage {

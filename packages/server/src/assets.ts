@@ -1,12 +1,14 @@
 import { execFile } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
-import { mkdir, readdir, rename, writeFile } from 'node:fs/promises'
+import { mkdir, open, readdir, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { Credential, HttpClientShape } from '@chatora/core'
 import { HttpClient } from '@chatora/core'
 import { Context, Data, Deferred, Effect, Layer, Option, SynchronizedRef } from 'effect'
+import { imageSizeOf } from './imageSize'
+import { log } from './log'
 import type { ErrCode, ErrEnvelope } from './pages'
 import { SessionState } from './state'
 
@@ -16,6 +18,9 @@ const UNAUTHORIZED_STATUSES: ReadonlySet<number> = new Set([401, 403])
 export interface FetchAssetSuccess {
   readonly ok: true
   readonly path: string
+  /** Intrinsic pixel size of the file at `path`; absent when the format is unmeasurable. */
+  readonly width?: number
+  readonly height?: number
 }
 export type FetchAssetResult = FetchAssetSuccess | ErrEnvelope
 
@@ -207,7 +212,14 @@ const fetchAndCache = (
     const ext = extensionFor(response.headers.get('content-type'))
     const path = yield* writeAtomic(cacheDir, hash, ext, new Uint8Array(body))
     return { ok: true as const, path }
-  }).pipe(Effect.catchTag('AssetFetchError', (error) => Effect.succeed(fromAssetFetchError(error))))
+  }).pipe(
+    // A failed asset is deliberately silent in the UI, since a missing picture is
+    // cosmetic — which is exactly why it is worth recording somewhere.
+    Effect.tapError((error) =>
+      log('warn', 'asset fetch failed', { url, status: error.status, detail: error.message }),
+    ),
+    Effect.catchTag('AssetFetchError', (error) => Effect.succeed(fromAssetFetchError(error))),
+  )
 
 // ---------------------------------------------------------------------------
 // border compositing
@@ -238,24 +250,38 @@ const sanitizeBorder = (border: BorderParams): BorderParams | null => {
 }
 
 /**
- * ImageMagick 7 ships `magick`; some installs only have the IM6 `convert`. Tried in that
- * order, remembered for the session. `null` (no ImageMagick at all) disables compositing.
+ * Builds a resolver that returns the first of `candidates` whose command answers
+ * `versionFlag`, or `null` when none is installed.
+ *
+ * @remarks
+ * The verdict is memoized for the life of the process, so a missing tool costs one failed
+ * spawn overall rather than one per request. A tool installed after startup is not picked
+ * up until the server restarts.
  */
-let magickCommand: string | null | undefined
-const resolveMagick = async (): Promise<string | null> => {
-  if (magickCommand !== undefined) return magickCommand
-  for (const candidate of ['magick', 'convert']) {
-    try {
-      await execFileAsync(candidate, ['-version'])
-      magickCommand = candidate
-      return candidate
-    } catch {
-      // keep trying
+const firstAvailable = <T extends { readonly cmd: string }>(
+  candidates: readonly T[],
+  versionFlag: string,
+): (() => Promise<T | null>) => {
+  let resolved: T | null | undefined
+  return async () => {
+    if (resolved !== undefined) return resolved
+    for (const candidate of candidates) {
+      try {
+        await execFileAsync(candidate.cmd, [versionFlag])
+        resolved = candidate
+        return candidate
+      } catch {}
     }
+    resolved = null
+    return null
   }
-  magickCommand = null
-  return null
 }
+
+/**
+ * ImageMagick 7 ships `magick`; some installs only have the IM6 `convert`. `null` (no
+ * ImageMagick at all) disables compositing.
+ */
+const resolveMagick = firstAvailable([{ cmd: 'magick' }, { cmd: 'convert' }], '-version')
 
 /**
  * Composites a frame into the image itself — a transparent padding ring, then the border
@@ -298,7 +324,7 @@ const withBorder = (
       String(border.width),
       borderedPath,
     ]
-    return yield* Effect.tryPromise(() => execFileAsync(magick, args)).pipe(
+    return yield* Effect.tryPromise(() => execFileAsync(magick.cmd, args)).pipe(
       Effect.as(borderedPath),
       Effect.orElseSucceed(() => sourcePath),
     )
@@ -326,7 +352,7 @@ const RASTER_DPI = '192'
 /**
  * SVG rasterizers, best first. librsvg is what ImageMagick itself delegates to when present;
  * without it ImageMagick falls back to its own renderer, which cannot resolve fonts and so
- * fails outright on any SVG containing text. Resolved once per process.
+ * fails outright on any SVG containing text.
  */
 const RASTERIZERS: readonly {
   readonly cmd: string
@@ -341,19 +367,7 @@ const RASTERIZERS: readonly {
   { cmd: 'convert', args: (i, o) => ['-density', RASTER_DPI, '-background', 'none', i, o] },
 ]
 
-let rasterizer: (typeof RASTERIZERS)[number] | null | undefined
-const resolveRasterizer = async (): Promise<(typeof RASTERIZERS)[number] | null> => {
-  if (rasterizer !== undefined) return rasterizer
-  for (const candidate of RASTERIZERS) {
-    try {
-      await execFileAsync(candidate.cmd, ['--version'])
-      rasterizer = candidate
-      return candidate
-    } catch {}
-  }
-  rasterizer = null
-  return null
-}
+const resolveRasterizer = firstAvailable(RASTERIZERS, '--version')
 
 /**
  * Terminal graphics protocols composite raster formats only, so an `image/svg+xml` asset is
@@ -487,6 +501,32 @@ export const AssetCacheLive: Layer.Layer<AssetCache> = Layer.effect(
 // chatora/fetchAsset
 // ---------------------------------------------------------------------------
 
+// Every format imageSizeOf understands puts its dimensions in the first few hundred
+// bytes; reading a prefix keeps a multi-megabyte GIF off the heap.
+const HEADER_BYTES = 1024
+
+/**
+ * Attach the intrinsic size of the file the client is about to draw. Measured on the
+ * *final* path, so a bordered or rasterized variant reports the size it actually has.
+ * A failure to measure is not a failure to fetch: the result passes through unchanged.
+ */
+const withSize = (result: FetchAssetResult): Effect.Effect<FetchAssetResult> => {
+  if (!result.ok) return Effect.succeed(result)
+  return Effect.tryPromise(async () => {
+    const handle = await open(result.path, 'r')
+    try {
+      const buffer = new Uint8Array(HEADER_BYTES)
+      const { bytesRead } = await handle.read(buffer, 0, HEADER_BYTES, 0)
+      return imageSizeOf(buffer.subarray(0, bytesRead))
+    } finally {
+      await handle.close()
+    }
+  }).pipe(
+    Effect.map((size) => (size ? { ...result, ...size } : result)),
+    Effect.orElseSucceed(() => result),
+  )
+}
+
 export const fetchAsset = (params: {
   readonly project: string
   readonly url: string
@@ -509,7 +549,7 @@ export const fetchAsset = (params: {
     const cached = yield* findCached(cacheDir, hash)
     if (Option.isSome(cached)) {
       const rasterized = yield* applySvgRaster(cacheDir, hash, { ok: true, path: cached.value })
-      return yield* applyBorder(cacheDir, hash, rasterized, border)
+      return yield* withSize(yield* applyBorder(cacheDir, hash, rasterized, border))
     }
 
     const credential = yield* session.getCredential()
@@ -523,5 +563,5 @@ export const fetchAsset = (params: {
       fetchAndCache(http.fetch, headersFor, cacheDir, hash, params.url),
     )
     const rasterized = yield* applySvgRaster(cacheDir, hash, fetched)
-    return yield* applyBorder(cacheDir, hash, rasterized, border)
+    return yield* withSize(yield* applyBorder(cacheDir, hash, rasterized, border))
   })

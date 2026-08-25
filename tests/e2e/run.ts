@@ -295,6 +295,26 @@ check(
   accessedPosts.map((r) => `${r.method} ${r.path} -> ${r.status}`),
 )
 
+// The scenario opens exactly two pages (ホーム, then メモ from the picker). The picker also
+// *previews* メモ, and scrolling a picker past a page must never count as reading it.
+check(
+  'previewing a page in the picker does not POST .../accessed',
+  accessedPosts.length === 2,
+  accessedPosts.map((r) => `${r.method} ${r.path} -> ${r.status}`),
+)
+
+// Reopening the sidebar serves the cached list. The scenario opens it, closes it and opens
+// it again; a refetch would show up as a second paged listing. `skip=` is what tells the
+// sidebar's batches apart from the picker's flat recent-pages query against the same path.
+const sidebarListRequests = requests.filter(
+  (r) => r.method === 'GET' && /^\/api\/pages\/[^/]+\/$/.test(r.path) && r.query.includes('skip='),
+)
+check(
+  'reopening the sidebar does not refetch the page list',
+  sidebarListRequests.length === 1,
+  sidebarListRequests.map((r) => `${r.method} ${r.path}${r.query} -> ${r.status}`),
+)
+
 // (g) no request ever carried a wrong/absent token -- zero 401s anywhere in the log
 const unauthorized = requests.filter((r) => r.status === 401)
 check('zero 401 responses across the whole request log', unauthorized.length === 0, unauthorized)

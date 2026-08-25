@@ -19,6 +19,14 @@ export interface ImageTarget {
   readonly iconUser?: string
   /** True when the node is the only non-whitespace child of its line (or the title line). */
   readonly standalone: boolean
+  /** `[[url]]` — Cosense's large form. Never set on an icon. */
+  readonly large: boolean
+  /**
+   * True when every non-whitespace child of the line is drawable. Such a line is a
+   * gallery — something to look at — rather than prose that happens to contain a
+   * picture, and the client sizes it accordingly.
+   */
+  readonly gallery: boolean
 }
 
 const isWhitespaceText = (node: AnyNode): boolean =>
@@ -38,14 +46,16 @@ const isFetchableImage = (src: string): boolean => {
   }
 }
 
+const DRAWABLE: ReadonlySet<string> = new Set(['image', 'icon'])
+
 /**
- * A node is standalone when it's the line's own child (not nested inside
- * decoration markup) and the line has no other content besides whitespace.
+ * The line's own content, ignoring whitespace — empty when the node is nested inside
+ * decoration markup rather than sitting directly on the line.
  */
-const isStandalone = (ancestors: readonly AnyNode[]): boolean => {
+const lineContent = (ancestors: readonly AnyNode[]): readonly AnyNode[] => {
   const parent = ancestors[ancestors.length - 1]
-  if (!parent || (parent.type !== 'line' && parent.type !== 'title')) return false
-  return parent.children.filter((child) => !isWhitespaceText(child)).length === 1
+  if (!parent || (parent.type !== 'line' && parent.type !== 'title')) return []
+  return parent.children.filter((child) => !isWhitespaceText(child))
 }
 
 export const computeImageTargets = (text: string): ImageTarget[] => {
@@ -55,11 +65,24 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
   visit(page, ['image', 'icon'], (node, ancestors) => {
     const { line, column } = node.position.start
     const endChar = node.position.end.column
-    const standalone = isStandalone(ancestors)
+    const content = lineContent(ancestors)
+    const standalone = content.length === 1
+    // An icon among images still makes a gallery: `[a.icon] [b.icon]` is a row of
+    // pictures, not a sentence.
+    const gallery = content.length > 0 && content.every((child) => DRAWABLE.has(child.type))
     if (node.type === 'image') {
       const src = asImageSrc(node.src) ?? node.src
       if (isFetchableImage(src)) {
-        out.push({ line, startChar: column, endChar, src, kind: 'image', standalone })
+        out.push({
+          line,
+          startChar: column,
+          endChar,
+          src,
+          kind: 'image',
+          standalone,
+          gallery,
+          large: node.large === true,
+        })
       }
     } else {
       out.push({
@@ -70,6 +93,8 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
         kind: 'icon',
         iconUser: node.user,
         standalone,
+        gallery,
+        large: false,
       })
     }
   })

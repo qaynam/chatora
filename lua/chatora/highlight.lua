@@ -1,4 +1,5 @@
--- Defaults for @lsp.type.<token>.cosense semantic token groups.
+-- Defaults for @lsp.type.<token>.cosense semantic token groups, plus the non-LSP
+-- groups that must be redefined on the same :colorscheme event.
 -- Attributes (bold/italic/…) are set directly instead of linking to groups
 -- like Bold/@markup.strong, so decorations render regardless of how the
 -- active colorscheme defines those groups; colors are borrowed from standard
@@ -53,6 +54,24 @@ local function specs()
   }
 end
 
+--- Highlight for a notation's full-row rule (`rule = true`). An underline on a
+--- line_hl_group runs to the window's right edge, which is the only way to draw a rule
+--- wider than its own text — and an underline takes its color from `sp`, not `fg`, so a
+--- configured `fg` is translated rather than silently ignored.
+---
+--- Color precedence is `rule = '<color>'`, `rule_hl`, then the theme; the chain ends at
+--- Comment because a theme may leave WinSeparator unset.
+local function rule_spec(notation)
+  local configured = type(notation.rule) == 'string' and { sp = notation.rule } or notation.rule_hl
+  local rule = vim.deepcopy(configured or {})
+  rule.sp = rule.sp or rule.fg or fg_of('WinSeparator') or fg_of('Comment')
+  rule.fg = nil
+  rule.underline = true
+  -- Only the derived fallback defers to the colorscheme; a configured color wins.
+  rule.default = configured == nil
+  return rule
+end
+
 local function apply()
   for token, spec in pairs(specs()) do
     spec.default = true
@@ -62,7 +81,11 @@ local function apply()
     local hl = vim.deepcopy(notation.hl or {})
     hl.default = true
     pcall(vim.api.nvim_set_hl, 0, '@lsp.type.' .. notation.name .. '.cosense', hl)
+    if notation.rule then
+      pcall(vim.api.nvim_set_hl, 0, config.notation_rule_hl(notation.name), rule_spec(notation))
+    end
   end
+  pcall(require('chatora.quote').ensure_hl)
 end
 
 function M.setup()

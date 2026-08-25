@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
 # Launch Neovim straight into chatora (sidebar + auth flow).
-# Extra arguments are passed through to nvim.
+#
+#   chatora                                        # sidebar on the configured project
+#   chatora https://scrapbox.io/proj/Page_Title    # straight to that page
+#
+# A leading Cosense URL is handed to :Chatora; anything else passes through to nvim.
+set -euo pipefail
+
+case "${1-}" in
+  http://* | https://* | cosense://*)
+    url=$1
+    shift
+    exec nvim "+Chatora open $url" "$@"
+    ;;
+esac
+
 exec nvim "+Chatora" "$@"

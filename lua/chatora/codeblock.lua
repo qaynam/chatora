@@ -1,10 +1,12 @@
 -- Syntax highlighting inside Cosense code blocks (`code:<filename>`), via
 -- treesitter, layered above the LSP's semantic-token 'codeBlock' coloring.
 --
--- Cosense notation: a line `code:<name>` (optionally indented) starts a
--- block; every following line with indent strictly greater than the
--- marker's indent belongs to it (blank lines never end a block); the first
--- line at or below the marker's indent ends it.
+-- Cosense notation: a line `code:<name>` (optionally indented) starts a block, and
+-- every following line indented strictly deeper than the marker belongs to it. The
+-- first line at or below the marker's indent ends it — including an *empty* line,
+-- whose indent is zero. A whitespace-only line keeps its indent and so stays inside,
+-- which is how a blank line survives in the middle of a code block. Verified against
+-- @cosense-toolbox/parser, which is what the server tokenizes with.
 local M = {}
 
 local config = require('chatora.config')
@@ -26,9 +28,9 @@ local function indent_of(line)
   return #(line:match('^[ \t]*'))
 end
 
---- Pure scan of buffer `lines` (1-indexed array) for Cosense code blocks.
---- Returns a list of { marker_line, start_line, end_line, name }, all
---- 0-based; interior lines are [start_line, end_line) (end_line exclusive).
+--- Pure scan of buffer `lines` (1-indexed) for Cosense code blocks. Returned line numbers
+--- are 0-based and the interior is the half-open range [start_line, end_line); `indent` is
+--- the marker's own indent, which is where the block's gutter sits.
 function M.find_blocks(lines)
   local blocks = {}
   local i = 1
@@ -40,11 +42,7 @@ function M.find_blocks(lines)
       local marker_indent = #indent
       if name ~= '' then
         local j = i + 1
-        while j <= n do
-          local l = lines[j]
-          if not is_blank(l) and indent_of(l) <= marker_indent then
-            break
-          end
+        while j <= n and indent_of(lines[j]) > marker_indent do
           j = j + 1
         end
         blocks[#blocks + 1] = {
@@ -52,6 +50,7 @@ function M.find_blocks(lines)
           start_line = i, -- 0-based: marker_line + 1
           end_line = j - 1, -- 0-based, exclusive
           name = name,
+          indent = marker_indent,
         }
         i = j
       else
@@ -189,16 +188,19 @@ end
 --- really in the buffer.
 local function decorate_block(bufnr, lines, block)
   local count = block.end_line - block.start_line
-  -- Numbering restarts per block and is padded to at least two digits, matching
-  -- the web UI; wider blocks grow the gutter rather than misaligning.
-  local width = math.max(2, #tostring(count))
+  -- Right-aligned, so a block past ten lines widens its gutter instead of misaligning.
+  local width = #tostring(count)
   for lnum = block.start_line, block.end_line - 1 do
     pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, lnum, 0, {
       line_hl_group = 'ChatoraCodeBlock',
     })
     if config.options.codeblock_numbers ~= false then
-      local n = ('%0' .. width .. 'd '):format(lnum - block.start_line + 1)
-      pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, lnum, 0, {
+      local n = ('%' .. width .. 'd '):format(lnum - block.start_line + 1)
+      -- Anchored at the marker's indent so the gutter sits under `code:<name>` rather
+      -- than at the window edge, and clamped: a shorter line has no such column.
+      local line = lines[lnum + 1] or ''
+      local col = math.min(block.indent, #(line:match('^[ \t]*') or ''))
+      pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, lnum, col, {
         virt_text = { { n, 'ChatoraCodeLineNr' } },
         virt_text_pos = 'inline',
       })

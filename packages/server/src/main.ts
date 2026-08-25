@@ -6,7 +6,7 @@ import {
   CredentialStoreLive,
   HttpClientLive,
 } from '@chatora/core'
-import { Layer, ManagedRuntime } from 'effect'
+import { Effect, Layer, ManagedRuntime } from 'effect'
 import {
   type CompletionParams,
   createConnection,
@@ -25,11 +25,14 @@ import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
 import { definitionLocation, findDefinitionTarget, findUrlTarget } from './definition'
 import { computeImageTargets } from './images'
+import { activeLogPath, log } from './log'
 import { type NotationSpec, notationSpecs, setNotations } from './notations'
 import * as handlers from './pages'
+import { computeQuoteRanges } from './quote'
 import { type ReadState, ReadStateLive } from './readState'
 import { makeSessionStateLayer, type SessionState } from './state'
 import { computeTokens, encodeTokens, type RawToken, TOKEN_TYPES } from './tokens'
+import { uploadImage } from './upload'
 import { parseUri } from './uriScheme'
 
 const DEFAULT_ORIGIN = 'https://scrapbox.io'
@@ -91,8 +94,9 @@ const toSemanticTokens = (tokens: RawToken[]): SemanticTokens => ({ data: encode
 
 type UrlAtResult = { ok: true; url: string | null } | { ok: false; code: string; message: string }
 
-// Markers that would collide with an official notation ([* /-_$[#] as its own marker char).
-const RESERVED_MARKERS = new Set(['*', '/', '-', '_', '$', '[', '#'])
+// Marker characters an official notation already owns: the four decoration flags
+// ([* /-_]), formulas ([$ ]) and bracket-nested links ([[ ]]).
+const RESERVED_MARKERS = new Set(['*', '/', '-', '_', '$', '['])
 const NOTATION_NAME_RE = /^[A-Za-z0-9_]+$/
 
 // initializationOptions come from the client, which is not trusted: drop anything malformed
@@ -116,12 +120,16 @@ const validateNotations = (input: unknown): NotationSpec[] => {
 
 connection.onInitialize((params: InitializeParams): InitializeResult => {
   const options = params.initializationOptions as
-    | { origin?: unknown; notations?: unknown }
+    | { origin?: unknown; notations?: unknown; log?: unknown }
     | undefined
+  // log.ts reads the environment per call, so this is all it takes to turn the
+  // diagnostic log on for the rest of the process.
+  if (typeof options?.log === 'string' && options.log !== '') process.env.CHATORA_LOG = options.log
   const origin =
     typeof options?.origin === 'string' && options.origin !== '' ? options.origin : DEFAULT_ORIGIN
   runtime = ManagedRuntime.make(buildAppLayer(origin))
   setNotations(validateNotations(options?.notations))
+  void Effect.runPromise(log('info', 'chatora server initialized', { origin }))
 
   return {
     capabilities: {
@@ -230,6 +238,13 @@ connection.onRequest('chatora/openPage', (params: { project: string; title: stri
 connection.onRequest('chatora/newPage', (params: { project: string; title: string }) =>
   runtime.runPromise(handlers.newPage(params)),
 )
+connection.onRequest('chatora/previewPage', (params: { project: string; title: string }) =>
+  runtime.runPromise(handlers.previewPage(params)),
+)
+connection.onRequest('chatora/logPath', async () => ({
+  ok: true as const,
+  path: activeLogPath() ?? null,
+}))
 connection.onRequest('chatora/savePage', (params: { uri: string }) =>
   runtime.runPromise(handlers.savePage(params.uri, documents.get(params.uri)?.getText())),
 )
@@ -237,14 +252,19 @@ connection.onRequest('chatora/relatedPages', (params: { project: string; title: 
   runtime.runPromise(handlers.relatedPages(params)),
 )
 type DecorationsResult =
-  | { ok: true; conceal: ReturnType<typeof computeConcealRanges> }
+  | {
+      ok: true
+      conceal: ReturnType<typeof computeConcealRanges>
+      quotes: ReturnType<typeof computeQuoteRanges>
+    }
   | { ok: false; code: string; message: string }
 connection.onRequest(
   'chatora/decorations',
   async (params: { uri: string }): Promise<DecorationsResult> => {
     const doc = documents.get(params.uri)
     if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
-    return { ok: true, conceal: computeConcealRanges(doc.getText()) }
+    const text = doc.getText()
+    return { ok: true, conceal: computeConcealRanges(text), quotes: computeQuoteRanges(text) }
   },
 )
 type ImagesResult =
@@ -264,6 +284,11 @@ connection.onRequest(
   'chatora/fetchAsset',
   (params: { project: string; url: string; border?: BorderParams }) =>
     runtime.runPromise(fetchAsset(params)),
+)
+connection.onRequest(
+  'chatora/uploadImage',
+  (params: { project: string; title: string; path: string }) =>
+    runtime.runPromise(uploadImage(params)),
 )
 
 documents.listen(connection)

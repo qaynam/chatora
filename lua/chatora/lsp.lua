@@ -42,7 +42,13 @@ function M.ensure_start(bufnr)
     name = 'chatora',
     cmd = cmd,
     root_dir = config.get_repo_root(),
-    init_options = { origin = config.options.origin, notations = config.notation_list() },
+    init_options = {
+      origin = config.options.origin,
+      notations = config.notation_list(),
+      -- `true` means "the default path"; a string is the path to write to. The server
+      -- reads this once, at initialize.
+      log = config.options.log == true and '1' or (config.options.log or nil),
+    },
   }, { bufnr = bufnr })
 
   if not id then

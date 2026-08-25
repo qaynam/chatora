@@ -55,7 +55,28 @@ function M.resolve_project(cb)
   end)
 end
 
-function M.open()
+--- Open the sidebar, or — given a Cosense page URL (or a cosense:// URI) — the page
+--- it names, switching the session to that page's project. Anything else is an error
+--- rather than a silent fall-back to the sidebar, so a mistyped URL is visible.
+function M.open(target)
+  if target and target ~= '' then
+    local project, title = require('chatora.uri').parse_any(target)
+    if not project then
+      vim.notify('[chatora] Cosense のページ URL ではありません: ' .. target, vim.log.levels.ERROR)
+      return
+    end
+    auth.ensure_auth(function()
+      M.session.project = project
+      if not title then
+        sidebar.open(project)
+        return
+      end
+      sidebar.open(project)
+      require('chatora.page').open(project, title, require('chatora.winutil').ensure_editor_win())
+    end)
+    return
+  end
+
   auth.ensure_auth(function()
     M.resolve_project(function(project)
       sidebar.open(project)
@@ -93,6 +114,66 @@ end
 
 function M.help()
   require('chatora.help').open()
+end
+
+-- Buffers chatora owns outright, which reloading wipes: a page buffer left behind would
+-- still be bound to the stopped LSP client.
+local OWNED_BUFFER_PATTERNS = { '^cosense://', '^chatora://' }
+
+local function is_owned_buffer(name)
+  for _, pattern in ipairs(OWNED_BUFFER_PATTERNS) do
+    if name:match(pattern) then
+      return true
+    end
+  end
+  return false
+end
+
+--- Reload the plugin in place, for developing it without restarting Neovim.
+---
+--- Server-side changes need `bun run build` first: this respawns the server process but
+--- does not rebuild it. Every chatora augroup is created with `clear = true` at module
+--- load, so re-requiring re-registers the autocmds instead of stacking them.
+function M.reload()
+  local opts = config.user_opts
+  for _, client in ipairs(vim.lsp.get_clients({ name = 'chatora' })) do
+    pcall(function()
+      client:stop(true)
+    end)
+  end
+  pcall(sidebar.close)
+  pcall(related.close)
+  pcall(require('chatora.picker').close)
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if is_owned_buffer(vim.api.nvim_buf_get_name(b)) then
+      pcall(vim.api.nvim_buf_delete, b, { force = true })
+    end
+  end
+
+  for name in pairs(package.loaded) do
+    if name == 'chatora' or name:match('^chatora%.') or name == 'telescope._extensions.chatora' then
+      package.loaded[name] = nil
+    end
+  end
+  -- Scheduled so this function finishes against the modules it was loaded from.
+  vim.schedule(function()
+    require('chatora').setup(opts)
+    vim.notify('[chatora] 再読み込みしました')
+  end)
+end
+
+--- Open the server's diagnostic log, or explain how to turn it on.
+function M.log()
+  lsp.request_ok('chatora/logPath', {}, function(result)
+    if not result.path then
+      vim.notify(
+        '[chatora] ログは無効です。setup({ log = true }) か CHATORA_LOG=1 で有効にしてください',
+        vim.log.levels.WARN
+      )
+      return
+    end
+    vim.cmd('tabedit ' .. vim.fn.fnameescape(result.path))
+  end)
 end
 
 --- Pick a different project and reopen the sidebar on it. Overrides both the
@@ -152,8 +233,12 @@ end
 
 --- Dispatcher for the :Chatora user command.
 function M.dispatch(subcmd, args)
-  if subcmd == '' or subcmd == 'open' then
-    M.open()
+  -- `:Chatora <url>` — a pasted page URL is not a subcommand, so it reaches `open`
+  -- directly rather than tripping the unknown-subcommand error.
+  if subcmd:match('^https?://') or subcmd:match('^cosense://') then
+    M.open(subcmd)
+  elseif subcmd == '' or subcmd == 'open' then
+    M.open(args ~= '' and args or nil)
   elseif subcmd == 'new' then
     M.new(args ~= '' and args or nil)
   elseif subcmd == 'search' then
@@ -170,6 +255,10 @@ function M.dispatch(subcmd, args)
     M.logout()
   elseif subcmd == 'help' then
     M.help()
+  elseif subcmd == 'log' then
+    M.log()
+  elseif subcmd == 'reload' then
+    M.reload()
   else
     vim.notify('[chatora] unknown subcommand: ' .. subcmd, vim.log.levels.ERROR)
   end

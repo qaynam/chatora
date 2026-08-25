@@ -49,7 +49,10 @@ export const computeConcealRanges = (text: string): ConcealRange[] => {
           )
           push(end.line, last.position.end.column, end.column)
         }
-        return 'skip'
+        // Descend, so a link nested in a decoration (`[* [nuclear]]`) loses its own
+        // brackets too. The ranges never overlap: this hid only what precedes the first
+        // child and follows the last.
+        return undefined
       }
       case 'internalLink':
       case 'projectLink':

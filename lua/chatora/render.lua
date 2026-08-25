@@ -1,7 +1,9 @@
--- render-markdown.nvim style notation concealing for cosense buffers: the
--- server returns markup ranges (chatora/decorations, UTF-16 columns) and we
--- hide them via conceal extmarks. conceallevel=2 + concealcursor='' means
--- Neovim itself reveals the raw source on the cursor line.
+-- Owner of the chatora/decorations request, which returns both the markup ranges to
+-- conceal and the quoted lines (UTF-16 columns) in one round trip.
+--
+-- Concealing follows render-markdown.nvim: conceallevel=2 + concealcursor='' lets
+-- Neovim itself reveal the raw source on the cursor line. The quote half is drawn by
+-- chatora.quote, which has its own switch.
 local M = {}
 
 local config = require('chatora.config')
@@ -13,10 +15,13 @@ local uv = vim.uv or vim.loop
 local timers = {}
 
 local function set_win_opts(bufnr)
-  for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
-    vim.wo[win].conceallevel = 2
-    vim.wo[win].concealcursor = ''
+  if config.options.conceal ~= false then
+    for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+      vim.wo[win].conceallevel = 2
+      vim.wo[win].concealcursor = ''
+    end
   end
+  require('chatora.quote').setup_win(bufnr)
 end
 
 local function apply(bufnr, ranges)
@@ -32,28 +37,34 @@ local function apply(bufnr, ranges)
       local ok1, sb = pcall(vim.str_byteindex, ltext, 'utf-16', r.startChar, false)
       local ok2, eb = pcall(vim.str_byteindex, ltext, 'utf-16', r.endChar, false)
       if ok1 and ok2 and eb > sb then
-        local icon = r.notation and config.notation_icon(r.notation)
+        local spec = r.notation and config.notation_spec(r.notation)
         pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, r.line, sb, {
           end_col = eb,
-          conceal = icon or '',
+          conceal = spec and spec.icon or '',
         })
+        if spec and spec.rule then
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, r.line, 0, {
+            line_hl_group = config.notation_rule_hl(r.notation),
+          })
+        end
       end
     end
   end
 end
 
 function M.refresh(bufnr)
-  if config.options.conceal == false then
-    vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
-    return
-  end
   local uri = vim.api.nvim_buf_get_name(bufnr)
   -- Cosmetic feature: fail silently rather than notifying on every edit.
   lsp.request('chatora/decorations', { uri = uri }, function(err, result)
     if err or not result or result.ok == false then
       return
     end
-    apply(bufnr, result.conceal or {})
+    if config.options.conceal == false then
+      vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
+    else
+      apply(bufnr, result.conceal or {})
+    end
+    require('chatora.quote').render(bufnr, result.quotes or {})
   end)
 end
 
@@ -76,9 +87,6 @@ local function debounced_refresh(bufnr)
 end
 
 function M.attach(bufnr)
-  if config.options.conceal == false then
-    return
-  end
   set_win_opts(bufnr)
   M.refresh(bufnr)
   if vim.b[bufnr].chatora_render_attached then

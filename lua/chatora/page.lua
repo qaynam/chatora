@@ -166,6 +166,10 @@ local function handle_read(ev)
   vim.bo[bufnr].shiftwidth = 1
   vim.bo[bufnr].softtabstop = 1
   vim.bo[bufnr].tabstop = 2
+  -- Indentation is structure in Cosense, not decoration: a code block is exactly the
+  -- lines indented deeper than its `code:` marker, so a new line at column 0 silently
+  -- *ends the block*. Carrying the previous indent is what the web editor does.
+  vim.bo[bufnr].autoindent = true
 
   status.set(bufnr, 'loading')
   lsp.request_ok('chatora/openPage', { project = project, title = title }, function(result)
@@ -173,7 +177,43 @@ local function handle_read(ev)
       return
     end
     set_content(bufnr, result.text)
+    vim.b[bufnr].chatora_meta = result.meta
     finalize_buffer(bufnr, project, title)
+  end)
+end
+
+--- Cosense's own numbers for the page in bufnr (updated/views/linked/…), or nil
+--- before the fetch lands and for a page that does not exist yet.
+function M.meta(bufnr)
+  return vim.b[bufnr or vim.api.nvim_get_current_buf()].chatora_meta
+end
+
+--- Refetch bufnr's page and replace the buffer with it, re-anchoring the next save: the
+--- server holds the line ids a save diffs against, and only openPage re-registers them.
+---
+--- `cb(changed)` runs once the buffer is up to date, with `false` when the server's copy
+--- was already what the buffer held. Overwrites unsaved edits: callers ask first.
+function M.pull(bufnr, cb)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local project, title = uri.parse(vim.api.nvim_buf_get_name(bufnr))
+  if not project then
+    return
+  end
+  local before = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n')
+  status.set(bufnr, 'loading')
+  lsp.request_ok('chatora/openPage', { project = project, title = title }, function(result)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    local changed = (result.text or '') ~= before
+    if changed then
+      set_content(bufnr, result.text)
+    end
+    vim.b[bufnr].chatora_meta = result.meta
+    finalize_buffer(bufnr, project, title)
+    if cb then
+      cb(changed)
+    end
   end)
 end
 

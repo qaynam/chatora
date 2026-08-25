@@ -10,9 +10,14 @@ local cur_project, cur_title
 local line_items = {}
 local ns = vim.api.nvim_create_namespace('chatora_related')
 
+-- Cosense's own word for a page's incoming links, so the panel and the page-info
+-- float name the same number the same way.
+local LINKED_LABEL = '被リンク '
+
 local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraRelatedHeader', { bold = true, underline = true, default = true })
   vim.api.nvim_set_hl(0, 'ChatoraRelatedEmpty', { link = 'NonText', default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraRelatedCount', { link = 'Comment', default = true })
   -- The panel gets the float background so it reads as chrome, not as a
   -- continuation of the page. Overridable like every Chatora* group.
   vim.api.nvim_set_hl(0, 'ChatoraRelatedNormal', { link = 'NormalFloat', default = true })
@@ -74,9 +79,10 @@ local function render(links1hop, links2hop)
   local empty_lines = {}
 
   local function add_section(name, items)
-    lines[#lines + 1] = name
+    items = items or {}
+    lines[#lines + 1] = #items > 0 and (name .. '  (' .. #items .. ')') or name
     header_lines[#header_lines + 1] = #lines - 1
-    if not items or #items == 0 then
+    if #items == 0 then
       lines[#lines + 1] = '  (none)'
       empty_lines[#empty_lines + 1] = #lines - 1
     else
@@ -107,6 +113,9 @@ local function render(links1hop, links2hop)
     })
   end
   vim.bo[buf].modifiable = false
+  -- Rendering marks an acwrite buffer modified, which makes Neovim offer to save it on
+  -- exit. This is a view; there is nothing to save.
+  vim.bo[buf].modified = false
 end
 
 --- Refresh the panel contents for project/title. No-op (besides remembering
@@ -164,7 +173,7 @@ function M.open()
   -- Same as the sidebar: never let another buffer take over this window.
   vim.wo[win].winfixbuf = true
   -- Label + panel background so the split is visibly chrome, not page content.
-  vim.wo[win].winbar = '%#ChatoraRelatedTitle# 関連ページ%*'
+  vim.wo[win].winbar = '%#ChatoraRelatedTitle# 関連ページ%*%#ChatoraRelatedCount#%{%v:lua.require("chatora.related").winbar_count()%}%*'
   vim.wo[win].winhighlight = 'Normal:ChatoraRelatedNormal,EndOfBuffer:ChatoraRelatedNormal'
   user_closed = false
 
@@ -208,6 +217,23 @@ vim.api.nvim_create_autocmd('BufEnter', {
     end
   end,
 })
+
+--- The subject page's own incoming-link count, for the winbar. Empty until that page's
+--- metadata has arrived, so the label never shows an invented number.
+function M.winbar_count()
+  if not (cur_project and cur_title) then
+    return ''
+  end
+  local bufnr = vim.fn.bufnr(require('chatora.uri').format(cur_project, cur_title))
+  if bufnr == -1 then
+    return ''
+  end
+  local meta = require('chatora.page').meta(bufnr)
+  if not (meta and meta.linked > 0) then
+    return ''
+  end
+  return '  ' .. LINKED_LABEL .. meta.linked
+end
 
 function M.open_current()
   if not is_open() then

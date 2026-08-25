@@ -128,8 +128,9 @@ local ok, err = pcall(function()
   end
 
   do
-    -- Blank lines inside a block belong to it; block ends at EOF if nothing
-    -- dedents; a second block with no extension falls back to name-as-lang.
+    -- An *empty* line has indent 0, so it ends the block exactly like any other line at
+    -- or below the marker's indent — this is what Cosense itself does. A block runs to
+    -- EOF if nothing dedents; a name with no extension falls back to name-as-lang.
     local lines = {
       'code:a.lua',
       '  local x = 1',
@@ -140,11 +141,20 @@ local ok, err = pcall(function()
     }
     local blocks = codeblock.find_blocks(lines)
     assert(#blocks == 2, 'expected two blocks, got ' .. #blocks)
-    assert(blocks[1].start_line == 1 and blocks[1].end_line == 4, 'first block range mismatch')
+    assert(blocks[1].start_line == 1 and blocks[1].end_line == 2, 'first block range mismatch')
     assert(blocks[1].name == 'a.lua', 'first block name mismatch: ' .. blocks[1].name)
     assert(blocks[2].marker_line == 4, 'second marker_line mismatch: ' .. blocks[2].marker_line)
     assert(blocks[2].start_line == 5 and blocks[2].end_line == 6, 'second block range mismatch')
     assert(blocks[2].name == 'bash', 'second block name mismatch: ' .. blocks[2].name)
+  end
+
+  do
+    -- A whitespace-only line keeps its indent, so it stays inside: that is how a blank
+    -- line survives in the middle of a code block.
+    local blocks = codeblock.find_blocks({ 'code:a.lua', '  local x = 1', '  ', '  local y = 2' })
+    assert(#blocks == 1, 'expected one block, got ' .. #blocks)
+    assert(blocks[1].start_line == 1 and blocks[1].end_line == 4, 'whitespace-only line ended the block')
+    assert(blocks[1].indent == 0, 'marker indent mismatch: ' .. tostring(blocks[1].indent))
   end
 
   do
@@ -198,7 +208,7 @@ local ok, err = pcall(function()
     assert(label_n == 1, 'expected the filename to be highlighted as a label')
     assert(tinted == 2, 'expected both interior lines tinted, got ' .. tinted)
 
-    -- Numbering restarts per block and is zero-padded to at least two digits.
+    -- Numbering restarts per block, right-aligned to the block's own widest number.
     local numbers = {}
     for _, m in ipairs(details) do
       for _, chunk in ipairs(m[4].virt_text or {}) do
@@ -207,7 +217,7 @@ local ok, err = pcall(function()
         end
       end
     end
-    assert(vim.deep_equal(numbers, { '01 ', '02 ' }), 'unexpected line numbers: ' .. vim.inspect(numbers))
+    assert(vim.deep_equal(numbers, { '1 ', '2 ' }), 'unexpected line numbers: ' .. vim.inspect(numbers))
 
     require('chatora.config').options.codeblock_numbers = false
     codeblock.refresh(buf)
