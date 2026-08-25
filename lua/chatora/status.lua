@@ -239,9 +239,15 @@ function M.page_info(bufnr)
     return ''
   end
   local parts = {}
-  local badge = BADGE[state_by_bufnr[bufnr or vim.api.nvim_get_current_buf()]]
-  if badge then
-    parts[#parts + 1] = badge
+  -- A page from another project cannot be saved, so the save-state badge would be
+  -- answering a question nobody asked; it says why the buffer is locked instead.
+  if vim.b[bufnr or vim.api.nvim_get_current_buf()].chatora_read_only then
+    parts[#parts + 1] = '読み取り専用'
+  else
+    local badge = BADGE[state_by_bufnr[bufnr or vim.api.nvim_get_current_buf()]]
+    if badge then
+      parts[#parts + 1] = badge
+    end
   end
   local relative = require('chatora.actions').relative_time(meta.updated)
   if relative then

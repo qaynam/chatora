@@ -445,7 +445,29 @@ export interface OpenPageResult {
   readonly pageId?: string
   readonly commitId?: string
   readonly meta?: PageMeta
+  /** True when this session cannot write to the page's project — see `isReadOnly`. */
+  readonly readOnly: boolean
 }
+
+/**
+ * Whether `project` is one this session can only read.
+ *
+ * Cosense lets anyone read a public project and only its members write to it, and following
+ * a `[/other-project/page]` link lands squarely in that case. Membership is decided from the
+ * project's roster, which is already cached for naming authors, so this costs nothing extra.
+ *
+ * A roster that could not be read leaves the page writable. Guessing the other way would
+ * lock a buffer the user can in fact edit, and the server refusing a save is a better
+ * failure than an editor that will not take the keystroke.
+ */
+const isReadOnly = (project: string): Effect.Effect<boolean, never, SessionState | HttpClient> =>
+  Effect.gen(function* () {
+    const session = yield* SessionState
+    const { projectId, users } = yield* session.getProjectUsers(project)
+    if (projectId === '') return false
+    const me = yield* session.verifiedUserId()
+    return me !== '' && !users.some((user) => user.id === me)
+  })
 
 export const openPage = (params: {
   readonly project: string
@@ -483,6 +505,7 @@ export const openPage = (params: {
           pageId: page.id,
           commitId: page.commitId,
           meta: yield* toPageMetaWithAuthors(params.project, page),
+          readOnly: yield* isReadOnly(params.project),
         }
       }
 
@@ -492,7 +515,13 @@ export const openPage = (params: {
         baseLines: [],
         exists: false,
       })
-      return { ok: true as const, uri, text: params.title, exists: false as const }
+      return {
+        ok: true as const,
+        uri,
+        text: params.title,
+        exists: false as const,
+        readOnly: yield* isReadOnly(params.project),
+      }
     }),
   )
 

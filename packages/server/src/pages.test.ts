@@ -407,6 +407,8 @@ describe('openPage / newPage', () => {
       exists: true,
       pageId: 'pg1',
       commitId: 'c1',
+      // The roster is unreadable in this fixture, which leaves the page writable.
+      readOnly: false,
       // Rides along on the open, so the status line and the info panel never need a
       // second round-trip.
       meta: {
@@ -437,6 +439,7 @@ describe('openPage / newPage', () => {
       uri: 'cosense://proj/New Page',
       text: 'New Page',
       exists: false,
+      readOnly: false,
     })
   })
 })
@@ -850,5 +853,58 @@ describe('syncPage', () => {
       changed: false,
       text: 'Page\nalpha\nmine',
     })
+  })
+})
+
+describe('openPage read-only', () => {
+  const page = {
+    id: 'pg1',
+    title: 'Page',
+    commitId: 'c1',
+    persistent: true,
+    lines: [{ id: 'l1', text: 'Page' }],
+  }
+  // `/api/users/me` and `/api/projects/<name>/users` both end in "users", so the account
+  // route has to be matched first or verification gets handed the roster.
+  const serve = (roster: unknown) =>
+    testHttpClient((url) => {
+      if (url.endsWith('/api/users/me')) return json(ME)
+      return url.endsWith('/users') ? json(roster) : json(page)
+    })
+
+  test('a project whose roster does not list this user is read-only', async () => {
+    const { layer: httpLayer } = serve({ projectId: 'p1', users: [{ id: 'someone-else' }] })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      // The read-only check compares against the verified user, so verify first.
+      yield* handlers.authStatus()
+      return yield* handlers.openPage({ project: 'other', title: 'Page' })
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toMatchObject({ readOnly: true })
+  })
+
+  test('a project this user belongs to is writable', async () => {
+    const { layer: httpLayer } = serve({ projectId: 'p1', users: [{ id: ME.id }] })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.authStatus()
+      return yield* handlers.openPage({ project: 'mine', title: 'Page' })
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toMatchObject({ readOnly: false })
+  })
+
+  // Locking a buffer the user can in fact edit is the worse mistake: a refused save
+  // explains itself, an editor that will not take a keystroke does not.
+  test('an unreadable roster leaves the page writable', async () => {
+    const { layer: httpLayer } = testHttpClient((url) => {
+      if (url.endsWith('/api/users/me')) return json(ME)
+      return url.endsWith('/users') ? json({ message: 'nope' }, 401) : json(page)
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.authStatus()
+      return yield* handlers.openPage({ project: 'unknown', title: 'Page' })
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toMatchObject({ readOnly: false })
   })
 })

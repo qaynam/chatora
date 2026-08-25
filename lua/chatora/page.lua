@@ -192,6 +192,13 @@ local function handle_read(ev)
     end
     set_content(bufnr, result.text)
     vim.b[bufnr].chatora_meta = result.meta
+    -- Following a [/other-project/page] link lands on a project this session may only read.
+    -- The buffer says so rather than letting the edit fail at save time, hours later.
+    vim.b[bufnr].chatora_read_only = result.readOnly == true
+    if result.readOnly then
+      vim.bo[bufnr].modifiable = false
+      vim.bo[bufnr].readonly = true
+    end
     finalize_buffer(bufnr, project, title)
   end)
 end
@@ -313,6 +320,13 @@ end
 --- `:wq`. vim.wait pumps the main loop, which is what lets the reply land while we block.
 --- Autosave does not come through here for exactly that reason: see schedule_autosave.
 local function handle_write(ev)
+  if vim.b[ev.buf].chatora_read_only then
+    vim.notify(
+      '[chatora] このプロジェクトには書き込めません（読み取り専用で開いています）',
+      vim.log.levels.WARN
+    )
+    return
+  end
   local done = false
   send_save(ev.buf, function()
     done = true

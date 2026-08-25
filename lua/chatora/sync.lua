@@ -43,6 +43,9 @@ local function is_page(bufnr)
   return vim.api.nvim_buf_is_valid(bufnr)
     and vim.api.nvim_buf_get_name(bufnr):match('^cosense://') ~= nil
     and vim.b[bufnr].chatora_attached == true
+    -- A read-only page holds no local edits to merge, and re-fetching one nobody can
+    -- change is a request spent on nothing.
+    and not vim.b[bufnr].chatora_read_only
 end
 
 --- Conflicts currently marked in bufnr, in buffer order.
