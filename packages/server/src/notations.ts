@@ -26,6 +26,8 @@ const MAX_SIZE_LEVEL = 4
 interface MarkerRun {
   /** Name of the first user-defined notation in the run. */
   readonly notation: string
+  /** The marker characters as written, in order and without repeats. */
+  readonly markers: readonly string[]
   /** Offset of the body within `inner`, past the run and the whitespace after it. */
   readonly bodyStart: number
   readonly bold: boolean
@@ -48,19 +50,25 @@ const scanMarkerRun = (
   markers: ReadonlyMap<string, string>,
 ): MarkerRun | undefined => {
   const flags = { bold: false, italic: false, strike: false, underline: false }
+  const written: string[] = []
   let notation: string | undefined
   let asterisks = 0
   let end = 0
+  const record = (char: string) => {
+    if (!written.includes(char)) written.push(char)
+  }
   for (; end < inner.length; end++) {
     const char = inner[end] as string
     const official = OFFICIAL_MARKERS[char as keyof typeof OFFICIAL_MARKERS]
     if (official !== undefined) {
       flags[official] = true
+      record(char)
       if (char === '*') asterisks++
       continue
     }
     const name = markers.get(char)
     if (name === undefined) break
+    record(char)
     notation ??= name
   }
   if (notation === undefined) return undefined
@@ -71,6 +79,7 @@ const scanMarkerRun = (
 
   return {
     notation,
+    markers: written,
     bodyStart,
     ...flags,
     sizeLevel: Math.min(Math.max(asterisks - 1, 0), MAX_SIZE_LEVEL),
@@ -86,6 +95,7 @@ const buildRule =
     return Option.some({
       type: 'decoration',
       value: body,
+      markers: run.markers,
       bold: run.bold,
       italic: run.italic,
       strike: run.strike,
@@ -126,20 +136,16 @@ export const notationSpecs = (): readonly NotationSpec[] => currentSpecs
 export const notationName = (marker: string): string | undefined => markerToName.get(marker)
 
 /**
- * Which user-defined notation (if any) opened a given decoration node — undefined for
- * the official ones (`[* x]`, `[-_ x]`, `[[x]]`).
+ * Which user-defined notation (if any) opened a given decoration node — undefined for the
+ * official ones (`[* x]`, `[-_ x]`, `[[x]]`), whose markers are never configurable.
  *
- * @remarks
- * The AST keeps only the resulting style flags, so the marker run is rescanned from the
- * source with the same function that matched it: whatever the parse accepted, this
- * agrees with.
+ * A run can hold several (`[|@ text]`); the first configured one names the node, matching
+ * the rule the bracket rule applied when it built it.
  */
-export const notationNameForDecoration = (
-  node: Decoration,
-  docLines: readonly string[],
-): string | undefined => {
-  const line = docLines[node.position.start.line]
-  if (line === undefined) return undefined
-  const inner = line.slice(node.position.start.column + 1, node.position.end.column - 1)
-  return scanMarkerRun(inner, markerToName)?.notation
+export const notationNameForDecoration = (node: Decoration): string | undefined => {
+  for (const marker of node.markers) {
+    const name = markerToName.get(marker)
+    if (name !== undefined) return name
+  }
+  return undefined
 }

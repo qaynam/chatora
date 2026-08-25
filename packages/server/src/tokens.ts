@@ -125,7 +125,7 @@ export const computeTokens = (text: string): RawToken[] => {
       case 'decoration': {
         // A marker run can hold both kinds (`[|* x]`) but a span carries one token type,
         // so the user-defined notation wins: it is what the user explicitly configured.
-        const type = notationNameForDecoration(node, docLines) ?? decorationTokenType(node)
+        const type = notationNameForDecoration(node) ?? decorationTokenType(node)
         if (type) tokens.push(spanToken(type, node.position))
         // Descend: a decoration can wrap a link, code span or image (`[* [nuclear]]`), and
         // that child needs its own token. encodeTokens' sort emits the child last, so its

@@ -93,7 +93,7 @@ describe('setNotations / parseOptions', () => {
       if (node?.type !== 'decoration') continue
       expect(node.bold).toBe(true)
       expect(node.value).toBe('特徴')
-      expect(notationNameForDecoration(node, [src])).toBe('highlight')
+      expect(notationNameForDecoration(node)).toBe('highlight')
     }
     setNotations([])
   })
@@ -118,7 +118,7 @@ describe('setNotations / parseOptions', () => {
     if (node?.type === 'decoration') {
       expect(node.strike).toBe(true)
       expect(node.underline).toBe(true)
-      expect(notationNameForDecoration(node, ['[-_ a]'])).toBeUndefined()
+      expect(notationNameForDecoration(node)).toBeUndefined()
     }
     setNotations([])
   })
@@ -152,11 +152,18 @@ describe('notationNameForDecoration', () => {
 
   test('resolves the marker at the node position back to its configured name', () => {
     setNotations([{ marker: '|', name: 'highlight' }])
-    expect(notationNameForDecoration(decorationNodeOf('[| hi]'), ['[| hi]'])).toBe('highlight')
+    expect(notationNameForDecoration(decorationNodeOf('[| hi]'))).toBe('highlight')
   })
 
   test('an official decoration marker never resolves to a name', () => {
     setNotations([{ marker: '|', name: 'highlight' }])
-    expect(notationNameForDecoration(decorationNodeOf('[* hi]'), ['[* hi]'])).toBeUndefined()
+    expect(notationNameForDecoration(decorationNodeOf('[* hi]'))).toBeUndefined()
+  })
+
+  test('the node carries the markers as written, in order and without repeats', () => {
+    setNotations([{ marker: '|', name: 'highlight' }])
+    expect(decorationNodeOf('[|* hi]').markers).toEqual(['|', '*'])
+    expect(decorationNodeOf('[*** hi]').markers).toEqual(['*'])
+    setNotations([])
   })
 })

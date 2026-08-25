@@ -45,7 +45,7 @@ export const computeConcealRanges = (text: string): ConcealRange[] => {
             start.line,
             start.column,
             first.position.start.column,
-            notationNameForDecoration(node, docLines),
+            notationNameForDecoration(node),
           )
           push(end.line, last.position.end.column, end.column)
         }
