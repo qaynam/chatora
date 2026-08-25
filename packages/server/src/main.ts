@@ -4,7 +4,6 @@ import {
   AccountStoreLive,
   CommandExecutorLive,
   CredentialStoreLive,
-  HttpClientLive,
 } from '@chatora/core'
 import { Effect, Layer, ManagedRuntime } from 'effect'
 import {
@@ -24,6 +23,7 @@ import { type AssetCache, AssetCacheLive, type BorderParams, fetchAsset } from '
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
 import { definitionLocation, findDefinitionTarget, findUrlTarget } from './definition'
+import { HttpClientLogged } from './httpLog'
 import { computeImageTargets } from './images'
 import { activeLogPath, log } from './log'
 import { type NotationSpec, notationSpecs, setNotations } from './notations'
@@ -60,7 +60,7 @@ const buildAppLayer = (
     Layer.provide(Layer.mergeAll(CommandExecutorLive, accountStore)),
   )
   return Layer.mergeAll(
-    HttpClientLive,
+    HttpClientLogged,
     AssetCacheLive,
     ReadStateLive,
     accountStore,
