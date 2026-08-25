@@ -253,8 +253,7 @@ end
 --- image right. pads only decorates the indent, so its own additions shift
 --- every later column by the same fixed amount.
 local function screen_col(line, byte_col, indent)
-  return vim.fn.strdisplaywidth(line:sub(1, byte_col))
-    + require('chatora.pads').extra_cells(indent, line)
+  return vim.fn.strdisplaywidth(line:sub(1, byte_col)) + require('chatora.pads').extra_cells(line)
 end
 
 --- Placement targets from a `chatora/images` reply. Skips a target whose line

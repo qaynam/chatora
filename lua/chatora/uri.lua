@@ -26,12 +26,21 @@ end
 
 --- Parse a cosense:// URI into project, title (decoded).
 --- Returns nil, nil if the string is not a valid cosense:// URI.
+--- Project and title of a `cosense://` URI, or nil for anything else.
+---
+--- A URI with no title names no page, and saying so here is what stops an empty title
+--- reaching the API as `/api/pages/v2/<project>//links1hop`. Callers test the project, and
+--- an empty string is truthy in Lua, so the guard cannot live in each of them.
 function M.parse(uri)
   local project, encoded_title = uri:match('^cosense://([^/]+)/(.*)$')
   if not project then
     return nil, nil
   end
-  return project, M.decode_title(encoded_title)
+  local title = M.decode_title(encoded_title)
+  if title == '' then
+    return nil, nil
+  end
+  return project, title
 end
 
 --- Percent-decode a browser URL's path segment. Cosense writes `_` for the space

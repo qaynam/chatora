@@ -5,6 +5,7 @@
 local M = {}
 
 local config = require('chatora.config')
+local indent = require('chatora.indent')
 
 M.ns = vim.api.nvim_create_namespace('chatora_pads')
 
@@ -24,6 +25,14 @@ end
 -- `gap` is only ever extra slack.
 local DEFAULTS = { bullet = '•', guide = false, spacing = true, gap = 0 }
 
+--- A line that carries its own `1.` marker; Cosense drops the bullet for it.
+local function numbered(line)
+  if not line then
+    return false
+  end
+  return line:sub(indent.text_at(line) + 1):match('^%d+%.') ~= nil
+end
+
 local function pad_opts()
   local opts = config.options.pads
   if type(opts) ~= 'table' then
@@ -39,17 +48,17 @@ local function pad_opts()
     type(opts.gap) == 'number' and math.max(0, math.floor(opts.gap)) or DEFAULTS.gap
 end
 
---- Display cells the inline pads add before the text of `line`, which has `indent` leading
---- whitespace chars. Anything positioned by text column (inline images) must shift right by
---- this much to stay aligned. The indent characters themselves are not counted: they are
---- real cells that the pads only draw between.
-function M.extra_cells(indent, line)
-  if config.options.pads == false or indent <= 0 then
+--- Display cells the inline pads add before `line`'s text. Anything positioned by text
+--- column (inline images) must shift right by this much to stay aligned. The indent
+--- characters themselves are not counted: they are real cells the pads only draw between.
+function M.extra_cells(line)
+  local levels = indent.level(line or '')
+  if config.options.pads == false or levels == 0 then
     return 0
   end
   local bullet, _, spacing, gap = pad_opts()
-  local width = spacing and indent - 1 or 0
-  if not (line and line:match('^[ \t]+%d+%.')) then
+  local width = spacing and levels - 1 or 0
+  if not numbered(line) then
     width = width + vim.fn.strdisplaywidth(bullet) + gap
   end
   return width
@@ -89,22 +98,22 @@ function M.render(bufnr)
     -- Line 1 is the page title. Indent-only lines DO get pads — Cosense
     -- shows the bullet on an empty list item too.
     if lnum > 1 and not in_block[lnum - 1] then
-      local ws = line:match('^([ \t]+)')
-      if ws then
-        local n = #ws
+      local offsets = indent.scan(line)
+      if #offsets > 0 then
         -- A line that numbers itself already has a marker, and Cosense drops the bullet for
         -- it rather than showing both. The indent still gets its widening, so a numbered
         -- item and a bulleted one at the same depth line up.
-        local numbered = line:match('^[ \t]+%d+%.') ~= nil
-        for i = 0, n - 1 do
-          local last = i == n - 1
+        local is_numbered = numbered(line)
+        for level, at in ipairs(offsets) do
+          local i = at
+          local last = level == #offsets
           -- One inline run per indent character, drawn before it: the widening that makes
           -- each level read as a step, and on the last level the bullet too.
           local chunks = {}
-          if i > 0 and spacing then
+          if level > 1 and spacing then
             chunks[#chunks + 1] = { ' ', 'ChatoraPadGuide' }
           end
-          if last and not numbered then
+          if last and not is_numbered then
             chunks[#chunks + 1] = { bullet, 'ChatoraPadBullet' }
             if gap > 0 then
               chunks[#chunks + 1] = { string.rep(' ', gap), 'ChatoraPadGuide' }

@@ -33,6 +33,13 @@ local ok, err = pcall(function()
   local formatted = uri.format('myproject', tricky_title)
   assert(formatted == ('cosense://myproject/' .. tricky_encoded), 'format() did not match encode_title()')
 
+  -- A URI with no title names no page; letting it through reaches the API as a path with
+  -- an empty segment.
+  do
+    local p, t = uri.parse('cosense://myproject/')
+    assert(p == nil and t == nil, 'a titleless URI must not parse as a page')
+  end
+
   local project, title = uri.parse(formatted)
   assert(project == 'myproject', 'parse() project mismatch: ' .. tostring(project))
   assert(title == tricky_title, 'parse() title mismatch: ' .. tostring(title))
@@ -516,6 +523,39 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- read-only pages: locked against editing, and the lock explains itself. 'modifiable'
+  -- alone answers every edit with E21, which never mentions whose project it is.
+  do
+    local page = require('chatora.page')
+    local buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(buf, 'cosense://other-project/' .. vim.uri_encode('ページ'))
+    vim.bo[buf].buftype = 'acwrite'
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'ページ', '本文' })
+    local prev = vim.api.nvim_get_current_buf()
+    vim.api.nvim_win_set_buf(0, buf)
+
+    page.mark_read_only(buf, 'other-project')
+    assert(vim.bo[buf].modifiable == false, 'a read-only page takes no edits')
+    assert(vim.b[buf].chatora_read_only == true, 'and says so to the rest of the plugin')
+
+    local said = nil
+    local orig = vim.notify
+    vim.notify = function(msg)
+      said = msg
+    end
+    for _, key in ipairs({ 'i', 'a', 'x', 'p' }) do
+      said = nil
+      local map = vim.fn.maparg(key, 'n', false, true)
+      assert(map.callback ~= nil, key .. ' must be answered, not left to E21')
+      map.callback()
+      assert(said ~= nil and said:find('other-project', 1, true), 'the reason names the project')
+    end
+    vim.notify = orig
+
+    vim.api.nvim_win_set_buf(0, prev)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- related panel: one window however often it is opened, and it can change edge.
   do
     local related = require('chatora.related')
@@ -595,17 +635,19 @@ local ok, err = pcall(function()
   do
     local pads = require('chatora.pads')
     local config = require('chatora.config')
-    assert(pads.extra_cells(0) == 0, 'an unindented line gains nothing')
+    assert(pads.extra_cells('本文') == 0, 'an unindented line gains nothing')
     -- Level 1 is bullet + gap; each further level adds guide + spacing.
-    assert(pads.extra_cells(1) == 1, 'indent 1: the bullet only, got ' .. pads.extra_cells(1))
+    assert(pads.extra_cells(' a') == 1, 'level 1: the bullet only, got ' .. pads.extra_cells(' a'))
     assert(
-      pads.extra_cells(2) == 2,
-      'indent 2: one level of widening + the bullet, got ' .. pads.extra_cells(2)
+      pads.extra_cells('  a') == 2,
+      'level 2: one level of widening + the bullet, got ' .. pads.extra_cells('  a')
     )
     -- A numbered item draws no bullet, so nothing shifts for it either.
-    assert(pads.extra_cells(2, '  1. foo') == 1, 'a numbered item gains only the widening')
+    assert(pads.extra_cells('  1. foo') == 1, 'a numbered item gains only the widening')
+    -- A full-width space is one level like an ASCII one, and three bytes wide.
+    assert(pads.extra_cells('　　a') == 2, 'a full-width indent counts in levels, not bytes')
     config.options.pads = false
-    assert(pads.extra_cells(3) == 0, 'no shift when pads are disabled')
+    assert(pads.extra_cells('   a') == 0, 'no shift when pads are disabled')
     config.options.pads = true
   end
 

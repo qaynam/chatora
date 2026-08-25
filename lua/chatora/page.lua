@@ -159,6 +159,40 @@ local function finalize_buffer(bufnr, project, title)
   require('chatora.sync').watch(bufnr)
 end
 
+-- Keys that begin an edit. On a buffer with 'modifiable' off Neovim answers all of them
+-- with E21, which says the option is set but not why it was — and the reason (this is
+-- someone else's project) is the only part the reader cannot work out.
+local EDIT_KEYS = {
+  'i', 'I', 'a', 'A', 'o', 'O',
+  'c', 'C', 's', 'S', 'x', 'X', 'd', 'D', 'r', 'R', 'p', 'P', 'J', '~',
+  '<BS>', '<Del>',
+}
+
+--- Lock bufnr against editing and answer attempts to type into it by name.
+---
+--- 'modifiable' alone answers every edit with E21, which reports that the option is set
+--- without saying why — and why (this is someone else's project) is the only part the
+--- reader cannot work out for themselves.
+function M.mark_read_only(bufnr, project)
+  vim.b[bufnr].chatora_read_only = true
+  vim.bo[bufnr].modifiable = false
+  vim.bo[bufnr].readonly = true
+  local function say()
+    vim.notify(
+      ('[chatora] %s には書き込み権限がありません（読み取り専用）'):format(project),
+      vim.log.levels.WARN
+    )
+  end
+  for _, key in ipairs(EDIT_KEYS) do
+    vim.keymap.set({ 'n', 'x' }, key, say, {
+      buffer = bufnr,
+      nowait = true,
+      silent = true,
+      desc = 'chatora: 読み取り専用の理由を知らせる',
+    })
+  end
+end
+
 local function handle_read(ev)
   local project, title = uri.parse(ev.match)
   if not project or not title then
@@ -194,10 +228,8 @@ local function handle_read(ev)
     vim.b[bufnr].chatora_meta = result.meta
     -- Following a [/other-project/page] link lands on a project this session may only read.
     -- The buffer says so rather than letting the edit fail at save time, hours later.
-    vim.b[bufnr].chatora_read_only = result.readOnly == true
     if result.readOnly then
-      vim.bo[bufnr].modifiable = false
-      vim.bo[bufnr].readonly = true
+      M.mark_read_only(bufnr, project)
     end
     finalize_buffer(bufnr, project, title)
   end)
