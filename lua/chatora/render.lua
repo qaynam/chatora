@@ -14,6 +14,11 @@ M.ns = vim.api.nvim_create_namespace('chatora_render')
 local uv = vim.uv or vim.loop
 local timers = {}
 
+-- Long enough to coalesce a burst of typing, short enough that markup does not sit
+-- unconcealed while the reader looks at it. One decorations round trip costs single-digit
+-- milliseconds on a few hundred lines, so this is nearly all of the delay a reader sees.
+local REFRESH_DEBOUNCE_MS = 60
+
 local function set_win_opts(bufnr)
   if config.options.conceal ~= false then
     for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
@@ -76,7 +81,7 @@ local function debounced_refresh(bufnr)
   end
   timer:stop()
   timer:start(
-    200,
+    REFRESH_DEBOUNCE_MS,
     0,
     vim.schedule_wrap(function()
       if vim.api.nvim_buf_is_valid(bufnr) then

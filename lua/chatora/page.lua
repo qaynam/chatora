@@ -13,6 +13,9 @@ local status = require('chatora.status')
 local uv = vim.uv or vim.loop
 local autosave_timers = {}
 
+-- Forward declaration: autosave fires the save, which is defined with the write path.
+local send_save
+
 --- Debounced autosave: (re)arm the buffer's timer; fires config.autosave
 --- seconds (minimum 1s) after the last edit, saving only if still modified.
 local function schedule_autosave(bufnr)
@@ -31,9 +34,10 @@ local function schedule_autosave(bufnr)
     0,
     vim.schedule_wrap(function()
       if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].modified then
-        vim.api.nvim_buf_call(bufnr, function()
-          vim.cmd('silent write')
-        end)
+        -- Not `:write`: that is BufWriteCmd, which blocks the editor until the save
+        -- round-trips because `:wq` needs it to. Nothing is waiting on an autosave, so it
+        -- goes straight to the request and the cursor keeps moving while it is in flight.
+        send_save(bufnr)
       end
     end)
   )
@@ -200,34 +204,17 @@ end
 
 local SAVE_TIMEOUT_MS = 15000
 
-local function handle_write(ev)
-  local bufnr = ev.buf
-  local uri_str = vim.api.nvim_buf_get_name(bufnr)
-
-  status.set(bufnr, 'saving', '保存中…')
-
-  -- The save is awaited synchronously: :wq / :x check 'modified' the moment
-  -- BufWriteCmd returns, so an async save would leave the buffer "unsaved"
-  -- and force a second :wq. vim.wait pumps the main loop, which is what lets
-  -- the LSP reply (delivered via vim.schedule) land while we block.
-  local done, save_err, save_result = false, nil, nil
-  lsp.request('chatora/savePage', { uri = uri_str }, function(err, result)
-    save_err, save_result = err, result
-    done = true
-  end)
-  vim.wait(SAVE_TIMEOUT_MS, function()
-    return done
-  end, 10)
-
+--- Handle one savePage reply. `tick` is the buffer's changedtick when the request went
+--- out: an autosave runs without blocking, so by the time it lands the user may have typed
+--- on. Anything that would speak for the whole buffer — clearing 'modified', replacing the
+--- text the server normalized — is skipped in that case. The base is left pointing at what
+--- was actually saved, so the next save diffs against it and picks the rest up.
+local function apply_save(bufnr, uri_str, save_err, save_result, tick)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-
-  if not done then
-    status.set(bufnr, 'error')
-    vim.notify('[chatora] 保存がタイムアウトしました', vim.log.levels.ERROR)
-    return
-  end
+  local current = vim.b[bufnr].changedtick
+  local unchanged = tick == nil or current == tick
 
   if save_err then
     local msg = type(save_err) == 'table' and (save_err.message or vim.inspect(save_err))
@@ -265,7 +252,7 @@ local function handle_write(ev)
     return
   end
 
-  if result.text then
+  if result.text and unchanged then
     local winid = vim.fn.bufwinid(bufnr)
     local cursor = nil
     if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
@@ -278,7 +265,9 @@ local function handle_write(ev)
     end
   end
 
-  vim.bo[bufnr].modified = false
+  if unchanged then
+    vim.bo[bufnr].modified = false
+  end
   -- Success feedback is one cmdline echo + the ✓ icon, not a toast; failures
   -- above still use vim.notify, where demanding attention is the point.
   status.set(bufnr, 'clean', '保存しました')
@@ -303,6 +292,36 @@ local function handle_write(ev)
         pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
       end
     end
+  end
+end
+
+--- Send the buffer to Cosense. `on_done()` runs once the reply has been applied.
+function send_save(bufnr, on_done)
+  local uri_str = vim.api.nvim_buf_get_name(bufnr)
+  local tick = vim.b[bufnr].changedtick
+  status.set(bufnr, 'saving', '保存中…')
+  lsp.request('chatora/savePage', { uri = uri_str }, function(err, result)
+    apply_save(bufnr, uri_str, err, result, tick)
+    if on_done then
+      on_done()
+    end
+  end)
+end
+
+--- BufWriteCmd. The reply is awaited synchronously because `:wq` and `:x` check 'modified'
+--- the moment this returns — an async write would read as unsaved and demand a second
+--- `:wq`. vim.wait pumps the main loop, which is what lets the reply land while we block.
+--- Autosave does not come through here for exactly that reason: see schedule_autosave.
+local function handle_write(ev)
+  local done = false
+  send_save(ev.buf, function()
+    done = true
+  end)
+  if not vim.wait(SAVE_TIMEOUT_MS, function()
+    return done
+  end, 10) and vim.api.nvim_buf_is_valid(ev.buf) then
+    status.set(ev.buf, 'error')
+    vim.notify('[chatora] 保存がタイムアウトしました', vim.log.levels.ERROR)
   end
 end
 

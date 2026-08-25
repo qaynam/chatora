@@ -13,7 +13,7 @@ local config = require('chatora.config')
 
 M.ns = vim.api.nvim_create_namespace('chatora_codeblock')
 
-local DEBOUNCE_MS = 150
+local DEBOUNCE_MS = 60
 -- Semantic tokens render at priority 125 (nvim default); stay above them.
 local PRIORITY = 130
 

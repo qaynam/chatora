@@ -13,7 +13,7 @@ local config = require('chatora.config')
 
 M.ns = vim.api.nvim_create_namespace('chatora_table')
 
-local DEBOUNCE_MS = 150
+local DEBOUNCE_MS = 60
 local uv = vim.uv or vim.loop
 local timers_by_bufnr = {}
 

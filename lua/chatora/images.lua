@@ -12,7 +12,7 @@ local lsp = require('chatora.lsp')
 
 M.ns = vim.api.nvim_create_namespace('chatora_images')
 
-local DEBOUNCE_MS = 300
+local DEBOUNCE_MS = 200
 local uv = vim.uv or vim.loop
 local timers_by_bufnr = {}
 local placements_by_bufnr = {} -- values are lists of { close = fn } wrappers

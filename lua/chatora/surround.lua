@@ -147,6 +147,11 @@ function M.wrap(marker)
 
   local edit_from, edit_to = start and start or from, start and stop or to
   vim.api.nvim_buf_set_text(0, row, edit_from, row, edit_to, { replacement })
+  -- One deliberate action, not a burst of typing: settle the markup now rather than making
+  -- the reader watch the brackets they just added sit there for a debounce interval.
+  local bufnr = vim.api.nvim_get_current_buf()
+  require('chatora.render').refresh(bufnr)
+  require('chatora.pads').render(bufnr)
   local offset = replacement == body and 0 or (replacement:find(body, 1, true) or 1) - 1
   local body_at = edit_from + offset
   if marker == '[' then
