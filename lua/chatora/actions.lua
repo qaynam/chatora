@@ -47,32 +47,29 @@ function M.open_in_browser()
   vim.ui.open(uri.web_url(config.options.origin, project, title))
 end
 
---- Refetch the current page — the working copy's `git pull`, and the only way to notice
---- someone else has edited it, since chatora never re-reads an open page on its own.
---- Asks before discarding unsaved edits: the buffer is the only place they exist.
+--- Merge the server's copy into the current page — the working copy's `git pull`. Nothing
+--- to confirm: unsaved edits are merged, not overwritten, and a line both sides changed
+--- keeps the local text and is marked as a conflict.
 function M.pull()
   local project, _, bufnr = current_page()
   if not project then
     return
   end
-  local page = require('chatora.page')
-  local function run()
-    page.pull(bufnr, function(changed)
-      vim.notify('[chatora] ' .. (changed and '最新を取得しました' or 'すでに最新です'))
-    end)
-  end
-
-  if not vim.bo[bufnr].modified then
-    run()
-    return
-  end
-  vim.ui.select({ '破棄して取得', 'やめる' }, {
-    prompt = '未保存の変更があります。取得すると失われます',
-  }, function(choice)
-    if choice == '破棄して取得' then
-      run()
+  require('chatora.sync').run(bufnr, function(changed, conflicts)
+    if #conflicts > 0 then
+      vim.notify(
+        ('[chatora] 競合 %d 件（ローカルの内容は残しています）。]c で移動できます'):format(#conflicts),
+        vim.log.levels.WARN
+      )
+    else
+      vim.notify('[chatora] ' .. (changed and 'リモートの変更を取り込みました' or 'すでに最新です'))
     end
   end)
+end
+
+--- Jump to the next line the last sync found a conflict on.
+function M.next_conflict()
+  require('chatora.sync').next_conflict()
 end
 
 function M.paste_image()

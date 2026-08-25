@@ -117,6 +117,39 @@ describe('uploadImage destination', () => {
     const token = calls.find((c) => c.url.includes('oauth-upload/token'))
     expect(token?.url).toContain('gyazoTeamsName=acme')
   })
+
+  // A PAT is rejected by Cosense's Gyazo token endpoint whatever the project asked for,
+  // which leaves the project's own storage as the only reachable destination.
+  test('a 401 from the Gyazo token endpoint falls back to the project storage', async () => {
+    const { result, calls } = run([
+      PROJECT('gyazo'),
+      ['/api/login/gyazo/oauth-upload/token', () => new Response('', { status: 401 })],
+      ...GCS_ROUTES,
+    ])
+    expect(await result).toMatchObject({ ok: true, url: 'https://scrapbox.io/files/file1.png' })
+    expect(calls.some((c) => c.url.includes('/api/gcs/proj1/verify'))).toBe(true)
+  })
+
+  test('a failing project storage falls back to Gyazo', async () => {
+    const { result } = run([
+      PROJECT('gcs'),
+      ['/upload-request', () => new Response('', { status: 403 })],
+      ...GYAZO_ROUTES,
+    ])
+    expect(await result).toMatchObject({ ok: true, url: 'https://gyazo.com/abc' })
+  })
+
+  test('both destinations failing reports the one the project asked for', async () => {
+    const { result } = run([
+      PROJECT('gyazo'),
+      ['/api/login/gyazo/oauth-upload/token', () => new Response('', { status: 401 })],
+      ['/upload-request', () => new Response('', { status: 403 })],
+    ])
+    expect(await result).toMatchObject({
+      ok: false,
+      message: 'Gyazo のアップロードトークンを取得できませんでした',
+    })
+  })
 })
 
 describe('uploadImage GCS flow', () => {

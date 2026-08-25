@@ -171,6 +171,28 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         pendingPreview = null
         return jsonResponse({ ok: true }, 200)
       }
+      // Stands in for another person editing the page while nvim has it open — the one
+      // thing the scenario cannot cause from inside the editor. Expressed as operations
+      // rather than a line list so the fixture's own line ids survive: the ids are what
+      // the merge matches on, and a caller that replaced them would be testing nothing.
+      if (path === '/__test/remote-edit' && method === 'POST') {
+        const edit = body as {
+          title: string
+          update?: { index: number; text: string }[]
+          append?: string[]
+        }
+        const page = pages.get(edit.title)
+        if (!page) return jsonResponse({ ok: false, error: 'no such page' }, 404)
+        for (const { index, text } of edit.update ?? []) {
+          const line = page.lines[index]
+          if (line) line.text = text
+        }
+        for (const text of edit.append ?? []) {
+          page.lines.push({ id: `remote${page.lines.length}`, text })
+        }
+        page.commitId = `${page.commitId}+remote`
+        return jsonResponse({ ok: true, lines: page.lines }, 200)
+      }
 
       if (!path.startsWith('/api/')) {
         return respond({ error: 'NotFound', path }, 404)

@@ -134,6 +134,11 @@ local function finalize_buffer(bufnr, project, title)
   vim.keymap.set('n', 'gs', function()
     require('chatora').search()
   end, { buffer = bufnr, nowait = true, silent = true, desc = 'chatora: ページ検索' })
+  -- ]c is vim's own "next diff hunk"; a merge conflict is the same kind of thing to step
+  -- through, and diff mode is never on in a page buffer.
+  vim.keymap.set('n', ']c', function()
+    require('chatora.sync').next_conflict()
+  end, { buffer = bufnr, nowait = true, silent = true, desc = 'chatora: 次の競合へ' })
 
   codeblock.attach(bufnr)
   images.attach(bufnr, project)
@@ -143,6 +148,9 @@ local function finalize_buffer(bufnr, project, title)
   require('chatora.spacing').attach(bufnr)
   require('chatora.completion').attach(bufnr)
   require('chatora.keymaps').attach(bufnr)
+  -- BufEnter fired while this page's content was still being fetched, when sync refuses to
+  -- touch the buffer, so the poll has to be started from here instead.
+  require('chatora.sync').watch(bufnr)
 end
 
 local function handle_read(ev)
@@ -188,35 +196,6 @@ function M.meta(bufnr)
   return vim.b[bufnr or vim.api.nvim_get_current_buf()].chatora_meta
 end
 
---- Refetch bufnr's page and replace the buffer with it, re-anchoring the next save: the
---- server holds the line ids a save diffs against, and only openPage re-registers them.
----
---- `cb(changed)` runs once the buffer is up to date, with `false` when the server's copy
---- was already what the buffer held. Overwrites unsaved edits: callers ask first.
-function M.pull(bufnr, cb)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  local project, title = uri.parse(vim.api.nvim_buf_get_name(bufnr))
-  if not project then
-    return
-  end
-  local before = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), '\n')
-  status.set(bufnr, 'loading')
-  lsp.request_ok('chatora/openPage', { project = project, title = title }, function(result)
-    if not vim.api.nvim_buf_is_valid(bufnr) then
-      return
-    end
-    local changed = (result.text or '') ~= before
-    if changed then
-      set_content(bufnr, result.text)
-    end
-    vim.b[bufnr].chatora_meta = result.meta
-    finalize_buffer(bufnr, project, title)
-    if cb then
-      cb(changed)
-    end
-  end)
-end
-
 local SAVE_TIMEOUT_MS = 15000
 
 local function handle_write(ev)
@@ -260,9 +239,22 @@ local function handle_write(ev)
   if not result or result.ok == false then
     local code = result and result.code
     status.set(bufnr, 'error')
-    if code == 'notFastForward' then
+    if code == 'conflict' then
+      -- The server rebuilt the save against its current copy and found lines both sides
+      -- had touched. The merge is applied so the remote changes are visible, the local
+      -- text is what survives on the conflicted lines, and the buffer stays modified —
+      -- nothing was written, and resolving is the user's next edit.
+      local sync = require('chatora.sync')
+      sync.apply_conflicts(bufnr, result.text, result.conflicts or {})
       vim.notify(
-        '[chatora] リモートが更新されています。:e で再読込してから保存してください',
+        ('[chatora] リモートと同じ行を編集しています（競合 %d 件）。ローカルの内容は残してあります。]c で移動して直してから再保存してください'):format(
+          #(result.conflicts or {})
+        ),
+        vim.log.levels.WARN
+      )
+    elseif code == 'notFastForward' then
+      vim.notify(
+        '[chatora] リモートが更新されています。<leader>cf で取り込んでから保存してください',
         vim.log.levels.WARN
       )
     else

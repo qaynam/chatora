@@ -5,15 +5,18 @@ import type {
   HttpClient,
   KeychainError,
   Me,
+  MergeConflict,
   PageDetail,
+  PageDetailLine,
   PageFilter,
   PageSummary,
   ProjectSummary,
   RelatedPage,
   SearchResultPage,
+  SubmitResponse,
 } from '@chatora/core'
-import { AccountStore, computeChanges, createNewLineId } from '@chatora/core'
-import { Effect, Option } from 'effect'
+import { AccountStore, computeChanges, createNewLineId, mergeThreeWay } from '@chatora/core'
+import { Effect, Either, Option } from 'effect'
 import { type ConcealRange, computeConcealRanges } from './decorations'
 import { textToLines } from './lines'
 import { computeQuoteRanges, type QuoteRange } from './quote'
@@ -442,6 +445,78 @@ export const openPage = (params: {
 // `chatora/newPage` is a plain alias — the Lua side may call either.
 export const newPage = openPage
 
+// ---------------------------------------------------------------------------
+// syncPage
+// ---------------------------------------------------------------------------
+
+export interface SyncPageResult {
+  readonly ok: true
+  /** False when the buffer already holds the merged text; the client then does nothing. */
+  readonly changed: boolean
+  readonly text: string
+  readonly conflicts: readonly MergeConflict[]
+  readonly meta?: PageMeta
+}
+
+/**
+ * Bring a buffer up to date with the server without discarding what is in it.
+ *
+ * Unlike `openPage`, which is a load and therefore an overwrite, this merges: the buffer's
+ * unsaved edits are replayed onto the server's current lines, and lines the two disagree
+ * about are returned as conflicts with the local text left in place. `docText` is the
+ * synced document, looked up at the LSP edge the same way `savePage` does it.
+ *
+ * The refetched lines become the new base, so the next save diffs against what the server
+ * actually holds; the merged text is exactly the edit that turns that into the buffer.
+ */
+export const syncPage = (
+  uri: string,
+  docText: string | undefined,
+): Effect.Effect<SyncPageResult | ErrEnvelope, never, SessionState | HttpClient> =>
+  handle(
+    Effect.gen(function* () {
+      if (docText === undefined) return err('error', 'document not synced')
+      const session = yield* SessionState
+      const baseOpt = yield* session.getPage(uri)
+      if (Option.isNone(baseOpt)) return err('error', 'page state not found; reopen the page')
+      const base = baseOpt.value
+
+      const apiOpt = yield* session.getApi()
+      if (Option.isNone(apiOpt)) return noCredential()
+      const pageOpt = yield* apiOpt.value.getPage(base.project, base.title)
+      // Compared line-wise, not as raw text: the document nvim syncs carries a trailing
+      // newline that a joined line list never has, so comparing the two strings directly
+      // would report every poll as a change and rewrite the buffer under the cursor.
+      const ours = textToLines(docText)
+      const before = ours.join('\n')
+      if (Option.isNone(pageOpt)) {
+        // The page is gone (or never existed). There is nothing to merge onto and nothing
+        // to take, so the buffer stands as the only copy of its own text.
+        return { ok: true as const, changed: false, text: before, conflicts: [] }
+      }
+      const page = pageOpt.value
+
+      const { merged, conflicts } = mergeThreeWay(base.baseLines, ours, page.lines)
+      yield* session.setPage(uri, {
+        project: base.project,
+        title: base.title,
+        pageId: page.id,
+        commitId: page.commitId,
+        baseLines: page.lines,
+        exists: true,
+      })
+
+      const text = merged.join('\n')
+      return {
+        ok: true as const,
+        changed: text !== before,
+        text,
+        conflicts,
+        meta: toPageMeta(page),
+      }
+    }),
+  )
+
 export interface PreviewPageResult {
   readonly ok: true
   readonly text: string
@@ -499,15 +574,41 @@ export interface SavePageResult {
   readonly titleChanged?: { readonly from: string; readonly to: string }
 }
 
+/** A save the client must resolve by hand; `text` is the merge, with the local side kept. */
+export interface SaveConflictResult {
+  readonly ok: false
+  readonly code: 'conflict'
+  readonly message: string
+  readonly text: string
+  readonly conflicts: readonly MergeConflict[]
+}
+
+const isNotFastForward = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  (error as { _tag?: string })._tag === 'CosenseApiError' &&
+  (error as { code?: string }).code === 'NotFastForward'
+
 /**
  * `docText` is the synced document text (or `undefined` when the uri has no open document) —
  * looked up from `TextDocuments` at the LSP edge in main.ts, since that lookup is plain
  * connection state, not something this Effect program needs to depend on.
+ *
+ * Cosense has no client-supplied version token: `page-edit-for-ai/preview` takes only
+ * `{pageId, changes}`, and the server compares against the state the preview captured. So a
+ * page that moved between this session's last read and the preview is caught at submit, as
+ * `NotFastForward`, and answered here the way the endpoint's own documentation prescribes —
+ * refetch, rebuild the ops, preview again. The rebuild is a three-way merge rather than a
+ * blind rebase, so a save only fails when the two sides really did touch the same line.
  */
 export const savePage = (
   uri: string,
   docText: string | undefined,
-): Effect.Effect<SavePageResult | ErrEnvelope, never, SessionState | HttpClient> =>
+): Effect.Effect<
+  SavePageResult | SaveConflictResult | ErrEnvelope,
+  never,
+  SessionState | HttpClient
+> =>
   handle(
     Effect.gen(function* () {
       if (docText === undefined) return err('error', 'document not synced')
@@ -521,19 +622,65 @@ export const savePage = (
       if (Option.isNone(apiOpt)) return noCredential()
       const api = apiOpt.value
 
-      const nextLines = textToLines(docText)
       const userId = yield* session.verifiedUserId()
-      const changes = computeChanges(base.baseLines, nextLines, () => createNewLineId(userId))
+      const push = (baseLines: readonly PageDetailLine[], lines: readonly string[]) =>
+        Effect.gen(function* () {
+          const changes = computeChanges(baseLines, lines, () => createNewLineId(userId))
+          if (changes.length === 0) return Option.none<SubmitResponse>()
+          const preview = yield* api.previewEdit(
+            base.project,
+            base.pageId !== undefined ? { pageId: base.pageId, changes } : { changes },
+          )
+          return Option.some(yield* api.submitEdit(base.project, preview.previewId))
+        })
 
-      if (changes.length === 0) {
-        return { ok: true as const, commitId: base.commitId ?? '', noop: true as const }
+      let nextLines: readonly string[] = textToLines(docText)
+      let attempt = yield* Effect.either(push(base.baseLines, nextLines))
+      // A merged save wrote something the buffer does not hold, so its text has to travel
+      // back whatever the refetch says; without it the buffer would keep the pre-merge
+      // lines and the next save would diff them against the merged base and undo the merge.
+      let merged = false
+
+      if (Either.isLeft(attempt)) {
+        if (!isNotFastForward(attempt.left)) return yield* Effect.fail(attempt.left)
+        // The page moved under us. Merge onto what it holds now; only a line both sides
+        // touched can still stop the save, and the local text is what survives it.
+        const latestOpt = yield* api.getPage(base.project, base.title)
+        if (Option.isNone(latestOpt)) return err('error', 'page no longer exists')
+        const latest = latestOpt.value
+        const { merged: mergedLines, conflicts } = mergeThreeWay(
+          base.baseLines,
+          nextLines,
+          latest.lines,
+        )
+        yield* session.setPage(uri, {
+          project: base.project,
+          title: base.title,
+          pageId: latest.id,
+          commitId: latest.commitId,
+          baseLines: latest.lines,
+          exists: true,
+        })
+        if (conflicts.length > 0) {
+          return {
+            ok: false as const,
+            code: 'conflict' as const,
+            message: 'リモートと同じ行を編集しています',
+            text: mergedLines.join('\n'),
+            conflicts,
+          }
+        }
+        nextLines = mergedLines
+        merged = true
+        attempt = yield* Effect.either(push(latest.lines, mergedLines))
+        if (Either.isLeft(attempt)) return yield* Effect.fail(attempt.left)
       }
 
-      const preview = yield* api.previewEdit(
-        base.project,
-        base.pageId !== undefined ? { pageId: base.pageId, changes } : { changes },
-      )
-      const submit = yield* api.submitEdit(base.project, preview.previewId)
+      const submitted = attempt.right
+      if (Option.isNone(submitted)) {
+        return { ok: true as const, commitId: base.commitId ?? '', noop: true as const }
+      }
+      const submit = submitted.value
 
       const finalTitle = submit.page?.title ?? submit.titleChanged?.to ?? base.title
       // refetched should be non-null right after a successful submit; falling back to what
@@ -544,7 +691,7 @@ export const savePage = (
         onNone: () => undefined,
         onSome: (refetched) => {
           const text = refetched.lines.map((l) => l.text).join('\n')
-          return text !== submittedText ? text : undefined
+          return merged || text !== submittedText ? text : undefined
         },
       })
 

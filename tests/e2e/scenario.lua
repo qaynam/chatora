@@ -600,6 +600,106 @@ local ok, err = pcall(function()
   log('picker OK (recent list, live query, accept opens page)')
 
   -- ===================================================================================
+  -- STEP: sync
+  -- ===================================================================================
+  step('sync')
+
+  -- Someone else editing the page is the one thing the scenario cannot cause from inside
+  -- the editor, so the fake server is told to do it directly.
+  local function remote_edit(edit)
+    local result = vim.system({
+      'curl',
+      '-fsS',
+      '-X',
+      'POST',
+      '-H',
+      'content-type: application/json',
+      '-d',
+      vim.json.encode(edit),
+      vim.env.CHATORA_TEST_ORIGIN .. '/__test/remote-edit',
+    }, { text = true }):wait()
+    if result.code ~= 0 then
+      fail('remote-edit failed: ' .. tostring(result.stderr))
+    end
+  end
+
+  local sync = require('chatora.sync')
+  require('chatora.page').open('testproj', 'ホーム')
+  local sync_buf = vim.api.nvim_get_current_buf()
+  if not wait_for(10000, function()
+    return (vim.api.nvim_buf_get_lines(sync_buf, 0, 1, false)[1] or '') == 'ホーム'
+      and vim.b[sync_buf].chatora_attached == true
+  end) then
+    fail('sync: ホーム did not load (buf ' .. sync_buf .. ' = ' .. vim.api.nvim_buf_get_name(sync_buf) .. ')')
+  end
+
+  -- A local edit that is *not* saved, on a line the remote will leave alone. The LSP has
+  -- to have seen it before a sync can merge against it.
+  vim.api.nvim_buf_set_lines(sync_buf, 2, 3, false, { 'ローカルだけの編集' })
+  vim.wait(300)
+
+  -- One remote insertion, on a page whose other lines nobody touched.
+  remote_edit({ title = 'ホーム', append = { 'リモートが足した行' } })
+
+  local synced, sync_conflicts = false, nil
+  sync.run(sync_buf, function(_, conflicts)
+    sync_conflicts = conflicts
+    synced = true
+  end)
+  if not wait_for(10000, function()
+    return synced
+  end) then
+    fail('sync: syncPage did not come back')
+  end
+
+  local after = vim.api.nvim_buf_get_lines(sync_buf, 0, -1, false)
+  local text = table.concat(after, '\n')
+  if not text:find('ローカルだけの編集', 1, true) then
+    fail('sync: the unsaved local edit was lost: ' .. vim.inspect(after))
+  end
+  if not text:find('リモートが足した行', 1, true) then
+    fail('sync: the remote line did not arrive: ' .. vim.inspect(after))
+  end
+  if #sync_conflicts ~= 0 then
+    fail('sync: edits to different lines must not conflict: ' .. vim.inspect(sync_conflicts))
+  end
+  log('sync merged the remote line and kept the unsaved local edit')
+
+  -- Now the same line on both sides: the local text must stay, and be marked.
+  remote_edit({ title = 'ホーム', update = { { index = 2, text = 'リモートが同じ行を書き換えた' } } })
+
+  synced, sync_conflicts = false, nil
+  sync.run(sync_buf, function(_, conflicts)
+    sync_conflicts = conflicts
+    synced = true
+  end)
+  if not wait_for(10000, function()
+    return synced
+  end) then
+    fail('sync: the conflicting syncPage did not come back')
+  end
+
+  if #sync_conflicts ~= 1 then
+    fail('sync: expected exactly one conflict, got ' .. vim.inspect(sync_conflicts))
+  end
+  local conflicted = vim.api.nvim_buf_get_lines(sync_buf, sync_conflicts[1].line, sync_conflicts[1].line + 1, false)[1]
+  if conflicted ~= 'ローカルだけの編集' then
+    fail('sync: the conflicted line must keep the local text, got ' .. tostring(conflicted))
+  end
+  local conflict_marks = vim.api.nvim_buf_get_extmarks(sync_buf, sync.ns, 0, -1, { details = true })
+  if #conflict_marks ~= 1 then
+    fail('sync: the conflict was not marked: ' .. vim.inspect(conflict_marks))
+  end
+  -- nvim_buf_get_extmarks with details = { id, row, col, details }.
+  local mark_details = conflict_marks[1][4]
+  if not vim.inspect(mark_details.virt_text):find('リモートが同じ行を書き換えた', 1, true) then
+    fail('sync: the mark must show the remote text: ' .. vim.inspect(mark_details))
+  end
+  log('sync kept the local text on a two-sided edit and marked it')
+
+  vim.bo[sync_buf].modified = false
+
+  -- ===================================================================================
   -- STEP: final-checks
   -- ===================================================================================
   step('final-checks')

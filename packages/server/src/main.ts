@@ -248,6 +248,9 @@ connection.onRequest('chatora/logPath', async () => ({
 connection.onRequest('chatora/savePage', (params: { uri: string }) =>
   runtime.runPromise(handlers.savePage(params.uri, documents.get(params.uri)?.getText())),
 )
+connection.onRequest('chatora/syncPage', (params: { uri: string }) =>
+  runtime.runPromise(handlers.syncPage(params.uri, documents.get(params.uri)?.getText())),
+)
 connection.onRequest('chatora/relatedPages', (params: { project: string; title: string }) =>
   runtime.runPromise(handlers.relatedPages(params)),
 )

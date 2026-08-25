@@ -53,26 +53,47 @@ const buildOps = (base: readonly BaseLine[], next: readonly string[]): Op[] => {
   return ops
 }
 
+/** A base line the edit left alone, text and id both. */
+export interface KeptSegment {
+  readonly kind: 'keep'
+  readonly line: BaseLine
+}
+
 /**
- * Line-level diff producing page-edit-for-ai RawChange ops (see docs/ARCHITECTURE.md and
- * cosense-cli src/commands/previewEdit.ts). A run of consecutive deletes/inserts between two
- * kept lines is paired up positionally into `_update`s (same line id, new text) first, with
- * any length difference becoming trailing `_delete`s or `_insert`s anchored on the next kept
- * line's id ('_end' when the run trails the whole document). Deterministic: ties in the LCS
+ * One stretch of change between two kept lines. The deletes and inserts are paired up
+ * positionally into `updates` first — same line id, new text — and whatever is left over
+ * is a real deletion or a real insertion.
+ */
+export interface ChangedSegment {
+  readonly kind: 'change'
+  readonly updates: readonly { readonly line: BaseLine; readonly text: string }[]
+  readonly deletes: readonly BaseLine[]
+  readonly inserts: readonly string[]
+  /** Base line id the inserts go *before*, or `'_end'` when the run trails the document. */
+  readonly anchor: string
+}
+
+export type EditSegment = KeptSegment | ChangedSegment
+
+/**
+ * The edit turning `base` into `next`, as an ordered walk of the base document.
+ *
+ * This is the one place the local diff is interpreted, so a save and a merge always agree
+ * on which base line a given piece of new text belongs to. Deterministic: ties in the LCS
  * backtrack always prefer consuming the base side (delete) first.
  */
-export const computeChanges = (
+export const buildSegments = (
   base: readonly BaseLine[],
   next: readonly string[],
-  newLineId: () => string,
-): readonly RawChange[] => {
+): readonly EditSegment[] => {
   const ops = buildOps(base, next)
-  const changes: RawChange[] = []
+  const segments: EditSegment[] = []
   let idx = 0
 
   while (idx < ops.length) {
     const op = ops[idx] as Op
     if (op.kind === 'match') {
+      segments.push({ kind: 'keep', line: base[op.baseIndex] as BaseLine })
       idx++
       continue
     }
@@ -102,16 +123,36 @@ export const computeChanges = (
     }
 
     const pairCount = Math.min(dels.length, inserts.length)
-    for (let k = 0; k < pairCount; k++) {
-      changes.push({ _update: (dels[k] as BaseLine).id, lines: { text: inserts[k] as string } })
-    }
-    for (let k = pairCount; k < dels.length; k++) {
-      changes.push({ _delete: (dels[k] as BaseLine).id })
-    }
-    for (let k = pairCount; k < inserts.length; k++) {
-      changes.push({ _insert: anchor, lines: { id: newLineId(), text: inserts[k] as string } })
-    }
+    segments.push({
+      kind: 'change',
+      updates: dels.slice(0, pairCount).map((line, k) => ({ line, text: inserts[k] as string })),
+      deletes: dels.slice(pairCount),
+      inserts: inserts.slice(pairCount),
+      anchor,
+    })
   }
 
+  return segments
+}
+
+/**
+ * Line-level diff producing page-edit-for-ai RawChange ops (see docs/ARCHITECTURE.md and
+ * cosense-cli src/commands/previewEdit.ts).
+ */
+export const computeChanges = (
+  base: readonly BaseLine[],
+  next: readonly string[],
+  newLineId: () => string,
+): readonly RawChange[] => {
+  const changes: RawChange[] = []
+  for (const segment of buildSegments(base, next)) {
+    if (segment.kind === 'keep') continue
+    for (const { line, text } of segment.updates)
+      changes.push({ _update: line.id, lines: { text } })
+    for (const line of segment.deletes) changes.push({ _delete: line.id })
+    for (const text of segment.inserts) {
+      changes.push({ _insert: segment.anchor, lines: { id: newLineId(), text } })
+    }
+  }
   return changes
 }

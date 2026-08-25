@@ -192,9 +192,14 @@ const uploadToGcs = (args: {
 /**
  * Upload an image and return the notation to write into the page.
  *
- * Where it goes is the *project's* choice, not chatora's: `uploadImageTo` sends a paid
- * project's images to its own file storage and everything else to Gyazo. It is read per
- * upload, so switching projects switches destination with no cached setting to go stale.
+ * Where it goes is first the *project's* choice: `uploadImageTo` sends a project's images
+ * either to its own file storage or to Gyazo, and it is read per upload so switching
+ * projects switches destination with no cached setting to go stale.
+ *
+ * Whichever it names, the other is tried when the first fails. Cosense's Gyazo token
+ * endpoint lives under `/api/login/` and answers to a browser session, not to a token, so
+ * a PAT gets 401 there however the project is configured — leaving the project's own
+ * storage as the only destination chatora can actually reach.
  */
 export const uploadImage = (params: {
   readonly project: string
@@ -219,24 +224,40 @@ export const uploadImage = (params: {
 
     const api = yield* session.getApi()
     if (Option.isNone(api)) return err('not logged in')
-    // Gyazo is the fallback for an unreadable project: it is the destination that works
-    // without the project having file storage at all.
-    const detail = yield* api.value
-      .projectDetail(params.project)
-      .pipe(Effect.orElseSucceed(() => null))
-    if (detail === null) {
-      yield* log('warn', 'project settings unavailable, defaulting to gyazo', {
-        project: params.project,
-      })
-    }
+    const detail = yield* api.value.projectDetail(params.project).pipe(
+      Effect.tapError((error) =>
+        log('warn', 'project settings unavailable', {
+          project: params.project,
+          status: error.status,
+          detail: error.message,
+        }),
+      ),
+      Effect.orElseSucceed(() => null),
+    )
 
     const common = { origin: session.origin, headers, bytes, contentType }
-    return detail !== null && detail.uploadImageTo === 'gcs' && detail.id !== ''
-      ? yield* uploadToGcs({ ...common, projectId: detail.id })
-      : yield* uploadToGyazo({
-          ...common,
-          project: params.project,
-          title: params.title,
-          gyazoTeamsName: detail?.gyazoTeamsName ?? null,
-        })
+    const gcs =
+      detail !== null && detail.id !== ''
+        ? () => uploadToGcs({ ...common, projectId: detail.id })
+        : null
+    const gyazo = () =>
+      uploadToGyazo({
+        ...common,
+        project: params.project,
+        title: params.title,
+        gyazoTeamsName: detail?.gyazoTeamsName ?? null,
+      })
+
+    const [first, second] =
+      detail?.uploadImageTo === 'gyazo' || gcs === null ? [gyazo, gcs] : [gcs, gyazo]
+    const result = yield* first()
+    if (result.ok || second === null) return result
+    yield* log('info', 'upload destination failed, trying the other one', {
+      project: params.project,
+      first: first === gyazo ? 'gyazo' : 'gcs',
+    })
+    const fallback = yield* second()
+    // The first message names the destination the project actually asked for, so it is the
+    // more useful one to report when neither worked.
+    return fallback.ok ? fallback : result
   })

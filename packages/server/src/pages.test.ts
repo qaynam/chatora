@@ -642,3 +642,213 @@ describe('listPages unread flag', () => {
     }
   })
 })
+
+// A page the server has moved on from, served as `before` until the first preview is
+// rejected and `after` from then on — the shape every conflict path below starts from.
+const racingPage = (
+  before: readonly { id: string; text: string }[],
+  after: readonly { id: string; text: string }[],
+  opts: {
+    readonly rejectSecondPreview?: boolean
+    /** What the page holds once the retried save lands. */
+    readonly settled?: readonly { id: string; text: string }[]
+  } = {},
+) => {
+  let previews = 0
+  let submitted = false
+  return testHttpClient((url) => {
+    if (url.endsWith('/page-edit-for-ai/preview')) {
+      previews++
+      if (previews === 1 || opts.rejectSecondPreview) return json({ error: 'NotFastForward' }, 409)
+      return json({ previewId: 'pv2', expireAt: 'later', pagePreview: null })
+    }
+    if (url.endsWith('/page-edit-for-ai/submit')) {
+      submitted = true
+      return json({ commitId: 'c3', page: { title: 'Page' } })
+    }
+    return json({
+      id: 'pg1',
+      title: 'Page',
+      commitId: previews === 0 ? 'c1' : 'c2',
+      persistent: true,
+      lines: submitted ? (opts.settled ?? after) : previews === 0 ? before : after,
+    })
+  })
+}
+
+const BEFORE = [
+  { id: 'l1', text: 'Page' },
+  { id: 'l2', text: 'alpha' },
+]
+
+describe('savePage conflict recovery', () => {
+  test('a remote edit elsewhere is merged in and the save goes through', async () => {
+    const after = [...BEFORE, { id: 'l3', text: 'theirs' }]
+    const settled = [...after, { id: 'l4', text: 'mine' }]
+    const { layer: httpLayer, calls } = racingPage(BEFORE, after, { settled })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      return yield* handlers.savePage('cosense://proj/Page', 'Page\nalpha\nmine\n')
+    })
+    const result = (await runOnce(program, httpLayer, credLayer)) as { ok: boolean; text?: string }
+
+    expect(result.ok).toBe(true)
+    // Both sides' lines are in the saved text, and the client is handed it: the buffer
+    // still holds the pre-merge lines and has to be brought up to the merge.
+    expect(result.text).toBe('Page\nalpha\ntheirs\nmine')
+    expect(calls.filter((c) => c.url.endsWith('/preview'))).toHaveLength(2)
+
+    const retry = calls.filter((c) => c.url.endsWith('/preview'))[1]
+    const body = JSON.parse(retry?.init.body as string) as {
+      changes: readonly { _insert?: string; lines?: { text: string } }[]
+    }
+    // Rebuilt against the refetched lines, so it adds the local line and nothing else.
+    expect(body.changes).toHaveLength(1)
+    expect(body.changes[0]?.lines?.text).toBe('mine')
+  })
+
+  test('the same line edited on both sides refuses the save and keeps the local text', async () => {
+    const after = [
+      { id: 'l1', text: 'Page' },
+      { id: 'l2', text: 'theirs' },
+    ]
+    const { layer: httpLayer, calls } = racingPage(BEFORE, after)
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      return yield* handlers.savePage('cosense://proj/Page', 'Page\nmine\n')
+    })
+    const result = (await runOnce(program, httpLayer, credLayer)) as {
+      ok: boolean
+      code?: string
+      text?: string
+      conflicts?: readonly { line: number; ours: string; theirs: string; base: string }[]
+    }
+
+    expect(result.ok).toBe(false)
+    expect(result.code).toBe('conflict')
+    expect(result.text).toBe('Page\nmine')
+    expect(result.conflicts).toEqual([{ line: 1, ours: 'mine', theirs: 'theirs', base: 'alpha' }])
+    // Nothing was written: a conflict stops at the merge, before a second preview.
+    expect(calls.filter((c) => c.url.endsWith('/submit'))).toHaveLength(0)
+    expect(calls.filter((c) => c.url.endsWith('/preview'))).toHaveLength(1)
+  })
+
+  test('a retry that races again reports notFastForward rather than looping', async () => {
+    const after = [...BEFORE, { id: 'l3', text: 'theirs' }]
+    const { layer: httpLayer, calls } = racingPage(BEFORE, after, { rejectSecondPreview: true })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      return yield* handlers.savePage('cosense://proj/Page', 'Page\nalpha\nmine\n')
+    })
+    const result = await runOnce(program, httpLayer, credLayer)
+    expect(result).toMatchObject({ ok: false, code: 'notFastForward' })
+    expect(calls.filter((c) => c.url.endsWith('/preview'))).toHaveLength(2)
+  })
+})
+
+describe('syncPage', () => {
+  test('a remote change reaches an untouched buffer', async () => {
+    let latest = BEFORE
+    const { layer: httpLayer } = testHttpClient(() =>
+      json({ id: 'pg1', title: 'Page', commitId: 'c1', persistent: true, lines: latest }),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      latest = [...BEFORE, { id: 'l3', text: 'theirs' }]
+      return yield* handlers.syncPage('cosense://proj/Page', 'Page\nalpha\n')
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toMatchObject({
+      ok: true,
+      changed: true,
+      text: 'Page\nalpha\ntheirs',
+      conflicts: [],
+    })
+  })
+
+  test('unsaved local edits survive the merge', async () => {
+    let latest = BEFORE
+    const { layer: httpLayer } = testHttpClient(() =>
+      json({ id: 'pg1', title: 'Page', commitId: 'c1', persistent: true, lines: latest }),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      latest = [...BEFORE, { id: 'l3', text: 'theirs' }]
+      return yield* handlers.syncPage('cosense://proj/Page', 'Page\nalpha\nmine\n')
+    })
+    const result = (await runOnce(program, httpLayer, credLayer)) as { text: string }
+    expect(result.text.split('\n')).toContain('mine')
+    expect(result.text.split('\n')).toContain('theirs')
+  })
+
+  test('a line both sides changed is reported, with the local text left in place', async () => {
+    let latest = BEFORE
+    const { layer: httpLayer } = testHttpClient(() =>
+      json({ id: 'pg1', title: 'Page', commitId: 'c1', persistent: true, lines: latest }),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      latest = [
+        { id: 'l1', text: 'Page' },
+        { id: 'l2', text: 'theirs' },
+      ]
+      return yield* handlers.syncPage('cosense://proj/Page', 'Page\nmine\n')
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toMatchObject({
+      ok: true,
+      text: 'Page\nmine',
+      conflicts: [{ line: 1, ours: 'mine', theirs: 'theirs', base: 'alpha' }],
+    })
+  })
+
+  test('the fetched lines become the base, so the next save carries only what is left', async () => {
+    let latest = BEFORE
+    let previewBody: string | undefined
+    const { layer: httpLayer } = testHttpClient((url, init) => {
+      if (url.endsWith('/page-edit-for-ai/preview')) {
+        previewBody = init.body as string
+        return json({ previewId: 'pv1', expireAt: 'later', pagePreview: null })
+      }
+      if (url.endsWith('/page-edit-for-ai/submit')) {
+        return json({ commitId: 'c3', page: { title: 'Page' } })
+      }
+      return json({ id: 'pg1', title: 'Page', commitId: 'c2', persistent: true, lines: latest })
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      latest = [...BEFORE, { id: 'l3', text: 'theirs' }]
+      yield* handlers.syncPage('cosense://proj/Page', 'Page\nalpha\nmine\n')
+      return yield* handlers.savePage('cosense://proj/Page', 'Page\nalpha\ntheirs\nmine\n')
+    })
+    await runOnce(program, httpLayer, credLayer)
+    const body = JSON.parse(previewBody as string) as { changes: readonly unknown[] }
+    // Only the local line is new; 'theirs' is already the server's and must not be re-sent.
+    expect(body.changes).toHaveLength(1)
+  })
+
+  test('a page deleted on the server leaves the buffer as the only copy', async () => {
+    let exists = true
+    const { layer: httpLayer } = testHttpClient(() =>
+      exists
+        ? json({ id: 'pg1', title: 'Page', commitId: 'c1', persistent: true, lines: BEFORE })
+        : json({ message: 'not found' }, 404),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      exists = false
+      return yield* handlers.syncPage('cosense://proj/Page', 'Page\nalpha\nmine\n')
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toMatchObject({
+      ok: true,
+      changed: false,
+      text: 'Page\nalpha\nmine',
+    })
+  })
+})

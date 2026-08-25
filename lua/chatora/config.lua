@@ -21,6 +21,10 @@ local defaults = {
 
   status = true,
   autosave = false,
+  -- Background merge of the server's copy into the page on screen. `interval` is seconds
+  -- between polls, `on_focus` also syncs the moment a page is entered, and `notify`
+  -- announces what came in. `false` leaves a page exactly as opened until <leader>cf.
+  sync = { interval = 30, on_focus = true, notify = true },
   completion = 'auto',
   external_link = 'confirm',
   keymaps = true,
