@@ -271,6 +271,34 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- code blocks: the interior keeps the editor's own line tint, while the marker line
+  -- shares the inline-code badge. The codeBlock token spans both and carries the badge
+  -- background, so the interior's own tint has to outrank it.
+  do
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'T', 'code:a.lua', '  local x = 1' })
+    codeblock.refresh(buf)
+
+    local function bg_of(name)
+      return vim.api.nvim_get_hl(0, { name = name, link = false }).bg
+    end
+    local cursorline = bg_of('CursorLine')
+    if cursorline then
+      assert(bg_of('ChatoraCodeBlock') == cursorline, 'the interior keeps the line tint')
+      assert(bg_of('ChatoraCodeLabel') ~= cursorline, 'the label wears the badge instead')
+    end
+
+    local interior = nil
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, codeblock.ns, 0, -1, { details = true })) do
+      if mark[4].line_hl_group == 'ChatoraCodeBlock' then
+        interior = mark[4]
+      end
+    end
+    assert(interior ~= nil, 'expected the interior to be tinted')
+    assert(interior.priority ~= nil and interior.priority > 125, 'the tint must outrank semantic tokens')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- pads: one bullet per indented line, and nothing drawn on the text itself.
   do
     local pads = require('chatora.pads')

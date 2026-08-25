@@ -172,14 +172,21 @@ local function highlight_block(bufnr, lines, block)
 end
 
 local function ensure_hl()
-  -- The same shade the `code` token uses, not CursorLine's: the marker line wears the
-  -- semantic token *and* this label, so two different greys would split it in half — which
-  -- is exactly what shows once the cursor lands on the line and unconceals `code:`.
-  local block_bg = require('chatora.highlight').badge_bg()
-  vim.api.nvim_set_hl(0, 'ChatoraCodeBlock', { bg = block_bg, default = true })
-  -- The filename reads as a tab above the block, the way Cosense's web UI
-  -- draws it, so it takes the block's own background.
-  vim.api.nvim_set_hl(0, 'ChatoraCodeLabel', { bg = block_bg, bold = true, default = true })
+  local normal = vim.api.nvim_get_hl(0, { name = 'Normal', link = false })
+  local cursorline = vim.api.nvim_get_hl(0, { name = 'CursorLine', link = false })
+  vim.api.nvim_set_hl(0, 'ChatoraCodeBlock', {
+    bg = cursorline and cursorline.bg or (normal and normal.bg) or nil,
+    default = true,
+  })
+  -- The filename reads as a tab above the block, the way Cosense's web UI draws it. It
+  -- takes the `code` badge's shade rather than the block's own, because the marker line
+  -- also wears the codeBlock token: two different greys would split that line in half,
+  -- which is what shows once the cursor lands on it and unconceals `code:`.
+  vim.api.nvim_set_hl(0, 'ChatoraCodeLabel', {
+    bg = require('chatora.highlight').badge_bg(),
+    bold = true,
+    default = true,
+  })
   vim.api.nvim_set_hl(0, 'ChatoraCodeLineNr', { link = 'LineNr', default = true })
 end
 
@@ -192,8 +199,11 @@ local function decorate_block(bufnr, lines, block)
   -- Right-aligned, so a block past ten lines widens its gutter instead of misaligning.
   local width = #tostring(count)
   for lnum = block.start_line, block.end_line - 1 do
+    -- Above the semantic token layer (125): the codeBlock token spans the interior too and
+    -- carries the badge background, which would otherwise paint over the block's own tint.
     pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, lnum, 0, {
       line_hl_group = 'ChatoraCodeBlock',
+      priority = PRIORITY,
     })
     if config.options.codeblock_numbers ~= false then
       local n = ('%' .. width .. 'd '):format(lnum - block.start_line + 1)
