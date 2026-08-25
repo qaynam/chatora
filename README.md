@@ -54,7 +54,7 @@ lazy.nvim（GitHub から直接）:
 | `image_height_large` | `image_height * 2` | `[[url]]`（Cosense の大きい画像記法）の高さ |
 | `image_gallery` | `true` | 画像だけの行を大きく描く。行のインデントに揃えて**縦に積む**（横並びは 1 行の高さでしか描けない。下記参照）。数値でその高さ、`false` で従来の行内 1 行 |
 | `image_border` | `true` | 画像自体に合成する枠（ImageMagick）。`{ width = 1, color = '#8888', padding = 12 }`（px、color は ImageMagick の色リテラル） |
-| `pads` | `true` | 箇条書きの中点とガイド線。`{ bullet = '●', guide = '┃', spacing = true, gap = 1 }`。`gap` は中点と本文の間の余白セル数 |
+| `pads` | `true` | 箇条書きの中点。`{ bullet = '●', guide = false, spacing = true, gap = 0 }`。`guide` に文字を渡すと上位レベルに縦線を引く（Cosense には無い）。`gap` は中点と本文の間の余白セル数で、既定の 0 でも本文との間にはインデント1文字分が残る |
 | `quote` | `true` | `>` 行を GitHub 風の縦棒付きで描く。下記参照 |
 | `conceal` | `true` | 記法マークアップをカーソル行以外で隠す（render-markdown.nvim 方式） |
 | `tables` | `true` | `table:` ブロックの罫線描画。`{ border = false, header = false }` で個別に無効化 |
@@ -188,10 +188,6 @@ Cosense のマーカーは 1 文字ではなく記号の連なりなので、公
 
 不正な設定（記号が1文字でない・`name` が不正・公式記法と衝突）はエントリごと `vim.notify` で警告して無視される。
 `icon` だけが1文字でない場合はエントリは活かしたまま `icon` だけを警告して無視する。
-
-`gap = 0` にすると中点が本文に密着するが、中点は overlay で描くため、端末が
-East Asian Ambiguous 幅の文字を 2 セルで描く設定だと次の 1 文字を潰す。
-その場合は `ambiwidth` を端末に合わせるか `gap` を 1 以上にする。
 
 ローカル開発中のリポジトリを使う場合は `'qaynam/chatora'` の代わりに
 `dir = '/path/to/chatora'` を指定（`build` は同じ）。

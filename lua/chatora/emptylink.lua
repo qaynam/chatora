@@ -1,7 +1,6 @@
 -- Cosense's red links: a link to a page nobody has written yet is drawn differently from
--- one that resolves. The answer comes from the project's title index, so it is deliberately
--- unhurried — a link created elsewhere in the last minute still reads as empty until the
--- index refreshes, which is the harmless direction to be wrong in.
+-- one that resolves. Deliberately unhurried — see chatora/emptyLinks for why the answer is
+-- allowed to lag.
 local M = {}
 
 local lsp = require('chatora.lsp')

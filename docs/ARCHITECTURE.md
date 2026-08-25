@@ -212,6 +212,18 @@ decoration ノードのフラグが全部 false のとき、ソース上 `positi
                                                   | { ok: false, code: 'notFastForward'|'conflict'|'unauthorized'|'error', message }
    // didChange 済みの最新ドキュメント内容と base を diff → preview → submit → getPage で base を更新
    // text が返った場合はサーバー側の正規化結果（タイトル自動サフィックス等）なので Lua はバッファを置き換える
+   // preview/submit が NotFastForward を返したら再取得 → 三方向マージ → 再 preview を 1 度だけ試みる。
+   // 両側が同じ行を触っていた場合だけ code:'conflict' で止め、マージ結果を text、衝突行を conflicts で返す
+'chatora/syncPage'    { uri }                     → { ok, changed, text, conflicts: MergeConflict[], meta? }
+   // ポーリングと <leader>cf の実体。openPage と違い上書きではなくマージで、バッファの未保存分は
+   // 残したまま base を取得結果に張り替える。changed=false ならバッファは既にマージ結果と同一
+'chatora/emptyLinks'  { uri }                     → { ok, links: { line, startChar, endChar }[] }
+   // 実体のないページを指す内部リンク（Cosense の赤リンク）。プロジェクトのタイトル索引
+   // （60 秒キャッシュ、補完と共用）で判定するので最大 1 分遅れる
+'chatora/uploadImage' { project, title, path }    → { ok, notation, url } | { ok:false, ... }
+   // 行き先はプロジェクトの uploadImageTo。PAT では /api/projects/<name> が 401 なので既定は
+   // GCS 側（project id は /api/projects/<name>/users から取る）。片方が失敗したらもう片方を試す
+'chatora/logPath'     {}                          → { ok, path: string|null }  // 診断ログの出力先（無効なら null）
 'chatora/relatedPages' { project, title }         → { ok, links1hop: RelatedPage[], links2hop: RelatedPage[] }
 'chatora/search'      { project, query, mode? }   → { ok, pages: { title, lines?: string[] }[] }  // mode: 'fulltext'(既定)|'vector'
 'chatora/newPage'     { project, title }          → { ok, uri, text }  // 空ページとして open（保存時に新規 preview/submit）
@@ -268,7 +280,9 @@ decoration ノードのフラグが全部 false のとき、ソース上 `positi
 ### ページバッファ（lua/chatora/page.lua）
 
 - `BufReadCmd cosense://*` → `chatora/openPage` → 本文流し込み → `filetype=cosense`, `buftype=acwrite`, undo リセット。
-- `BufWriteCmd cosense://*` → `chatora/savePage` → 成功で `modified=false` + `vim.notify`、`notFastForward` は「リモートが更新されています。:e で再読込してから保存してください」を通知。
+- `BufWriteCmd cosense://*` → `chatora/savePage` → 成功で `modified=false` + cmdline echo。`conflict` はマージ結果を流し込んで衝突行に印を付け、バッファは modified のまま残す（`]c` で移動）。`:wq` が直後に `modified` を見るのでここだけ同期待ちする。
+- 自動保存は `:write` を経由せず `chatora/savePage` を直接投げる（待たないのでカーソルが固まらない）。返事にはリクエスト時の `changedtick` を持たせ、その間に打鍵があればバッファ全体を代表する処理（`modified` クリア・正規化テキスト適用）は行わない。
+- `BufEnter`/`FocusGained` で `chatora/syncPage`（画面に出ているバッファだけポーリング、離れると停止）。取り込みはマージなのでローカルの未保存分は消えない。
 - 定義ジャンプ（`gd` 等の標準 LSP 機構）で `cosense://` URI に飛ぶと同じ BufReadCmd 経路で開ける。
 
 ### 関連ページパネル（lua/chatora/related.lua)

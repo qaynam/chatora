@@ -192,16 +192,14 @@ const uploadToGcs = (args: {
 /**
  * Upload an image and return the notation to write into the page.
  *
- * Two destinations exist, and which one a project wants is its `uploadImageTo` setting —
- * read per upload, so switching projects switches destination with nothing cached to go
- * stale. A personal access token cannot read it, though: plain `/api/projects/<name>`
- * answers a PAT with 401. So the setting is treated as a preference when it can be read
- * and the project's own storage is assumed when it cannot, which is the right guess
- * precisely because the case where it cannot be read is the PAT case — and Cosense's Gyazo
- * token endpoint lives under `/api/login/`, answering to a browser session rather than a
- * token, so a PAT is refused there whatever the project would have preferred.
+ * Which of the two destinations a project wants is its `uploadImageTo` setting, read per
+ * upload so switching projects switches destination with nothing cached to go stale.
  *
- * Whichever goes first, the other is tried if it fails.
+ * A personal access token cannot read that setting — plain `/api/projects/<name>` answers
+ * one with 401 — so an unreadable setting means the project's own storage rather than
+ * Gyazo. That is the right guess precisely because the unreadable case *is* the PAT case,
+ * and Cosense's Gyazo token endpoint lives under `/api/login/`: it answers a browser
+ * session, never a token. Whichever goes first, the other is tried if it fails.
  */
 export const uploadImage = (params: {
   readonly project: string

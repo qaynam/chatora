@@ -1,9 +1,8 @@
 -- Cosense's visual-mode decoration keys: with text selected, the marker character wraps it
 -- in that notation — `*` gives `[* text]`, `[` gives the link form `[text]`, and so on.
 --
--- Pressing the same marker again works on the result rather than nesting a second time,
--- which is what makes `***` reachable by repeating `*`: the run inside the brackets is
--- rewritten, not re-wrapped. Every other marker toggles, since there is nothing to grow.
+-- Pressing the same marker again rewrites the run inside the brackets rather than nesting
+-- a second pair, which is what makes `***` reachable by repeating `*`.
 local M = {}
 
 local config = require('chatora.config')

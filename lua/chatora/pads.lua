@@ -1,8 +1,7 @@
--- Cosense-style bullet pads: on every indented, non-blank line, overlay the
--- leading whitespace with indent guides and a bullet at the deepest level
--- (1 whitespace char = 1 indent level, per Cosense notation). Doubles as the
--- indent guide for page buffers — general indent plugins (snacks.indent etc.)
--- skip buftype=acwrite buffers.
+-- Cosense-style bullet pads: every indented, non-blank line gets a bullet before its text
+-- and a cell of widening per level above it (1 whitespace char = 1 indent level, per
+-- Cosense notation). Doubles as the indent guide for page buffers — general indent plugins
+-- (snacks.indent etc.) skip buftype=acwrite buffers.
 local M = {}
 
 local config = require('chatora.config')
@@ -14,22 +13,15 @@ local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraPadBullet', { link = 'Comment', default = true })
 end
 
--- The bullet is *inline* virtual text, not an overlay, and both of the things that used to
--- be wrong here come from that one choice.
---
--- An overlay replaces a fixed cell, but a bullet glyph's width is the font's business:
--- '●' is East Asian Ambiguous, and a terminal that draws it two cells wide paints over
--- whatever comes next — which is the line's first real character. Inline text pushes
--- instead of painting, so no width can eat the text.
---
--- It also fixes the cursor. Anchoring the bullet to the *last* indent character rather
--- than to the text means nothing is drawn at the first text byte, and Neovim renders an
--- end-of-line cursor before inline text: on an empty list item — a line that is nothing
--- but indent — the cursor would otherwise sit a cell left of where typing puts the first
--- character. Anchored one byte earlier, that indent character is itself the gap, and the
--- empty item's cursor lands exactly where a sibling line's text starts.
---
--- `gap` is extra slack on top of that, drawn with the bullet and so equally safe.
+-- Two rules keep the text and the cursor where they belong, both asserted in
+-- tests/smoke.lua. The bullet is inline virtual text rather than an overlay, because an
+-- overlay replaces a fixed cell while a glyph's width belongs to the font — '●' is East
+-- Asian Ambiguous, and drawn two cells wide it would paint over the line's first real
+-- character. And it is anchored to the last indent character rather than to the text, so
+-- nothing is drawn at the first text byte: Neovim renders an end-of-line cursor *before*
+-- inline text, which on an empty list item would otherwise leave the cursor a cell left of
+-- where typing lands. That displaced indent character is also the gap the bullet needs, so
+-- `gap` is only ever extra slack.
 local DEFAULTS = { bullet = '●', guide = false, spacing = true, gap = 0 }
 
 local function pad_opts()

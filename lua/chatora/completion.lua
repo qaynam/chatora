@@ -175,8 +175,7 @@ function M.attach(bufnr)
 end
 
 --- The page title out of a completion entry, whatever shape the engine hands it in. The
---- server puts the title in `label`; the built-in menu may only keep the inserted form,
---- which is the title in brackets.
+--- server puts it in `label`; a menu that only kept the inserted form has it bracketed.
 function M.title_of(item)
   if type(item) ~= 'table' then
     return nil

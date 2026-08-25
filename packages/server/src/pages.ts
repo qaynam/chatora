@@ -577,12 +577,10 @@ export interface EmptyLinksResult {
  * The links on a page that point at nothing — Cosense's red links.
  *
  * Answered from the project's title index, the same cached list the link completion reads,
- * so this costs one request per minute however often a page is edited. That cache is also
- * why the answer can lag: a page created elsewhere in the last minute still reads as empty,
- * which is the right way round — a link wrongly shown as empty corrects itself, and the
- * alternative is a request per link.
- *
- * An unreadable index yields no links rather than marking every link on the page.
+ * so this costs one request a minute however often a page is edited — and lags by up to
+ * that minute. Being late in this direction is the harmless one: a link wrongly shown as
+ * empty corrects itself, where the alternative is a request per link. An index that cannot
+ * be read at all yields nothing rather than marking every link on the page.
  */
 export const emptyLinks = (
   uri: string,
