@@ -284,6 +284,9 @@ export const startFakeCosense = (): FakeCosenseHandle => {
       const v2Prefix = `/api/pages/v2/${PROJECT}/`
       if (path.startsWith(v2Prefix) && method === 'GET') {
         let rest = path.slice(v2Prefix.length)
+        // getPage asks for `<title>/?followRename=true`, so the segment arrives with a
+        // trailing slash the real API tolerates.
+        if (rest.endsWith('/')) rest = rest.slice(0, -1)
         let hop: 'links1hop' | 'links2hop' | null = null
         if (rest.endsWith('/links1hop')) {
           hop = 'links1hop'

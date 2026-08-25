@@ -137,14 +137,18 @@ describe('CosenseApi happy paths', () => {
         snapshotCount: 0,
       }),
     )
-    expect(calls[0]?.url).toBe('https://scrapbox.io/api/pages/v2/myproject/My_Page')
+    expect(calls[0]?.url).toBe(
+      'https://scrapbox.io/api/pages/v2/myproject/My_Page/?followRename=true',
+    )
   })
 
   test('getPage() encodes titles like cosense-cli encodeTitleForUrl (space -> _, unicode kept raw)', async () => {
     const { layer, calls } = testHttpClient(() => json({ persistent: false }))
     const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
     await run(api.getPage('myproject', '日本語 タイトル/foo'), layer)
-    expect(calls[0]?.url).toBe('https://scrapbox.io/api/pages/v2/myproject/日本語_タイトル%2Ffoo')
+    expect(calls[0]?.url).toBe(
+      'https://scrapbox.io/api/pages/v2/myproject/日本語_タイトル%2Ffoo/?followRename=true',
+    )
   })
 
   test('getPage() returns Option.none on HTTP 404', async () => {
@@ -310,5 +314,60 @@ describe('markAccessed', () => {
   test('never fails, whatever the endpoint does', async () => {
     const { layer } = testHttpClient(() => json({}, 404))
     expect(await run(api.markAccessed('proj', 'page1'), layer)).toBeUndefined()
+  })
+})
+
+describe('renamed pages and redirects', () => {
+  // Cosense keeps a renamed page reachable under its old title and redirects to the
+  // current one, which is what a link written before the rename still points at.
+  test('a same-origin redirect is followed, carrying the credential', async () => {
+    const seen: string[] = []
+    const { layer, calls } = testHttpClient((url) => {
+      seen.push(url)
+      if (seen.length === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: '/api/pages/v2/myproject/New_Title' },
+        })
+      }
+      return json({ id: 'pg1', title: 'New Title', persistent: true, lines: [] })
+    })
+    const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+    const page = await Effect.runPromise(
+      api.getPage('myproject', 'Old Title').pipe(Effect.provide(layer)),
+    )
+    expect(Option.isSome(page)).toBe(true)
+    expect(seen).toHaveLength(2)
+    expect(seen[1]).toBe('https://scrapbox.io/api/pages/v2/myproject/New_Title')
+    expect(calls[1]?.init.headers).toMatchObject({ 'x-personal-access-token': PAT.value })
+  })
+
+  test('a redirect off the origin is refused rather than replayed there', async () => {
+    const { layer } = testHttpClient(
+      () =>
+        new Response(null, { status: 302, headers: { location: 'https://evil.example/steal' } }),
+    )
+    const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+    const result = await Effect.runPromise(
+      Effect.either(api.getPage('myproject', 'Page').pipe(Effect.provide(layer))),
+    )
+    expect(result._tag).toBe('Left')
+  })
+
+  test('a redirect loop gives up instead of spinning', async () => {
+    let hops = 0
+    const { layer } = testHttpClient(() => {
+      hops++
+      return new Response(null, {
+        status: 302,
+        headers: { location: '/api/pages/v2/myproject/Round' },
+      })
+    })
+    const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+    const result = await Effect.runPromise(
+      Effect.either(api.getPage('myproject', 'Round').pipe(Effect.provide(layer))),
+    )
+    expect(result._tag).toBe('Left')
+    expect(hops).toBeLessThanOrEqual(5)
   })
 })

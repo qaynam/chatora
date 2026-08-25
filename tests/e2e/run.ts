@@ -171,6 +171,9 @@ const v2Title = (path: string): { title: string; hop: 'links1hop' | 'links2hop' 
   if (!path.startsWith(V2_PREFIX)) return null
   if (path === PREVIEW_PATH || path === SUBMIT_PATH) return null
   let rest = path.slice(V2_PREFIX.length)
+  // getPage asks for `<title>/?followRename=true`; the query is logged separately, so only
+  // the trailing slash reaches here.
+  if (rest.endsWith('/')) rest = rest.slice(0, -1)
   let hop: 'links1hop' | 'links2hop' | null = null
   if (rest.endsWith('/links1hop')) {
     hop = 'links1hop'

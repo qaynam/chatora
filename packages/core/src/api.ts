@@ -94,11 +94,34 @@ interface RawResponse {
 // redirect: 'manual' + treat any 3xx as an error so credential headers never travel to a
 // redirect target on a different origin (architecture doc "セキュリティ / 作法"; cosense-cli
 // applies the same policy for file downloads in src/lib/request.ts downloadToFile).
+// Cosense keeps a renamed page reachable under its old title and answers with a redirect
+// to the current one, so following a link written before the rename means following that.
+const MAX_REDIRECTS = 3
+
+/**
+ * `location` as a path to re-request, or undefined when it leaves `origin`.
+ *
+ * Redirects are handled here rather than by fetch because these requests carry credentials:
+ * `redirect: 'manual'` is what stops them being replayed at whatever host a response names.
+ * Staying on the origin the credential belongs to is the whole condition for following one.
+ */
+const sameOriginPath = (origin: string, location: string): string | undefined => {
+  try {
+    const resolved = new URL(location, origin)
+    return resolved.origin === new URL(origin).origin
+      ? `${resolved.pathname}${resolved.search}`
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 const requestJson = (
   origin: string,
   credential: Credential,
   path: string,
   init?: { method?: Method; body?: unknown },
+  hop = 0,
 ): Effect.Effect<RawResponse, CosenseApiError, HttpClient> =>
   Effect.gen(function* () {
     const client = yield* HttpClient
@@ -121,6 +144,11 @@ const requestJson = (
       )
 
     if (res.status >= REDIRECT_STATUS_MIN && res.status < REDIRECT_STATUS_MAX) {
+      const location = res.headers.get('location')
+      const next = location === null ? undefined : sameOriginPath(origin, location)
+      if (next !== undefined && hop < MAX_REDIRECTS) {
+        return yield* requestJson(origin, credential, next, init, hop + 1)
+      }
       return yield* Effect.fail(
         new CosenseApiError({
           status: res.status,
@@ -276,7 +304,9 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
   }
 
   const getPage: CosenseApiShape['getPage'] = (project, title) => {
-    const path = `/api/pages/v2/${project}/${encodeTitleForUrl(title)}`
+    // followRename resolves a title the page has since moved away from, which is what a
+    // link written before the rename still says.
+    const path = `/api/pages/v2/${project}/${encodeTitleForUrl(title)}/?followRename=true`
     return request(path).pipe(
       Effect.flatMap((res) => decode(PageV2ResponseSchema, res)),
       Effect.map(
