@@ -91,6 +91,8 @@ export interface SessionStateShape {
   ) => Effect.Effect<readonly VectorResultPage[], CosenseApiError, HttpClient>
   /** `project`'s id and everyone who can be named as an author in it. Empty when unreadable. */
   readonly getProjectUsers: (project: string) => Effect.Effect<ProjectUsers, never, HttpClient>
+  /** Forget `project`'s cached title index, after something changed which pages exist. */
+  readonly invalidateTitles: (project: string) => Effect.Effect<void>
   readonly getTitles: (
     project: string,
   ) => Effect.Effect<readonly TitleEntry[], CosenseApiError, HttpClient>
@@ -244,6 +246,14 @@ export const makeSessionStateLayer = (
           return value
         })
 
+      const invalidateTitles: SessionStateShape['invalidateTitles'] = (project) =>
+        Ref.update(titlesCacheRef, (map) => {
+          if (!map.has(project)) return map
+          const next = new Map(map)
+          next.delete(project)
+          return next
+        })
+
       const getTitles: SessionStateShape['getTitles'] = (project) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
@@ -287,6 +297,7 @@ export const makeSessionStateLayer = (
         removeCredential,
         searchVectorCached,
         getProjectUsers,
+        invalidateTitles,
         getTitles,
         getPage,
         setPage,

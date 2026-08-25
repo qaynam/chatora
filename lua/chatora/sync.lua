@@ -209,6 +209,9 @@ function M.resume(bufnr)
     return
   end
   start(bufnr)
+  -- Returning to a page is exactly when a link it holds may have stopped being empty —
+  -- the page it points at is often the one just written and left.
+  require('chatora.emptylink').refresh(bufnr)
   if opts.on_focus then
     M.run(bufnr, function(changed, conflicts)
       if not opts.notify then

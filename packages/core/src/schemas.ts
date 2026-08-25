@@ -170,6 +170,7 @@ export const PageV2ResponseSchema = Schema.Struct({
   snapshotCount: optionalNumber,
   user: Schema.optionalWith(Schema.NullOr(UserRefSchema), { exact: true }),
   lastUpdateUser: Schema.optionalWith(Schema.NullOr(UserRefSchema), { exact: true }),
+  users: Schema.optionalWith(Schema.Array(UserRefSchema), { default: () => [] }),
 })
 
 // `/api/projects/<name>/users` — the page body names its author by id alone, so this is
@@ -223,12 +224,14 @@ const PagePreviewSchema = Schema.Struct({
 })
 
 export const PreviewResponseSchema = Schema.Struct({
+  pageDelete: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   previewId: optionalString,
   expireAt: optionalString,
   pagePreview: Schema.optionalWith(Schema.NullOr(PagePreviewSchema), { default: () => null }),
 })
 
 export const SubmitResponseSchema = Schema.Struct({
+  pageDeleted: Schema.optionalWith(Schema.Struct({ title: optionalString }), { exact: true }),
   commitId: optionalString,
   page: Schema.optionalWith(Schema.NullOr(Schema.Struct({ title: optionalString })), {
     default: () => null,

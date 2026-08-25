@@ -299,6 +299,7 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
                 pageRank: data.pageRank,
                 snapshotCount: data.snapshotCount,
                 ...(data.user ? { user: data.user } : {}),
+                ...(data.users.length > 0 ? { users: data.users } : {}),
                 ...(data.lastUpdateUser ? { lastUpdateUser: data.lastUpdateUser } : {}),
               }),
       ),

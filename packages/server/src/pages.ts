@@ -372,6 +372,8 @@ export interface PageMeta {
   readonly snapshotCount: number
   readonly createdBy?: PageAuthor
   readonly updatedBy?: PageAuthor
+  /** Everyone else who has edited the page — Cosense's 共同編集者. Absent when nobody has. */
+  readonly collaborators?: readonly PageAuthor[]
 }
 
 /**
@@ -396,10 +398,8 @@ const toPageMetaWithAuthors = (
 ): Effect.Effect<PageMeta, never, SessionState | HttpClient> =>
   Effect.gen(function* () {
     const meta = toPageMeta(page)
-    const ids = [page.user?.id, page.lastUpdateUser?.id].filter(
-      (id): id is string => typeof id === 'string' && id !== '',
-    )
-    if (ids.length === 0) return meta
+    const named = [page.user?.id, page.lastUpdateUser?.id, ...(page.users ?? []).map((u) => u.id)]
+    if (named.every((id) => id === undefined || id === '')) return meta
     const session = yield* SessionState
     const { users } = yield* session.getProjectUsers(project)
     const author = (id: string | undefined): PageAuthor | undefined => {
@@ -409,10 +409,18 @@ const toPageMetaWithAuthors = (
     }
     const createdBy = author(page.user?.id)
     const updatedBy = author(page.lastUpdateUser?.id)
+    // `users` is everyone who has touched the page, the two named above included. Only the
+    // rest are collaborators — repeating the author under a second heading says nothing.
+    const shown = new Set([createdBy?.id, updatedBy?.id])
+    const collaborators = (page.users ?? [])
+      .filter((user) => user.id !== '' && !shown.has(user.id))
+      .map((user) => author(user.id))
+      .filter((entry): entry is PageAuthor => entry !== undefined)
     return {
       ...meta,
       ...(createdBy ? { createdBy } : {}),
       ...(updatedBy ? { updatedBy } : {}),
+      ...(collaborators.length > 0 ? { collaborators } : {}),
     }
   })
 
@@ -605,6 +613,58 @@ export const previewPage = (params: {
         quotes: computeQuoteRanges(text),
         meta: toPageMeta(page),
       }
+    }),
+  )
+
+// ---------------------------------------------------------------------------
+// deletePage
+// ---------------------------------------------------------------------------
+
+export interface DeletePageResult {
+  readonly ok: true
+  readonly title: string
+}
+
+/**
+ * Delete the page a buffer holds, through the same two-step edit endpoint a save uses: the
+ * whole-page sentinel `changes: [{ deleted: true }]` instead of line ops.
+ *
+ * The preview is only submitted once the server has echoed `pageDelete`, which is the
+ * check cosense-cli's own previewDelete refuses to skip — a previewId built from something
+ * the server read differently would commit whatever it did read, and this is the one
+ * operation with nothing to undo it.
+ */
+export const deletePage = (
+  uri: string,
+): Effect.Effect<DeletePageResult | ErrEnvelope, never, SessionState | HttpClient> =>
+  handle(
+    Effect.gen(function* () {
+      const session = yield* SessionState
+      const baseOpt = yield* session.getPage(uri)
+      if (Option.isNone(baseOpt)) return err('error', 'page state not found; reopen the page')
+      const base = baseOpt.value
+      if (base.pageId === undefined || !base.exists) {
+        return err('error', 'このページはまだ Cosense に存在しません')
+      }
+
+      const apiOpt = yield* session.getApi()
+      if (Option.isNone(apiOpt)) return noCredential()
+      const api = apiOpt.value
+
+      const preview = yield* api.previewEdit(base.project, {
+        pageId: base.pageId,
+        changes: [{ deleted: true }],
+      })
+      if (preview.pageDelete !== true) {
+        return err('error', 'サーバーが削除として受理しませんでした（中止しました）')
+      }
+      const submit = yield* api.submitEdit(base.project, preview.previewId)
+
+      yield* session.deletePage(uri)
+      // The page is gone from the project, so the title index that still lists it would
+      // keep answering link questions with it.
+      yield* session.invalidateTitles(base.project)
+      return { ok: true as const, title: submit.pageDeleted?.title ?? base.title }
     }),
   )
 
@@ -814,6 +874,9 @@ export const savePage = (
       const newUri = formatUri(base.project, finalTitle)
       if (newUri !== uri) yield* session.deletePage(uri)
       yield* session.setPage(newUri, newBase)
+      // A page saved for the first time is not in the cached title index, so every link
+      // pointing at it would keep reading as empty until that cache aged out on its own.
+      if (!base.exists || newUri !== uri) yield* session.invalidateTitles(base.project)
 
       return {
         ok: true as const,

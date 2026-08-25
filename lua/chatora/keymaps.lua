@@ -35,6 +35,7 @@ local GLOBAL_ACTIONS = {
   f = { 'pull', 'サーバーの変更を取り込む（マージ）' },
   c = { 'next_conflict', '次の競合へ' },
   v = { 'paste_image', 'クリップボードの画像を貼り付け' },
+  d = { 'delete', 'ページを削除（確認あり）' },
   y = { 'copy_url', 'ページ URL をコピー' },
   Y = { 'copy_link', 'リンク記法をコピー' },
   o = { 'open_in_browser', 'ブラウザで開く' },

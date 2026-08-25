@@ -407,6 +407,7 @@ local ok, err = pcall(function()
       snapshotCount = 12,
       createdBy = { id = 'u1', name = 'taro', displayName = 'taro' },
       updatedBy = { id = 'u2', name = 'hanako', displayName = 'はなこ' },
+      collaborators = { { id = 'u3', name = 'ken', displayName = 'ken' } },
     }
 
     actions.info()
@@ -430,16 +431,30 @@ local ok, err = pcall(function()
     end
     assert(rules == 2, 'expected two separators, got ' .. rules)
 
-    -- Every value starts at the same column, gutter included, whatever the row.
+    -- The two single-author rows share a value column, gutter included. The collaborators
+    -- row reserves one gutter per person, so it deliberately starts further right.
     local ns = vim.api.nvim_create_namespace('chatora_page_info')
-    local value_col = nil
+    local name_cols = {}
     for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(info_buf, ns, 0, -1, { details = true })) do
       if mark[4].hl_group == 'ChatoraInfoName' then
-        value_col = value_col or mark[3]
-        assert(mark[3] == value_col, 'author values must share one column')
+        name_cols[#name_cols + 1] = mark[3]
       end
     end
-    assert(value_col ~= nil, 'expected the author rows to be marked')
+    assert(#name_cols == 3, 'expected 作成 / 更新 / 共同編集者 to be marked, got ' .. #name_cols)
+    assert(name_cols[1] == name_cols[2], 'the two author rows must share one column')
+    assert(name_cols[3] > name_cols[2], 'a second icon has to widen the collaborators gutter')
+    assert(text:find('共同編集者', 1, true), 'collaborators are listed when there are any')
+
+    vim.api.nvim_win_close(0, true)
+
+    -- A page nobody else has touched has no collaborators row at all, the way the web
+    -- popup omits it.
+    local solo = vim.deepcopy(vim.b[buf].chatora_meta)
+    solo.collaborators = nil
+    vim.b[buf].chatora_meta = solo
+    actions.info()
+    local solo_text = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+    assert(not solo_text:find('共同編集者', 1, true), 'no collaborators means no row')
 
     vim.api.nvim_win_close(0, true)
     vim.api.nvim_win_set_buf(0, prev)

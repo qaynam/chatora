@@ -105,6 +105,8 @@ export interface PageDetail {
   /** Author. The page body carries only an id; `projectUsers` turns it into a name. */
   readonly user?: UserRef | null
   readonly lastUpdateUser?: UserRef | null
+  /** Everyone who has edited the page, author included. Ids only, same as the two above. */
+  readonly users?: readonly UserRef[]
 }
 
 export interface RelatedPage {
@@ -182,9 +184,14 @@ export interface RawDeleteChange {
 
 export type RawChange = RawInsertChange | RawUpdateChange | RawDeleteChange
 
+/** The whole-page deletion sentinel; it replaces the line ops rather than joining them. */
+export interface RawPageDelete {
+  readonly deleted: true
+}
+
 export interface PreviewEditBody {
   readonly pageId?: string
-  readonly changes: readonly RawChange[]
+  readonly changes: readonly RawChange[] | readonly [RawPageDelete]
 }
 
 export interface PagePreview {
@@ -197,10 +204,18 @@ export interface PreviewResponse {
   readonly previewId: string
   readonly expireAt: string
   readonly pagePreview: PagePreview | null
+  /**
+   * True only when the server accepted the preview *as a page deletion*. cosense-cli
+   * refuses to submit a delete preview without it (src/commands/previewDelete.ts), and so
+   * does this client: submitting a previewId the server read as something else would run
+   * whatever it did read.
+   */
+  readonly pageDelete?: boolean
 }
 
 export interface SubmitResponse {
   readonly commitId: string
   readonly page: { readonly title: string } | null
   readonly titleChanged?: { readonly from: string; readonly to: string }
+  readonly pageDeleted?: { readonly title: string }
 }
