@@ -280,12 +280,16 @@ local function build_targets(bufnr, project, origin, border, images)
         }
 
         if img.kind == 'icon' then
-          -- An icon stands in for a face in running text, so it is one row even when it
-          -- has the line to itself.
+          -- An icon stands in for a face in running text, so it is one row — except in
+          -- Cosense's large form on a line of its own, which is a picture to look at and
+          -- is sized like one. Inline it stays one row whatever the form: a taller glyph
+          -- has nowhere to go in a line of text.
+          local rows = (img.large and img.standalone) and standalone_height(true) or 1
           targets[#targets + 1] = {
             url = M.icon_url(origin, project, img.iconUser),
             geom = geom,
-            opts = { height = 1 },
+            opts = rows > 1 and { max_height = rows } or { height = 1 },
+            border = rows > 1 and border or nil,
             standalone = img.standalone,
           }
         elseif img.standalone or (img.gallery and gallery_rows() ~= nil) then

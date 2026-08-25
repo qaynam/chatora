@@ -220,7 +220,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | `images` | `'auto'` | 描画バックエンドが使えるときだけ描く。`false` で無効 |
 | `image_backend` | `'auto'` | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック |
 | `image_height` | `20` | 単独行の画像の高さ（行数）。文中のインライン画像は常に 1 行 |
-| `image_height_large` | `image_height * 2` | `[[url]]`（大きい画像記法）の高さ |
+| `image_height_large` | `image_height * 2` | `[[…]]`（大きい記法）の高さ。画像とアイコンの両方に効く |
 | `image_gallery` | `true` | 画像だけの行を大きく描く。[下記](#画像だけの行) |
 | `image_border` | `true` | 画像に合成する枠。`{ width = 1, color = '#8888', padding = 12 }` |
 
@@ -381,6 +381,10 @@ ImageMagick（`brew install imagemagick`）、そして描画プラグインが�
 
 画像の取得は chatora の LSP サーバーが PAT 付きで行いローカルにキャッシュするため、
 プライベートプロジェクトのアイコンも表示できる。
+
+`[[…]]`（大きい記法）は画像にもアイコンにも効く。`[[name.icon]]` が単独で行にあるときは
+`image_height_large` の大きさで描き、文中にあるときは 1 行のまま（インラインの行に背の高い
+グリフを置く場所が無いため）。
 
 #### 画像だけの行
 

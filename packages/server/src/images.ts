@@ -19,7 +19,7 @@ export interface ImageTarget {
   readonly iconUser?: string
   /** True when the node is the only non-whitespace child of its line (or the title line). */
   readonly standalone: boolean
-  /** `[[url]]` — Cosense's large form. Never set on an icon. */
+  /** `[[…]]` — Cosense's large form, which applies to an icon as much as to an image. */
   readonly large: boolean
   /**
    * True when every non-whitespace child of the line is drawable. Such a line is a
@@ -48,6 +48,24 @@ const isFetchableImage = (src: string): boolean => {
 
 const DRAWABLE: ReadonlySet<string> = new Set(['image', 'icon'])
 
+const ICON_SUFFIX = /^(.+)\.icon$/
+
+/**
+ * The icon behind `[[name.icon]]`, or undefined for anything else.
+ *
+ * Cosense's large form draws a bigger icon just as it draws a bigger image, but the parser
+ * only resolves it for image URLs: an icon inside it arrives as a bold decoration whose
+ * `value` is the raw text, with no icon child to visit. The `[[` is what separates it from
+ * `[* name.icon]`, which really is only bold text, and the flags cannot — both are bold at
+ * size level 0.
+ */
+const largeIconUser = (node: AnyNode, lineText: string): string | undefined => {
+  if (node.type !== 'decoration') return undefined
+  const raw = lineText.slice(node.position.start.column, node.position.end.column)
+  if (!raw.startsWith('[[')) return undefined
+  return ICON_SUFFIX.exec(node.value)?.[1]
+}
+
 /**
  * The line's own content, ignoring whitespace — empty when the node is nested inside
  * decoration markup rather than sitting directly on the line.
@@ -60,16 +78,39 @@ const lineContent = (ancestors: readonly AnyNode[]): readonly AnyNode[] => {
 
 export const computeImageTargets = (text: string): ImageTarget[] => {
   const page = parse(text, parseOptions())
+  const docLines = text.split('\n')
   const out: ImageTarget[] = []
 
-  visit(page, ['image', 'icon'], (node, ancestors) => {
+  visit(page, ['image', 'icon', 'decoration'], (node, ancestors) => {
     const { line, column } = node.position.start
     const endChar = node.position.end.column
+    const lineText = docLines[line] ?? ''
     const content = lineContent(ancestors)
     const standalone = content.length === 1
     // An icon among images still makes a gallery: `[a.icon] [b.icon]` is a row of
     // pictures, not a sentence.
-    const gallery = content.length > 0 && content.every((child) => DRAWABLE.has(child.type))
+    const gallery =
+      content.length > 0 &&
+      content.every(
+        (child) => DRAWABLE.has(child.type) || largeIconUser(child, lineText) !== undefined,
+      )
+    if (node.type === 'decoration') {
+      const user = largeIconUser(node, lineText)
+      if (user !== undefined) {
+        out.push({
+          line,
+          startChar: column,
+          endChar,
+          src: user,
+          kind: 'icon',
+          iconUser: user,
+          standalone,
+          gallery,
+          large: true,
+        })
+      }
+      return
+    }
     if (node.type === 'image') {
       const src = asImageSrc(node.src) ?? node.src
       if (isFetchableImage(src)) {

@@ -192,3 +192,45 @@ describe('only fetchable image URLs become targets', () => {
     expect(targets.map((t) => t.gallery)).toEqual([false, false])
   })
 })
+
+describe('the large form applied to an icon', () => {
+  // `[[name.icon]]` reaches the parser as a bold decoration, not as an icon node, so
+  // without recovering it here the icon simply would not be drawn.
+  test('draws the icon, marked large', () => {
+    expect(computeImageTargets('タイトル\n[[/qaynam/qaynam.icon]]')).toEqual([
+      {
+        line: 1,
+        startChar: 0,
+        endChar: 24,
+        src: '/qaynam/qaynam',
+        kind: 'icon',
+        iconUser: '/qaynam/qaynam',
+        standalone: true,
+        gallery: true,
+        large: true,
+      },
+    ])
+  })
+
+  test('the plain form is unchanged', () => {
+    const [target] = computeImageTargets('タイトル\n[/qaynam/qaynam.icon]')
+    expect(target).toMatchObject({ kind: 'icon', iconUser: '/qaynam/qaynam', large: false })
+  })
+
+  test('bold text that merely ends in .icon is not one', () => {
+    // `[* x]` is bold text; only the `[[ ]]` form is the large notation.
+    expect(computeImageTargets('タイトル\n[* qaynam.icon]')).toEqual([])
+    expect(computeImageTargets('タイトル\n[[ただの太字]]')).toEqual([])
+  })
+
+  test('inline among text it is not standalone', () => {
+    const [target] = computeImageTargets('タイトル\n文中に [[qaynam.icon]] がある')
+    expect(target).toMatchObject({ large: true, standalone: false, gallery: false })
+  })
+
+  test('a row of them is a gallery', () => {
+    const targets = computeImageTargets('タイトル\n[[a.icon]] [[b.icon]]')
+    expect(targets).toHaveLength(2)
+    expect(targets.every((t) => t.gallery && t.large)).toBe(true)
+  })
+})
