@@ -192,14 +192,16 @@ const uploadToGcs = (args: {
 /**
  * Upload an image and return the notation to write into the page.
  *
- * Where it goes is first the *project's* choice: `uploadImageTo` sends a project's images
- * either to its own file storage or to Gyazo, and it is read per upload so switching
- * projects switches destination with no cached setting to go stale.
+ * Two destinations exist, and which one a project wants is its `uploadImageTo` setting —
+ * read per upload, so switching projects switches destination with nothing cached to go
+ * stale. A personal access token cannot read it, though: plain `/api/projects/<name>`
+ * answers a PAT with 401. So the setting is treated as a preference when it can be read
+ * and the project's own storage is assumed when it cannot, which is the right guess
+ * precisely because the case where it cannot be read is the PAT case — and Cosense's Gyazo
+ * token endpoint lives under `/api/login/`, answering to a browser session rather than a
+ * token, so a PAT is refused there whatever the project would have preferred.
  *
- * Whichever it names, the other is tried when the first fails. Cosense's Gyazo token
- * endpoint lives under `/api/login/` and answers to a browser session, not to a token, so
- * a PAT gets 401 there however the project is configured — leaving the project's own
- * storage as the only destination chatora can actually reach.
+ * Whichever goes first, the other is tried if it fails.
  */
 export const uploadImage = (params: {
   readonly project: string
@@ -234,12 +236,15 @@ export const uploadImage = (params: {
       ),
       Effect.orElseSucceed(() => null),
     )
+    // `/users` is the project-id route a PAT can take, so the storage upload stays
+    // reachable even when the settings above came back 401.
+    const projectId =
+      detail?.id !== undefined && detail.id !== ''
+        ? detail.id
+        : (yield* session.getProjectUsers(params.project)).projectId
 
     const common = { origin: session.origin, headers, bytes, contentType }
-    const gcs =
-      detail !== null && detail.id !== ''
-        ? () => uploadToGcs({ ...common, projectId: detail.id })
-        : null
+    const gcs = projectId !== '' ? () => uploadToGcs({ ...common, projectId }) : null
     const gyazo = () =>
       uploadToGyazo({
         ...common,

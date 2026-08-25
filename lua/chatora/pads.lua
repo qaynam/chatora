@@ -14,36 +14,53 @@ local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraPadBullet', { link = 'Comment', default = true })
 end
 
+-- The bullet is *inline* virtual text, not an overlay, and both of the things that used to
+-- be wrong here come from that one choice.
+--
+-- An overlay replaces a fixed cell, but a bullet glyph's width is the font's business:
+-- '●' is East Asian Ambiguous, and a terminal that draws it two cells wide paints over
+-- whatever comes next — which is the line's first real character. Inline text pushes
+-- instead of painting, so no width can eat the text.
+--
+-- It also fixes the cursor. Anchoring the bullet to the *last* indent character rather
+-- than to the text means nothing is drawn at the first text byte, and Neovim renders an
+-- end-of-line cursor before inline text: on an empty list item — a line that is nothing
+-- but indent — the cursor would otherwise sit a cell left of where typing puts the first
+-- character. Anchored one byte earlier, that indent character is itself the gap, and the
+-- empty item's cursor lands exactly where a sibling line's text starts.
+--
+-- `gap` is extra slack on top of that, drawn with the bullet and so equally safe.
+local DEFAULTS = { bullet = '●', guide = false, spacing = true, gap = 0 }
+
 local function pad_opts()
   local opts = config.options.pads
-  -- gap is cells of slack after the bullet. It defaults to 1 because the
-  -- bullet is drawn as an *overlay*: '●' is East Asian Ambiguous, so a
-  -- terminal that draws it two cells wide paints over whatever follows, and
-  -- with no slack that is the line's first real character. gap = 0 hugs the
-  -- text, and is safe with 'ambiwidth' set to match the terminal.
-  local bullet, guide, spacing, gap = '●', '┃', true, 1
-  if type(opts) == 'table' then
-    bullet = opts.bullet or bullet
-    guide = opts.guide or guide
-    if opts.spacing == false then
-      spacing = false
-    end
-    if type(opts.gap) == 'number' then
-      gap = math.max(0, math.floor(opts.gap))
-    end
+  if type(opts) ~= 'table' then
+    return DEFAULTS.bullet, DEFAULTS.guide, DEFAULTS.spacing, DEFAULTS.gap
   end
-  return bullet, guide, spacing, gap
+  local guide = opts.guide
+  if guide == nil then
+    guide = DEFAULTS.guide
+  end
+  return opts.bullet or DEFAULTS.bullet,
+    guide,
+    opts.spacing ~= false,
+    type(opts.gap) == 'number' and math.max(0, math.floor(opts.gap)) or DEFAULTS.gap
 end
 
---- Display cells the inline spacing adds before the text of a line with
---- `indent` leading whitespace chars. Anything rendered at a text column
---- (inline images) must shift right by this much to stay aligned.
-function M.extra_cells(indent)
+--- Display cells the inline pads add before the text of `line`, which has `indent` leading
+--- whitespace chars. Anything positioned by text column (inline images) must shift right by
+--- this much to stay aligned. The indent characters themselves are not counted: they are
+--- real cells that the pads only draw between.
+function M.extra_cells(indent, line)
   if config.options.pads == false or indent <= 0 then
     return 0
   end
-  local _, _, spacing, gap = pad_opts()
-  return (spacing and indent - 1 or 0) + gap
+  local bullet, _, spacing, gap = pad_opts()
+  local width = spacing and indent - 1 or 0
+  if not (line and line:match('^[ \t]+%d+%.')) then
+    width = width + vim.fn.strdisplaywidth(bullet) + gap
+  end
+  return width
 end
 
 function M.render(bufnr)
@@ -78,21 +95,37 @@ function M.render(bufnr)
       local ws = line:match('^([ \t]+)')
       if ws then
         local n = #ws
+        -- A line that numbers itself already has a marker, and Cosense drops the bullet for
+        -- it rather than showing both. The indent still gets its widening, so a numbered
+        -- item and a bulleted one at the same depth line up.
+        local numbered = line:match('^[ \t]+%d+%.') ~= nil
         for i = 0, n - 1 do
           local last = i == n - 1
-          vim.api.nvim_buf_set_extmark(bufnr, M.ns, lnum - 1, i, {
-            virt_text = { { last and bullet or guide, last and 'ChatoraPadBullet' or 'ChatoraPadGuide' } },
-            virt_text_pos = 'overlay',
-            hl_mode = 'combine',
-          })
-          -- Widen each *guide* level to 2 display cells ('┃ ') so nesting
-          -- reads as a list; the bullet level only gets `gap` extra spaces,
-          -- keeping the bullet next to its text.
-          local pad = last and gap or (spacing and 1 or 0)
-          if pad > 0 then
-            vim.api.nvim_buf_set_extmark(bufnr, M.ns, lnum - 1, i + 1, {
-              virt_text = { { string.rep(' ', pad), 'ChatoraPadGuide' } },
+          -- One inline run per indent character, drawn before it: the widening that makes
+          -- each level read as a step, and on the last level the bullet too.
+          local chunks = {}
+          if i > 0 and spacing then
+            chunks[#chunks + 1] = { ' ', 'ChatoraPadGuide' }
+          end
+          if last and not numbered then
+            chunks[#chunks + 1] = { bullet, 'ChatoraPadBullet' }
+            if gap > 0 then
+              chunks[#chunks + 1] = { string.rep(' ', gap), 'ChatoraPadGuide' }
+            end
+          end
+          if #chunks > 0 then
+            vim.api.nvim_buf_set_extmark(bufnr, M.ns, lnum - 1, i, {
+              virt_text = chunks,
               virt_text_pos = 'inline',
+            })
+          end
+          -- Guides mark the levels above this one, so they land on the indent characters
+          -- the bullet does not. An overlay is right here: a guide sits *on* its column.
+          if guide and not last then
+            vim.api.nvim_buf_set_extmark(bufnr, M.ns, lnum - 1, i, {
+              virt_text = { { guide, 'ChatoraPadGuide' } },
+              virt_text_pos = 'overlay',
+              hl_mode = 'combine',
             })
           end
         end

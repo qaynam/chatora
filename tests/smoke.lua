@@ -244,12 +244,11 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
-  -- pads: indented non-blank lines get guide/bullet extmarks; title line,
-  -- unindented lines, and whitespace-only lines get none.
+  -- pads: one bullet per indented line, and nothing drawn on the text itself.
   do
     local pads = require('chatora.pads')
     local buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+    local lines = {
       'タイトル',
       '本文',
       ' レベル1',
@@ -257,20 +256,89 @@ local ok, err = pcall(function()
       '   ',
       ' code:y.lua',
       '  print(1)',
-    })
+    }
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
     pads.render(buf)
-    local marks = vim.api.nvim_buf_get_extmarks(buf, pads.ns, 0, -1, {})
-    -- Every level is glyph + one cell of slack (spacing for guides, `gap` for
-    -- the bullet). ' レベル1' -> 2, '  レベル2' -> 4, '   ' indent-only -> 6
-    -- (Cosense shows the bullet on empty list items too), ' code:y.lua'
-    -- marker -> 2, code interior and title/plain lines -> none.
-    assert(#marks == 14, 'expected 14 pad extmarks, got ' .. #marks)
+    local marks = vim.api.nvim_buf_get_extmarks(buf, pads.ns, 0, -1, { details = true })
+
+    local bullet_rows = {}
+    for _, mark in ipairs(marks) do
+      local row, col, details = mark[2], mark[3], mark[4]
+      local carries_bullet = false
+      for _, chunk in ipairs(details.virt_text or {}) do
+        carries_bullet = carries_bullet or chunk[1]:find('●', 1, true) ~= nil
+      end
+      if carries_bullet then
+        -- An overlay is replaced *by* the glyph, so a bullet the font draws two cells wide
+        -- would paint over the line's first real character. Inline text pushes instead.
+        assert(details.virt_text_pos == 'inline', 'the bullet must be inline, not an overlay')
+        bullet_rows[row] = (bullet_rows[row] or 0) + 1
+      end
+      -- Anything at or past the first text byte moves an empty list item's end-of-line
+      -- cursor off the column its siblings' text starts at.
+      local indent = #(lines[row + 1]:match('^[ \t]*') or '')
+      assert(col < indent, 'pads must not draw at or past the first text byte')
+    end
+
+    -- Every indented line outside a code block gets exactly one bullet, the empty list
+    -- item included (Cosense shows one there too); the code interior gets none.
+    for _, row in ipairs({ 2, 3, 4, 5 }) do
+      assert(bullet_rows[row] == 1, 'expected one bullet on row ' .. row)
+    end
+    for _, row in ipairs({ 0, 1, 6 }) do
+      assert(bullet_rows[row] == nil, 'expected no bullet on row ' .. row)
+    end
 
     require('chatora.config').options.pads = false
     pads.render(buf)
     marks = vim.api.nvim_buf_get_extmarks(buf, pads.ns, 0, -1, {})
     assert(#marks == 0, 'expected no pad extmarks when pads=false')
     require('chatora.config').options.pads = true
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
+  -- surround: the visual-mode decoration keys, including pressing one twice.
+  do
+    local surround = require('chatora.surround')
+    local buf = vim.api.nvim_create_buf(false, true)
+    local prev = vim.api.nvim_get_current_buf()
+    vim.api.nvim_win_set_buf(0, buf)
+
+    --- Select bytes [from, to] of `text` (1-based, inclusive) and press each marker.
+    local function press(text, from, to, markers)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { text })
+      vim.api.nvim_win_set_cursor(0, { 1, from - 1 })
+      vim.cmd('normal! v')
+      vim.api.nvim_win_set_cursor(0, { 1, to - 1 })
+      for _, marker in ipairs(markers) do
+        surround.wrap(marker)
+      end
+      vim.cmd('normal! \27')
+      return vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1]
+    end
+
+    local cases = {
+      { 'hello world', 1, 5, { '*' }, '[* hello] world' },
+      -- Repeating the marker grows the run rather than nesting: this is how [***] is typed.
+      { 'hello world', 1, 5, { '*', '*', '*' }, '[*** hello] world' },
+      { 'hello', 1, 5, { '*', '*', '*', '*', '*', '*' }, '[***** hello]' },
+      { 'hello world', 1, 5, { '[' }, '[hello] world' },
+      { 'hello world', 1, 5, { '[', '[' }, 'hello world' },
+      { 'hello', 1, 5, { '_', '_' }, 'hello' },
+      { 'hello', 1, 5, { '*', '/' }, '[*/ hello]' },
+      -- Multibyte: the selection must cover whole characters, not bytes.
+      { 'あいうえお', 1, 9, { '*' }, '[* あいう]えお' },
+      { 'a bold b', 3, 6, { '*' }, 'a [* bold] b' },
+    }
+    for _, case in ipairs(cases) do
+      local got = press(case[1], case[2], case[3], case[4])
+      assert(
+        got == case[5],
+        ('surround %s: expected %q, got %q'):format(vim.inspect(case[4]), case[5], got)
+      )
+    end
+
+    vim.api.nvim_win_set_buf(0, prev)
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
@@ -305,8 +373,13 @@ local ok, err = pcall(function()
     local config = require('chatora.config')
     assert(pads.extra_cells(0) == 0, 'an unindented line gains nothing')
     -- Level 1 is bullet + gap; each further level adds guide + spacing.
-    assert(pads.extra_cells(1) == 1, 'indent 1: gap only, got ' .. pads.extra_cells(1))
-    assert(pads.extra_cells(2) == 2, 'indent 2: one guide spacing + gap, got ' .. pads.extra_cells(2))
+    assert(pads.extra_cells(1) == 1, 'indent 1: the bullet only, got ' .. pads.extra_cells(1))
+    assert(
+      pads.extra_cells(2) == 2,
+      'indent 2: one level of widening + the bullet, got ' .. pads.extra_cells(2)
+    )
+    -- A numbered item draws no bullet, so nothing shifts for it either.
+    assert(pads.extra_cells(2, '  1. foo') == 1, 'a numbered item gains only the widening')
     config.options.pads = false
     assert(pads.extra_cells(3) == 0, 'no shift when pads are disabled')
     config.options.pads = true

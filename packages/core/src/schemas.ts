@@ -168,7 +168,24 @@ export const PageV2ResponseSchema = Schema.Struct({
   pin: optionalNumber,
   pageRank: optionalNumber,
   snapshotCount: optionalNumber,
+  user: Schema.optionalWith(Schema.NullOr(UserRefSchema), { exact: true }),
   lastUpdateUser: Schema.optionalWith(Schema.NullOr(UserRefSchema), { exact: true }),
+})
+
+// `/api/projects/<name>/users` — the page body names its author by id alone, so this is
+// where an id becomes something to show. Members who have left survive in
+// `memberSnapshots`, which is why an author can still be named after they are gone.
+//
+// It also carries `projectId`, and is the only route to it that a personal access token can
+// take: plain `/api/projects/<name>` answers a PAT with 401 (cosense-cli reaches for this
+// same endpoint in resolveProjectId.ts for exactly that reason).
+export const ProjectUsersResponseSchema = Schema.Struct({
+  projectId: optionalString,
+  users: Schema.optionalWith(Schema.Array(UserRefSchema), { default: () => [] }),
+  memberSnapshots: Schema.optionalWith(
+    Schema.Array(Schema.Struct({ data: Schema.optionalWith(UserRefSchema, { exact: true }) })),
+    { default: () => [] },
+  ),
 })
 
 export const Links1HopResponseSchema = Schema.Struct({

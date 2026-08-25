@@ -148,6 +148,8 @@ local function finalize_buffer(bufnr, project, title)
   require('chatora.spacing').attach(bufnr)
   require('chatora.completion').attach(bufnr)
   require('chatora.keymaps').attach(bufnr)
+  require('chatora.surround').attach(bufnr)
+  require('chatora.emptylink').attach(bufnr)
   -- BufEnter fired while this page's content was still being fetched, when sync refuses to
   -- touch the buffer, so the poll has to be started from here instead.
   require('chatora.sync').watch(bufnr)

@@ -11,6 +11,7 @@ import {
   PreviewResponseSchema,
   ProjectDetailSchema,
   ProjectsResponseSchema,
+  ProjectUsersResponseSchema,
   SearchFullTextResponseSchema,
   SearchVectorResponseSchema,
   SubmitResponseSchema,
@@ -25,10 +26,12 @@ import type {
   PreviewResponse,
   ProjectDetail,
   ProjectSummary,
+  ProjectUsers,
   RelatedPages,
   SearchResult,
   SubmitResponse,
   TitleEntry,
+  UserRef,
   VectorResult,
 } from './types'
 
@@ -168,6 +171,10 @@ const decode = <A, I>(
 export interface CosenseApiShape {
   readonly me: () => Effect.Effect<Me, CosenseApiError, HttpClient>
   readonly projects: () => Effect.Effect<readonly ProjectSummary[], CosenseApiError, HttpClient>
+  /** Everyone who can be named as a page's author, current members and departed alike. */
+  readonly projectUsers: (
+    project: string,
+  ) => Effect.Effect<ProjectUsers, CosenseApiError, HttpClient>
   /** One project's own settings, including where it wants uploaded images to go. */
   readonly projectDetail: (
     project: string,
@@ -241,6 +248,18 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
       Effect.flatMap((res) => decode(ProjectDetailSchema, res)),
     )
 
+  const projectUsers: CosenseApiShape['projectUsers'] = (project) =>
+    request(`/api/projects/${encodeURIComponent(project)}/users`).pipe(
+      Effect.flatMap((res) => decode(ProjectUsersResponseSchema, res)),
+      Effect.map((data) => ({
+        projectId: data.projectId,
+        users: [
+          ...data.users,
+          ...data.memberSnapshots.flatMap((snapshot) => (snapshot.data ? [snapshot.data] : [])),
+        ],
+      })),
+    )
+
   const listPages: CosenseApiShape['listPages'] = (project, opts = {}) => {
     const params = new URLSearchParams()
     if (opts.sort !== undefined) params.set('sort', opts.sort)
@@ -279,6 +298,7 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
                 pin: data.pin,
                 pageRank: data.pageRank,
                 snapshotCount: data.snapshotCount,
+                ...(data.user ? { user: data.user } : {}),
                 ...(data.lastUpdateUser ? { lastUpdateUser: data.lastUpdateUser } : {}),
               }),
       ),
@@ -370,6 +390,7 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
     me,
     projects,
     projectDetail,
+    projectUsers,
     listPages,
     getPage,
     relatedPages,

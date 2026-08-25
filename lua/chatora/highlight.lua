@@ -29,9 +29,12 @@ end
 local function specs()
   return {
     title = { fg = fg_of('Title'), bold = true },
-    link = { fg = fg_of('Function'), underline = true },
-    projectLink = { fg = fg_of('Constant'), underline = true },
-    externalLink = { fg = fg_of('Special'), underline = true },
+    -- Cosense's own convention, and the only thing that tells the two apart at a glance:
+    -- a link inside the project is plain colored text, one that leaves it is underlined.
+    -- Same color for both, so the underline is carrying the distinction by itself.
+    link = { fg = fg_of('Function') },
+    projectLink = { fg = fg_of('Function') },
+    externalLink = { fg = fg_of('Function'), underline = true },
     hashtag = { fg = fg_of('Special') },
     code = { fg = fg_of('String') },
     codeBlock = { fg = fg_of('String') },

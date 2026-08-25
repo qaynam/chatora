@@ -56,6 +56,12 @@ const run = (routes: readonly (readonly [string, (init: RequestInit) => Response
 const PROJECT = (uploadImageTo: string, gyazoTeamsName: string | null = null) =>
   ['/api/projects/my-project', () => json({ id: 'proj1', uploadImageTo, gyazoTeamsName })] as const
 
+/** What a PAT sees: settings refused, but `/users` still hands over the project id. */
+const PAT_ONLY = [
+  ['/api/projects/my-project/users', () => json({ projectId: 'proj1', users: [] })],
+  ['/api/projects/my-project', () => new Response('', { status: 401 })],
+] as const
+
 const GYAZO_ROUTES = [
   ['/api/login/gyazo/oauth-upload/token', () => json({ token: 'gyazo-token' })],
   ['upload.gyazo.com', () => json({ permalink_url: 'https://gyazo.com/abc' })],
@@ -103,9 +109,18 @@ describe('uploadImage destination', () => {
     expect(gcs.calls.some((c) => c.url.includes('/api/gcs/'))).toBe(true)
   })
 
-  test('unreadable project settings fall back to Gyazo', async () => {
+  // The case a personal access token is always in: settings 401, so the preference is
+  // unknown — and Gyazo, the destination a PAT can never reach, must not be the guess.
+  test('settings a PAT cannot read still upload, to the project storage', async () => {
+    const { result, calls } = run([...PAT_ONLY, ...GCS_ROUTES, ...GYAZO_ROUTES])
+    expect(await result).toMatchObject({ ok: true, url: 'https://scrapbox.io/files/file1.png' })
+    expect(calls.some((c) => c.url.includes('gyazo'))).toBe(false)
+  })
+
+  test('with neither settings nor a project id, Gyazo is all that is left', async () => {
     const { result } = run([
-      ['/api/projects/my-project', () => new Response('nope', { status: 500 })],
+      ['/api/projects/my-project/users', () => new Response('', { status: 401 })],
+      ['/api/projects/my-project', () => new Response('', { status: 401 })],
       ...GYAZO_ROUTES,
     ])
     expect(await result).toMatchObject({ ok: true, url: 'https://gyazo.com/abc' })

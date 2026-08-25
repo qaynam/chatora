@@ -6,6 +6,7 @@ import type {
   KeychainError,
   Me,
   PageDetailLine,
+  ProjectUsers,
   TitleEntry,
   VectorResultPage,
 } from '@chatora/core'
@@ -22,8 +23,16 @@ export interface BasePageState {
 }
 
 const TITLES_CACHE_TTL_MS = 60_000
+// A project's roster changes far more slowly than its pages, and it is only ever read to
+// put a name on an author, so a stale entry costs nothing worse than a stale display name.
+const USERS_CACHE_TTL_MS = 600_000
 const VECTOR_CACHE_TTL_MS = 30_000
 const VECTOR_CACHE_MAX = 200
+
+interface UsersCacheEntry {
+  readonly fetchedAt: number
+  readonly value: ProjectUsers
+}
 
 interface TitlesCacheEntry {
   readonly fetchedAt: number
@@ -80,6 +89,8 @@ export interface SessionStateShape {
     project: string,
     query: string,
   ) => Effect.Effect<readonly VectorResultPage[], CosenseApiError, HttpClient>
+  /** `project`'s id and everyone who can be named as an author in it. Empty when unreadable. */
+  readonly getProjectUsers: (project: string) => Effect.Effect<ProjectUsers, never, HttpClient>
   readonly getTitles: (
     project: string,
   ) => Effect.Effect<readonly TitleEntry[], CosenseApiError, HttpClient>
@@ -109,6 +120,7 @@ export const makeSessionStateLayer = (
       const credentialRef = yield* SynchronizedRef.make<CredentialCache>(UNRESOLVED_CREDENTIAL)
       const verifiedRef = yield* SynchronizedRef.make<VerifiedCache>(UNATTEMPTED_VERIFIED)
       const titlesCacheRef = yield* Ref.make<ReadonlyMap<string, TitlesCacheEntry>>(new Map())
+      const usersCacheRef = yield* Ref.make<ReadonlyMap<string, UsersCacheEntry>>(new Map())
       const vectorCacheRef = yield* Ref.make<ReadonlyMap<string, VectorCacheEntry>>(new Map())
       const pagesRef = yield* Ref.make<ReadonlyMap<string, BasePageState>>(new Map())
 
@@ -211,6 +223,27 @@ export const makeSessionStateLayer = (
           return result.pages
         })
 
+      const getProjectUsers: SessionStateShape['getProjectUsers'] = (project) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          const cache = yield* Ref.get(usersCacheRef)
+          const cached = cache.get(project)
+          if (cached && now - cached.fetchedAt < USERS_CACHE_TTL_MS) return cached.value
+
+          const empty: ProjectUsers = { projectId: '', users: [] }
+          const apiOpt = yield* getApi()
+          if (Option.isNone(apiOpt)) return empty
+          // A roster that cannot be read is not a reason to fail whatever wanted it: the
+          // caller falls back to showing the author's id, or nothing at all.
+          const value = yield* apiOpt.value
+            .projectUsers(project)
+            .pipe(Effect.orElseSucceed(() => empty))
+          yield* Ref.update(usersCacheRef, (map) =>
+            new Map(map).set(project, { fetchedAt: now, value }),
+          )
+          return value
+        })
+
       const getTitles: SessionStateShape['getTitles'] = (project) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
@@ -253,6 +286,7 @@ export const makeSessionStateLayer = (
         storeCredential,
         removeCredential,
         searchVectorCached,
+        getProjectUsers,
         getTitles,
         getPage,
         setPage,

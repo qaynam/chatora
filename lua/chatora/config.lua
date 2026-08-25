@@ -28,6 +28,9 @@ local defaults = {
   completion = 'auto',
   external_link = 'confirm',
   keymaps = true,
+  -- Visual-mode decoration keys: `*` wraps the selection in [* ], `[` in [ ], and so on.
+  -- A list of marker characters restricts it to those; false installs none of them.
+  surround = true,
   log = false,
 
   images = 'auto',

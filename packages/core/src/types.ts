@@ -28,6 +28,12 @@ export interface ProjectSummary {
   readonly updated: number
 }
 
+export interface ProjectUsers {
+  /** Empty when the roster could not be read. */
+  readonly projectId: string
+  readonly users: readonly UserRef[]
+}
+
 export interface ProjectDetail {
   readonly id: string
   readonly name: string
@@ -96,6 +102,8 @@ export interface PageDetail {
   readonly pageRank: number
   /** Stored revisions — the web page menu's ページ履歴. */
   readonly snapshotCount: number
+  /** Author. The page body carries only an id; `projectUsers` turns it into a name. */
+  readonly user?: UserRef | null
   readonly lastUpdateUser?: UserRef | null
 }
 

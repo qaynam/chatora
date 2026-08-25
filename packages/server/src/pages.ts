@@ -14,11 +14,13 @@ import type {
   RelatedPage,
   SearchResultPage,
   SubmitResponse,
+  TitleEntry,
 } from '@chatora/core'
 import { AccountStore, computeChanges, createNewLineId, mergeThreeWay } from '@chatora/core'
 import { Effect, Either, Option } from 'effect'
 import { type ConcealRange, computeConcealRanges } from './decorations'
 import { textToLines } from './lines'
+import { computeInternalLinks, titleKey } from './links'
 import { computeQuoteRanges, type QuoteRange } from './quote'
 import { ReadState } from './readState'
 import { type BasePageState, SessionState } from './state'
@@ -558,6 +560,59 @@ export const previewPage = (params: {
         conceal: computeConcealRanges(text),
         quotes: computeQuoteRanges(text),
         meta: toPageMeta(page),
+      }
+    }),
+  )
+
+// ---------------------------------------------------------------------------
+// emptyLinks
+// ---------------------------------------------------------------------------
+
+export interface EmptyLinksResult {
+  readonly ok: true
+  readonly links: readonly { line: number; startChar: number; endChar: number }[]
+}
+
+/**
+ * The links on a page that point at nothing — Cosense's red links.
+ *
+ * Answered from the project's title index, the same cached list the link completion reads,
+ * so this costs one request per minute however often a page is edited. That cache is also
+ * why the answer can lag: a page created elsewhere in the last minute still reads as empty,
+ * which is the right way round — a link wrongly shown as empty corrects itself, and the
+ * alternative is a request per link.
+ *
+ * An unreadable index yields no links rather than marking every link on the page.
+ */
+export const emptyLinks = (
+  uri: string,
+  docText: string | undefined,
+): Effect.Effect<EmptyLinksResult | ErrEnvelope, never, SessionState | HttpClient> =>
+  handle(
+    Effect.gen(function* () {
+      if (docText === undefined) return err('error', 'document not synced')
+      const session = yield* SessionState
+      const baseOpt = yield* session.getPage(uri)
+      if (Option.isNone(baseOpt)) return { ok: true as const, links: [] }
+      const base = baseOpt.value
+
+      const links = computeInternalLinks(docText)
+      if (links.length === 0) return { ok: true as const, links: [] }
+
+      const titles = yield* session
+        .getTitles(base.project)
+        .pipe(Effect.orElseSucceed(() => [] as readonly TitleEntry[]))
+      if (titles.length === 0) return { ok: true as const, links: [] }
+      const known = new Set(titles.map((entry) => titleKey(entry.title)))
+      // The page being edited is not in the index until it is saved, and a page linking to
+      // itself is not a red link.
+      known.add(titleKey(base.title))
+
+      return {
+        ok: true as const,
+        links: links
+          .filter((link) => !known.has(titleKey(link.title)))
+          .map(({ line, startChar, endChar }) => ({ line, startChar, endChar })),
       }
     }),
   )
