@@ -7,36 +7,40 @@ local M = {}
 local uv = vim.uv or vim.loop
 local REOPEN_DEBOUNCE_MS = 120
 
---- Mirrors the server's detectLink: true only when the cursor sits inside a
---- *closed* bracket pair `[...|...]` (and not inside `[[`).
-local function in_link_context(line, col)
+--- The `[...]` the cursor sits inside, as the 1-based byte positions of its brackets, or
+--- nil. Mirrors the server's detectLink: the pair has to be closed, and `[[` is not one.
+function M.link_range(line, col)
   local open = nil
   for i = col, 1, -1 do
     local ch = line:sub(i, i)
     if ch == ']' then
-      return false
+      return nil
     end
     if ch == '[' then
       if line:sub(i - 1, i - 1) == '[' then
-        return false
+        return nil
       end
       open = i
       break
     end
   end
   if not open then
-    return false
+    return nil
   end
   for j = col + 1, #line do
     local ch = line:sub(j, j)
     if ch == '[' then
-      return false
+      return nil
     end
     if ch == ']' then
-      return true
+      return open, j
     end
   end
-  return false
+  return nil
+end
+
+local function in_link_context(line, col)
+  return M.link_range(line, col) ~= nil
 end
 
 local function show_menu(bufnr)
@@ -168,6 +172,77 @@ function M.attach(bufnr)
   })
 
   vim.api.nvim_create_autocmd({ 'InsertLeave', 'BufUnload' }, { buffer = bufnr, callback = stop })
+end
+
+--- The page title out of a completion entry, whatever shape the engine hands it in. The
+--- server puts the title in `label`; the built-in menu may only keep the inserted form,
+--- which is the title in brackets.
+function M.title_of(item)
+  if type(item) ~= 'table' then
+    return nil
+  end
+  local label = item.label or item.abbr or item.word
+  if type(label) ~= 'string' or label == '' then
+    return nil
+  end
+  label = label:gsub('^%[', ''):gsub('%]$', ''):gsub('^#', '')
+  return label ~= '' and label or nil
+end
+
+-- Completion engines each own their menu, and none of them agree on how to ask what is
+-- selected — so all three are tried and whichever is installed answers.
+local SELECTED = {
+  function()
+    local ok, blink = pcall(require, 'blink.cmp')
+    if ok and type(blink.get_selected_item) == 'function' then
+      return blink.get_selected_item()
+    end
+  end,
+  function()
+    local ok, cmp = pcall(require, 'cmp')
+    if ok and type(cmp.get_selected_entry) == 'function' then
+      local entry = cmp.get_selected_entry()
+      return entry and entry:get_completion_item() or nil
+    end
+  end,
+  function()
+    if tonumber(vim.fn.pumvisible()) ~= 1 then
+      return nil
+    end
+    local info = vim.fn.complete_info({ 'selected', 'items' })
+    -- -1 is "the menu is open but nothing is highlighted".
+    return (info.selected or -1) >= 0 and (info.items or {})[info.selected + 1] or nil
+  end,
+}
+
+--- The page title the completion menu currently has highlighted, or nil when no menu is
+--- open, nothing in it is selected, or the entry is not a page.
+function M.selected_title()
+  for _, ask in ipairs(SELECTED) do
+    local ok, item = pcall(ask)
+    if ok and item then
+      local title = M.title_of(item)
+      if title then
+        return title
+      end
+    end
+  end
+  return nil
+end
+
+--- Close the menu, so the edit that follows is not read as another keystroke into it.
+function M.dismiss()
+  local ok, blink = pcall(require, 'blink.cmp')
+  if ok and type(blink.hide) == 'function' then
+    pcall(blink.hide)
+  end
+  local ok_cmp, cmp = pcall(require, 'cmp')
+  if ok_cmp and type(cmp.close) == 'function' then
+    pcall(cmp.close)
+  end
+  if tonumber(vim.fn.pumvisible()) == 1 then
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-e>', true, false, true), 'n', false)
+  end
 end
 
 return M

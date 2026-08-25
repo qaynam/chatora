@@ -297,6 +297,30 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- completion: the pieces the icon key needs to turn a highlighted suggestion into
+  -- [title.icon]. The engines themselves are not installed here, so only the parts that
+  -- do not need one are exercised.
+  do
+    local completion = require('chatora.completion')
+
+    -- link_range: the bracket pair the cursor is inside, as 1-based byte positions.
+    local open, close = completion.link_range('a [foo] b', 5)
+    assert(open == 3 and close == 7, 'link_range mismatch: ' .. tostring(open) .. ',' .. tostring(close))
+    assert(completion.link_range('a [[foo]] b', 6) == nil, '[[ ]] is an image, not a link')
+    assert(completion.link_range('no brackets', 5) == nil, 'expected nil outside a pair')
+    assert(completion.link_range('a [unclosed', 5) == nil, 'an unclosed pair is not a link context')
+
+    -- title_of: whatever shape the engine hands an entry over in.
+    assert(completion.title_of({ label = 'ページ' }) == 'ページ', 'label should win')
+    assert(completion.title_of({ word = '[ページ]' }) == 'ページ', 'the inserted form is bracketed')
+    assert(completion.title_of({ abbr = '#タグ' }) == 'タグ', 'a hashtag entry names the same page')
+    assert(completion.title_of({}) == nil, 'an entry with no text names nothing')
+    assert(completion.title_of(nil) == nil, 'nil is not an entry')
+
+    -- With no menu open there is nothing selected, so the key falls back to the own icon.
+    assert(completion.selected_title() == nil, 'expected no selection without a menu')
+  end
+
   -- surround: the visual-mode decoration keys, including pressing one twice.
   do
     local surround = require('chatora.surround')
@@ -305,6 +329,7 @@ local ok, err = pcall(function()
     vim.api.nvim_win_set_buf(0, buf)
 
     --- Select bytes [from, to] of `text` (1-based, inclusive) and press each marker.
+    --- Returns the resulting line and the mode the last press left behind.
     local function press(text, from, to, markers)
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, { text })
       vim.api.nvim_win_set_cursor(0, { 1, from - 1 })
@@ -313,8 +338,9 @@ local ok, err = pcall(function()
       for _, marker in ipairs(markers) do
         surround.wrap(marker)
       end
+      local mode = vim.fn.mode()
       vim.cmd('normal! \27')
-      return vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1]
+      return vim.api.nvim_buf_get_lines(buf, 0, -1, false)[1], mode
     end
 
     local cases = {
@@ -323,7 +349,6 @@ local ok, err = pcall(function()
       { 'hello world', 1, 5, { '*', '*', '*' }, '[*** hello] world' },
       { 'hello', 1, 5, { '*', '*', '*', '*', '*', '*' }, '[***** hello]' },
       { 'hello world', 1, 5, { '[' }, '[hello] world' },
-      { 'hello world', 1, 5, { '[', '[' }, 'hello world' },
       { 'hello', 1, 5, { '_', '_' }, 'hello' },
       { 'hello', 1, 5, { '*', '/' }, '[*/ hello]' },
       -- Multibyte: the selection must cover whole characters, not bytes.
@@ -337,6 +362,13 @@ local ok, err = pcall(function()
         ('surround %s: expected %q, got %q'):format(vim.inspect(case[4]), case[5], got)
       )
     end
+
+    -- A decoration key stays in visual mode so it can be pressed again; `[` has nothing to
+    -- build on, so it hands back normal mode.
+    local _, after_star = press('hello', 1, 5, { '*' })
+    assert(after_star:find('v'), 'expected * to stay in visual mode, got ' .. after_star)
+    local _, after_bracket = press('hello', 1, 5, { '[' })
+    assert(after_bracket == 'n', 'expected [ to return to normal mode, got ' .. after_bracket)
 
     vim.api.nvim_win_set_buf(0, prev)
     vim.api.nvim_buf_delete(buf, { force = true })

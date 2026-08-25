@@ -108,6 +108,31 @@ local function insert_at_cursor(bufnr, text)
   vim.api.nvim_win_set_cursor(0, { row, col + #text })
 end
 
+--- Insert an icon notation. Which icon depends on what is on screen: with a link
+--- completion open and an entry highlighted it is *that page's* icon, replacing the
+--- half-typed `[...]` outright — the same thing the web editor does when the key is pressed
+--- with a suggestion focused. With no menu it falls back to the user's own icon.
+local function insert_icon(bufnr)
+  local completion = require('chatora.completion')
+  local title = completion.selected_title()
+  if title then
+    local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+    local open, close = completion.link_range(vim.api.nvim_get_current_line(), col)
+    if open then
+      -- Dismissed first: an open menu treats the replacement as more typing and re-filters
+      -- against text that is no longer a query.
+      completion.dismiss()
+      local text = '[' .. title .. '.icon]'
+      vim.api.nvim_buf_set_text(bufnr, row - 1, open - 1, row - 1, close, { text })
+      vim.api.nvim_win_set_cursor(0, { row, open - 1 + #text })
+      return
+    end
+  end
+  with_own_name(function(name)
+    insert_at_cursor(bufnr, '[' .. name .. '.icon]')
+  end)
+end
+
 local function char_at(line, col)
   return line:sub(col + 1, col + 1)
 end
@@ -232,10 +257,12 @@ function M.attach(bufnr)
     with_own_name(function() end, { silent = true })
     for _, key in ipairs(as_list(opts.insert_icon)) do
       vim.keymap.set('i', key, function()
-        with_own_name(function(name)
-          insert_at_cursor(bufnr, '[' .. name .. '.icon]')
-        end)
-      end, { buffer = bufnr, silent = true, desc = 'chatora: 自分のアイコンを挿入' })
+        insert_icon(bufnr)
+      end, {
+        buffer = bufnr,
+        silent = true,
+        desc = 'chatora: アイコンを挿入（リンク補完中はその候補のアイコン）',
+      })
     end
   end
 

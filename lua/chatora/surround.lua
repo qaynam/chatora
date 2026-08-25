@@ -113,8 +113,11 @@ local function decorate(run, body)
   return run == '' and '[' .. body .. ']' or '[' .. run .. ' ' .. body .. ']'
 end
 
---- Wrap the visual selection in `marker`'s notation, leaving the body selected so the key
---- can be pressed again to build on what it just produced.
+--- Wrap the visual selection in `marker`'s notation.
+---
+--- A decoration marker leaves the body selected, which is what lets the key be pressed
+--- again to build on its own result — `[*** ]` is three presses of `*`. `[` has nothing to
+--- build, so it returns to normal mode with the cursor on the text it just linked.
 function M.wrap(marker)
   local row, from, to, line = selection()
   if not row then
@@ -129,7 +132,6 @@ function M.wrap(marker)
   local start, stop, run = enclosing(line, from, to)
   local body, replacement = selected, nil
   if start and marker == '[' then
-    -- `[` toggles the brackets themselves, so a second press gives the bare text back.
     replacement = selected
   elseif start and run ~= '' then
     local updated = next_run(run, marker)
@@ -146,7 +148,13 @@ function M.wrap(marker)
   local edit_from, edit_to = start and start or from, start and stop or to
   vim.api.nvim_buf_set_text(0, row, edit_from, row, edit_to, { replacement })
   local offset = replacement == body and 0 or (replacement:find(body, 1, true) or 1) - 1
-  reselect(row, edit_from + offset, edit_from + offset + #body)
+  local body_at = edit_from + offset
+  if marker == '[' then
+    vim.cmd('normal! \27')
+    vim.api.nvim_win_set_cursor(0, { row + 1, body_at })
+    return
+  end
+  reselect(row, body_at, body_at + #body)
 end
 
 --- Bind every marker in visual mode on a page buffer.
