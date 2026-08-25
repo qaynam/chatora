@@ -22,7 +22,7 @@ end
 -- inline text, which on an empty list item would otherwise leave the cursor a cell left of
 -- where typing lands. That displaced indent character is also the gap the bullet needs, so
 -- `gap` is only ever extra slack.
-local DEFAULTS = { bullet = '●', guide = false, spacing = true, gap = 0 }
+local DEFAULTS = { bullet = '•', guide = false, spacing = true, gap = 0 }
 
 local function pad_opts()
   local opts = config.options.pads
@@ -53,6 +53,11 @@ function M.extra_cells(indent, line)
     width = width + vim.fn.strdisplaywidth(bullet) + gap
   end
   return width
+end
+
+--- The bullet glyph in effect, for callers that need to recognise one on screen.
+function M.default_bullet()
+  return (pad_opts())
 end
 
 function M.render(bufnr)

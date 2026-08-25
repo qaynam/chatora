@@ -26,29 +26,98 @@ local function bg_of(name)
   return nil
 end
 
+--- The first of `names` whose foreground is not already in `taken`, or a synthesized one.
+---
+--- Emphasis is graded by color, so the levels have to differ from each other and from the
+--- link color — an emphasis wearing a link's blue reads as a link. Borrowing alone cannot
+--- promise that: Neovim's own default colorscheme gives Constant and Keyword the same hue,
+--- which would collapse two levels into one look. So a candidate that is already spoken
+--- for is skipped, and when a theme has nothing distinct left the fallback is used, chosen
+--- to sit legibly on a light and a dark background alike.
+local function distinct_fg(names, taken, fallback)
+  for _, name in ipairs(names) do
+    local fg = fg_of(name)
+    if fg and not taken[fg] then
+      taken[fg] = true
+      return fg
+    end
+  end
+  return fallback
+end
+
+--- A background one step away from the editor's own — lighter on a dark theme, darker on a
+--- light one. Cosense draws inline code as a grey box rather than colored text, and mixing
+--- toward the far end of the theme is the only way to get "a box" out of an arbitrary
+--- colorscheme; borrowing CursorLine instead would make the badge vanish on the cursor line.
+local SHADE_RATIO = 0.14
+
+local function badge_bg()
+  local base = bg_of('Normal')
+  if not base then
+    return bg_of('CursorLine')
+  end
+  local target = vim.o.background == 'light' and 0 or 0xffffff
+  local mixed = 0
+  for shift = 0, 16, 8 do
+    local from = math.floor(base / 2 ^ shift) % 256
+    local to = math.floor(target / 2 ^ shift) % 256
+    mixed = mixed + math.floor(from + (to - from) * SHADE_RATIO + 0.5) * 2 ^ shift
+  end
+  return math.floor(mixed)
+end
+
+-- Used only when a colorscheme has no hue left that some other token has not taken.
+local EMPHASIS_FALLBACK = { level2 = 0xd78700, level3 = 0xaf5fd7 }
+
 local function specs()
+  local link = fg_of('Function')
+  -- A hashtag is a link to a page in Cosense, so sharing the link's color is correct and
+  -- is not counted as taken; the emphasis levels are what must stay clear of it.
+  local taken = {}
+  for _, color in ipairs({ link, fg_of('Normal') }) do
+    if color then
+      taken[color] = true
+    end
+  end
   return {
     title = { fg = fg_of('Title'), bold = true },
     -- Cosense's own convention, and the only thing that tells the two apart at a glance:
     -- a link inside the project is plain colored text, one that leaves it is underlined.
     -- Same color for both, so the underline is carrying the distinction by itself.
-    link = { fg = fg_of('Function') },
-    projectLink = { fg = fg_of('Function') },
-    externalLink = { fg = fg_of('Function'), underline = true },
+    link = { fg = link },
+    projectLink = { fg = link },
+    externalLink = { fg = link, underline = true },
     hashtag = { fg = fg_of('Special') },
-    code = { fg = fg_of('String') },
-    codeBlock = { fg = fg_of('String') },
+    -- Cosense draws code as a badge, not as colored text: a grey box, foreground left
+    -- alone. That also frees the string color, which the emphasis levels below need.
+    code = { bg = badge_bg() },
+    codeBlock = { bg = badge_bg() },
     formula = { fg = fg_of('Special'), italic = true },
     icon = { fg = fg_of('Identifier') },
     quote = { fg = fg_of('Comment'), italic = true },
-    -- Emphasis levels ([*]=bold, [**]=bold2, [***+]=bold3): terminals have a
-    -- single bold weight, so the levels are graded with color on top of bold
-    -- (think font-weight 500/600/800). Colors also keep the emphasis visible
-    -- when the CJK fallback font lacks a bold variant. bold3 uses a soft
-    -- background block instead of underline — underline reads as a link.
+    -- Emphasis levels ([*]=bold, [**]=bold2, [***+]=bold3). Cosense scales these by font
+    -- size, which a terminal cannot do, so they are graded by color on top of bold — which
+    -- also keeps them visible when the CJK fallback font has no bold variant.
+    --
+    -- The hues have to steer clear of the ones already spoken for: blue is a link and a
+    -- box is code, so an emphasis wearing either would read as the wrong thing entirely.
     bold = { bold = true },
-    bold2 = { bold = true, fg = fg_of('Constant') },
-    bold3 = { bold = true, fg = fg_of('Title'), bg = bg_of('CursorLine') },
+    bold2 = {
+      bold = true,
+      fg = distinct_fg(
+        { 'Constant', 'Number', 'WarningMsg', 'Type' },
+        taken,
+        EMPHASIS_FALLBACK.level2
+      ),
+    },
+    bold3 = {
+      bold = true,
+      fg = distinct_fg(
+        { 'Keyword', 'PreProc', 'Statement', 'Identifier', 'Special' },
+        taken,
+        EMPHASIS_FALLBACK.level3
+      ),
+    },
     italic = { italic = true, fg = fg_of('Comment') },
     strike = { strikethrough = true },
     underline = { underline = true },

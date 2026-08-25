@@ -264,9 +264,11 @@ local ok, err = pcall(function()
     local bullet_rows = {}
     for _, mark in ipairs(marks) do
       local row, col, details = mark[2], mark[3], mark[4]
+      -- Read the glyph from the module rather than naming it, so changing the shipped
+      -- bullet does not turn this into a test of what it used to be.
       local carries_bullet = false
       for _, chunk in ipairs(details.virt_text or {}) do
-        carries_bullet = carries_bullet or chunk[1]:find('●', 1, true) ~= nil
+        carries_bullet = carries_bullet or chunk[1]:find(pads.default_bullet(), 1, true) ~= nil
       end
       if carries_bullet then
         -- An overlay is replaced *by* the glyph, so a bullet the font draws two cells wide

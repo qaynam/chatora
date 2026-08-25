@@ -54,7 +54,7 @@ lazy.nvim（GitHub から直接）:
 | `image_height_large` | `image_height * 2` | `[[url]]`（Cosense の大きい画像記法）の高さ |
 | `image_gallery` | `true` | 画像だけの行を大きく描く。行のインデントに揃えて**縦に積む**（横並びは 1 行の高さでしか描けない。下記参照）。数値でその高さ、`false` で従来の行内 1 行 |
 | `image_border` | `true` | 画像自体に合成する枠（ImageMagick）。`{ width = 1, color = '#8888', padding = 12 }`（px、color は ImageMagick の色リテラル） |
-| `pads` | `true` | 箇条書きの中点。`{ bullet = '●', guide = false, spacing = true, gap = 0 }`。`guide` に文字を渡すと上位レベルに縦線を引く（Cosense には無い）。`gap` は中点と本文の間の余白セル数で、既定の 0 でも本文との間にはインデント1文字分が残る |
+| `pads` | `true` | 箇条書きの中点。`{ bullet = '•', guide = false, spacing = true, gap = 0 }`。`guide` に文字を渡すと上位レベルに縦線を引く（Cosense には無い）。`gap` は中点と本文の間の余白セル数で、既定の 0 でも本文との間にはインデント1文字分が残る |
 | `quote` | `true` | `>` 行を GitHub 風の縦棒付きで描く。下記参照 |
 | `conceal` | `true` | 記法マークアップをカーソル行以外で隠す（render-markdown.nvim 方式） |
 | `tables` | `true` | `table:` ブロックの罫線描画。`{ border = false, header = false }` で個別に無効化 |
@@ -159,6 +159,32 @@ quote = {
 `wrap = true`（既定）のとき、折り返された引用の 2 行目以降にも縦棒が続くよう
 `breakindent` と `breakindentopt=shift:2` をページのウィンドウに設定する。この字下げが無いと
 縦棒が折り返し行の 1 文字目を潰すため、`wrap = false` にすると追従自体をやめる。
+
+### 記法の色
+
+既定は colorscheme から借りるが、**同じ色が二度使われないことだけは保証する**。強調は
+Cosense ではフォントサイズで段階を付けるところをターミナルでは色でやるしかないので、
+リンクの色や他の段階と被ると別の意味に読めてしまうため:
+
+| 記法 | 既定の見た目 |
+|---|---|
+| `[link]` / `[/proj/page]` | リンク色（下線なし） |
+| 外部 URL | 同じ色 + **下線** |
+| `` `code` `` / `code:js` | **灰色の背景バッジ**（文字色はそのまま。web の `<code>` と同じ） |
+| `[* 見出し]` | 太字のみ |
+| `[** 見出し]` | 太字 + 色（リンク色とは必ず別） |
+| `[*** 見出し]` 以上 | 太字 + さらに別の色 |
+| 実体のないページへのリンク | 赤（`ChatoraLinkEmpty`） |
+
+バッジの背景は Normal の背景から一段ずらして作る（暗いテーマでは明るく、明るいテーマでは
+暗く）。`CursorLine` を借りるとカーソル行でバッジが消えるため。
+
+全部 `default = true` で定義しているので、自分で `:hi` すれば上書きできる:
+
+```lua
+vim.api.nvim_set_hl(0, '@lsp.type.bold3.cosense', { fg = '#ff8700', bold = true })
+vim.api.nvim_set_hl(0, '@lsp.type.code.cosense', { bg = '#303030' })
+```
 
 ### カスタム装飾記法（`notations`）
 
