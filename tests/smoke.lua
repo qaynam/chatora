@@ -982,6 +982,142 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- buftext: only the run that differs is written, so the extmarks around it survive.
+  do
+    local buftext = require('chatora.buftext')
+    local buf = vim.api.nvim_create_buf(false, true)
+    local ns = vim.api.nvim_create_namespace('smoke_buftext')
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'タイトル', '一行目', '二行目', '三行目' })
+    local top = vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {})
+    local bottom = vim.api.nvim_buf_set_extmark(buf, ns, 3, 0, {})
+
+    assert(buftext.set(buf, { 'タイトル', '一行目', '書き換え', '三行目' }), 'a changed line is written')
+    assert(
+      vim.deep_equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), { 'タイトル', '一行目', '書き換え', '三行目' }),
+      'buftext.set must leave the buffer holding exactly what it was given'
+    )
+    assert(#vim.api.nvim_buf_get_extmark_by_id(buf, ns, top, {}) > 0, 'the mark above survives')
+    assert(
+      vim.api.nvim_buf_get_extmark_by_id(buf, ns, bottom, {})[1] == 3,
+      'the mark below stays on its own line'
+    )
+
+    assert(not buftext.set(buf, vim.api.nvim_buf_get_lines(buf, 0, -1, false)), 'identical text writes nothing')
+    assert(buftext.set(buf, { 'タイトル' }), 'a shorter document is written')
+    assert(#vim.api.nvim_buf_get_lines(buf, 0, -1, false) == 1, 'and ends up short')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
+  -- images: a page that changes one line keeps the pictures that did not move, redraws the
+  -- one that did, and tries again when the backend accepted a placement that never arrived.
+  do
+    local images = require('chatora.images')
+    local buftext = require('chatora.buftext')
+    local lsp = require('chatora.lsp')
+    local orig_backend, orig_request = images.backend, lsp.request
+
+    local placed, closed = {}, {}
+    local healthy = true
+    images.backend = function()
+      return {
+        place = function(_, path, geom)
+          local id = #placed + 1
+          placed[id] = { path = path, row = geom.row }
+          return {
+            close = function()
+              closed[#closed + 1] = id
+            end,
+            ok = function()
+              return healthy
+            end,
+          }
+        end,
+      }
+    end
+
+    -- Its own window: the placements are looked up per window, and the sidebar above pins
+    -- the one it left behind.
+    vim.cmd('new')
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_name(buf, 'cosense://proj/画像')
+    local function lines_of(second)
+      return { '画像', second, '[https://gyazo.com/b]', '[https://gyazo.com/c]' }
+    end
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines_of('[https://gyazo.com/a]'))
+
+    lsp.request = function(method, _, cb)
+      if method == 'chatora/images' then
+        local found = {}
+        for row, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+          local url = line:match('^%[(https://gyazo%.com/%a)%]$')
+          if url then
+            found[#found + 1] = { line = row - 1, startChar = 0, endChar = #line, src = url, standalone = true }
+          end
+        end
+        cb(nil, { ok = true, images = found })
+      elseif method == 'chatora/fetchAsset' then
+        cb(nil, { ok = true, path = '/dev/null' })
+      end
+    end
+
+    images.attach(buf, 'proj')
+    images.refresh(buf)
+    assert(#placed == 3, 'expected a placement per image, got ' .. #placed)
+    assert(#closed == 0, 'nothing to close on a first draw')
+
+    -- Nothing changed at all: no teardown, no redraw.
+    images.refresh(buf)
+    assert(#placed == 3 and #closed == 0, 'an untouched page must not redraw anything')
+
+    -- A line is added between the pictures, which is what a merge looks like. The two
+    -- below it move down with the text and are left alone.
+    buftext.set(buf, {
+      '画像',
+      '[https://gyazo.com/a]',
+      '書き足した行',
+      '[https://gyazo.com/b]',
+      '[https://gyazo.com/c]',
+    })
+    images.refresh(buf)
+    assert(
+      #placed == 3 and #closed == 0,
+      'pictures that only moved with the text must be left alone, got '
+        .. #placed
+        .. ' placements / '
+        .. #closed
+        .. ' closed'
+    )
+
+    -- One picture's line is rewritten: only that one is closed and drawn again.
+    buftext.set(buf, {
+      '画像',
+      '[https://gyazo.com/d]',
+      '書き足した行',
+      '[https://gyazo.com/b]',
+      '[https://gyazo.com/c]',
+    })
+    images.refresh(buf)
+    assert(#placed == 4, 'the rewritten picture is drawn again, got ' .. #placed .. ' placements')
+    assert(vim.deep_equal(closed, { 1 }), 'only the rewritten one is closed, got ' .. vim.inspect(closed))
+
+    -- A placement the backend accepts but never draws is tried again.
+    healthy = false
+    buftext.set(buf, { '画像', '[https://gyazo.com/e]' })
+    images.refresh(buf)
+    local before = #placed
+    assert(
+      vim.wait(3000, function()
+        return #placed > before
+      end),
+      'a placement that never arrived must be drawn again'
+    )
+    healthy = true
+
+    images.backend, lsp.request = orig_backend, orig_request
+    vim.cmd('close')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- The sidebar follows the page the reader moves to, and a project it has listed before
   -- comes back without asking the server again.
   do

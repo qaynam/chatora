@@ -79,11 +79,9 @@ local function set_content(bufnr, text)
   local lines = vim.split(text or '', '\n', { plain = true })
   local ul = vim.bo[bufnr].undolevels
   vim.bo[bufnr].undolevels = -1
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  local changed = require('chatora.buftext').set(bufnr, lines)
   vim.bo[bufnr].undolevels = ul
-  -- Replacing every line destroys the extmarks image placements ride on, while
-  -- leaving the set of images in the text identical.
-  images.invalidate(bufnr)
+  return changed
 end
 
 local function refresh_sidebar_marks()

@@ -13,13 +13,23 @@ local lsp = require('chatora.lsp')
 M.ns = vim.api.nvim_create_namespace('chatora_images')
 
 local DEBOUNCE_MS = 200
+-- A placement the backend accepted can still fail to reach the screen: a decode that dies,
+-- a terminal that drops the escape sequence, a window that was not there yet. Each attempt
+-- is looked at once, after long enough for an asynchronous backend to have finished.
+local RETRY_MS = 700
+local PLACE_ATTEMPTS = 3
 local uv = vim.uv or vim.loop
 local timers_by_bufnr = {}
-local placements_by_bufnr = {} -- values are lists of { close = fn } wrappers
+local placements_by_bufnr = {} -- bufnr -> { [target key] = list of { close, anchor } }
 local project_by_bufnr = {}
 local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async replies (chatora/images and chatora/fetchAsset alike)
 local path_by_key = {} -- fetch key -> local file path, resolved once via fetchAsset and reused
-local signature_by_bufnr = {} -- target multiset of the last applied refresh (flicker guard)
+local width_by_bufnr = {} -- text width the placements were scaled for; a resize re-places all
+-- Anchors: one extmark per placement, at the row it was drawn on. A placement rides on the
+-- backend's own extmark, which nothing here can read back; this one moves and dies the same
+-- way, so it is how a placement still standing where its picture belongs is told apart from
+-- one whose line was rewritten out from under it.
+local anchor_ns = vim.api.nvim_create_namespace('chatora_image_anchor')
 local reported = {} -- fetch failures already surfaced, so a page of them notifies once each
 
 --- Fetch failures are normally silent (a missing image is cosmetic), but some
@@ -97,7 +107,10 @@ local function snacks_image()
   return snacks.image
 end
 
--- Backend contract: place(bufnr, path, geom, opts) -> { close = fn } | nil.
+-- Backend contract: place(bufnr, path, geom, opts) -> { close = fn, ok = fn? } | nil.
+-- `ok()` answers whether the picture is actually on screen: true drawn, false failed for
+-- good, nil "cannot say" (which is also what a backend without one says). It is what the
+-- retry above the placement acts on.
 -- `geom` carries the notation's position in both coordinate systems the two
 -- backends disagree about: `row` (1-based), `byte_col`/`byte_end` (0-based byte
 -- offsets into the line) and `screen_col` (display cells, which is what the
@@ -142,6 +155,10 @@ local function image_nvim_backend()
         close = function()
           pcall(o.clear, o)
         end,
+        -- image.nvim sets this once the terminal has actually been written to.
+        ok = function()
+          return o.is_rendered == true
+        end,
       }
     end,
   }
@@ -173,14 +190,26 @@ local function snacks_backend()
         close = function()
           pcall(p.close, p)
         end,
+        -- snacks converts asynchronously: not ready yet is not the same as never coming.
+        ok = function()
+          if p.closed then
+            return false
+          end
+          if p.img and p.img.failed and p.img:failed() then
+            return false
+          end
+          local ok_ready, ready = pcall(p.ready, p)
+          return (ok_ready and ready) or nil
+        end,
       }
     end,
   }
 end
 
---- The active render backend per config.image_backend
---- ('auto' prefers image.nvim), or nil when none is usable.
-local function backend()
+--- The active render backend per config.image_backend ('auto' prefers image.nvim), or nil
+--- when none is usable. Public so a caller can ask what is drawing — and so a test can
+--- answer with a backend of its own.
+function M.backend()
   local pref = config.options.image_backend
   if pref == 'snacks' then
     return snacks_backend()
@@ -196,7 +225,7 @@ local function images_enabled()
   if opt == false then
     return false
   end
-  return backend() ~= nil
+  return M.backend() ~= nil
 end
 
 --- The server's encodeTitleForUrl rule (space -> `_`, percent-encode
@@ -224,14 +253,41 @@ function M.icon_url(origin, project, icon_user)
   return origin .. '/api/pages/' .. project .. '/' .. encode_path_segment(icon_user) .. '/icon'
 end
 
+--- Whether `row` (0-based) is on screen in some window showing the buffer.
+---
+--- Only there does "the backend says it drew nothing" mean something is wrong: image.nvim
+--- clears what scrolls out of view, and taking that for a failure would have every refresh
+--- tear down and redraw the pictures nobody is looking at.
+local function on_screen(bufnr, row)
+  for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+    local info = vim.fn.getwininfo(win)[1]
+    if info and row + 1 >= info.topline and row + 1 <= info.botline then
+      return true
+    end
+  end
+  return false
+end
+
+--- True when the backend says this placement is not on screen and should be.
+local function failed(bufnr, handle, row)
+  return handle.ok ~= nil and on_screen(bufnr, row) and handle.ok() == false
+end
+
+local function drop(bufnr, handle)
+  handle.close()
+  pcall(vim.api.nvim_buf_del_extmark, bufnr, anchor_ns, handle.anchor)
+end
+
 local function clear_placements(bufnr)
   pcall(vim.api.nvim_buf_clear_namespace, bufnr, M.ns, 0, -1)
-  local list = placements_by_bufnr[bufnr]
-  if not list then
+  local pools = placements_by_bufnr[bufnr]
+  if not pools then
     return
   end
-  for _, p in ipairs(list) do
-    p.close()
+  for _, pool in pairs(pools) do
+    for _, handle in ipairs(pool) do
+      drop(bufnr, handle)
+    end
   end
   placements_by_bufnr[bufnr] = nil
 end
@@ -325,89 +381,155 @@ local function build_targets(bufnr, project, origin, border, images)
   return targets
 end
 
---- Apply a `chatora/images` reply for `epoch`: build targets, skip the
---- teardown/re-place cycle when the target multiset hasn't actually changed
---- (placements are extmark-bound and follow ordinary edits on their own, so
---- redoing it would only flash), then kick off fetchAsset + placement.
+--- The pool a target's placement belongs to. Standalone targets keep their column: their
+--- position only changes when the line itself is rewritten, which should re-place.
+--- Non-standalone targets (icons, inline images) drop it — ordinary text edits elsewhere on
+--- the line shift it constantly, and re-placing on every such edit would only flash.
+local function pool_key(target)
+  return target.url .. (target.standalone and ('\0' .. target.geom.screen_col) or '')
+end
+
+--- Apply a `chatora/images` reply for `epoch`.
+---
+--- Only what actually moved is redrawn: a placement still anchored to the row its target
+--- sits on is left alone, so a merge touching one line does not take every picture on the
+--- page down and put it back. Whatever is left once the targets have been matched is
+--- closed, and only the unmatched targets are fetched and placed.
 local function apply_images(bufnr, project, origin, border, epoch, images)
   if epoch_by_bufnr[bufnr] ~= epoch or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
-  local active = backend()
+  local active = M.backend()
   if not active then
     return
   end
 
   local targets = build_targets(bufnr, project, origin, border, images)
 
-  -- Rows are deliberately NOT part of the signature (they shift on every
-  -- line inserted above). Standalone targets keep their column: their
-  -- position only changes when the line itself is rewritten, which should
-  -- re-place. Non-standalone targets (icons, inline images) drop their
-  -- column: ordinary text edits elsewhere on the same line shift it
-  -- constantly, and re-placing on every such edit would just flash.
-  local counts = {}
+  -- Placements bake in their scale, so a window resize is the one change that has to redo
+  -- every one of them.
+  local width = text_width(bufnr)
+  if width_by_bufnr[bufnr] ~= width then
+    clear_placements(bufnr)
+    width_by_bufnr[bufnr] = width
+  end
+
+  local pools = placements_by_bufnr[bufnr] or {}
+  local kept = {}
+  local missing = {}
   for _, target in ipairs(targets) do
-    local key = target.url .. (target.standalone and ('\0' .. target.geom.screen_col) or '')
-    counts[key] = (counts[key] or 0) + 1
+    local key = pool_key(target)
+    local reused = nil
+    for i, handle in ipairs(pools[key] or {}) do
+      local at = vim.api.nvim_buf_get_extmark_by_id(bufnr, anchor_ns, handle.anchor, {})
+      if at[1] == target.geom.row - 1 then
+        -- A placement the backend has given up on is not a picture: let it be drawn again
+        -- rather than reusing the hole it left.
+        if not failed(bufnr, handle, at[1]) then
+          reused = table.remove(pools[key], i)
+        end
+        break
+      end
+    end
+    if reused then
+      kept[key] = kept[key] or {}
+      table.insert(kept[key], reused)
+      -- The conceal rides on the buffer's own extmarks and dies with its line, so it is
+      -- re-applied even for a picture that never moved.
+      conceal_notation(bufnr, target.geom)
+    else
+      missing[#missing + 1] = target
+    end
   end
-  local parts = {}
-  for key, n in pairs(counts) do
-    parts[#parts + 1] = key .. '\0' .. n
+  for _, pool in pairs(pools) do
+    for _, handle in ipairs(pool) do
+      drop(bufnr, handle)
+    end
   end
-  table.sort(parts)
-  -- Width is part of the signature: placements bake in their scale, so a
-  -- window resize has to re-place even when the target set is unchanged.
-  local signature = table.concat(parts, '\1') .. '\2' .. text_width(bufnr)
+  placements_by_bufnr[bufnr] = kept
 
-  if signature_by_bufnr[bufnr] == signature and placements_by_bufnr[bufnr] then
-    return
-  end
-  signature_by_bufnr[bufnr] = signature
-
-  clear_placements(bufnr)
-
-  local new_placements = {}
-  placements_by_bufnr[bufnr] = new_placements
-
-  local function place(path, geom, opts)
+  --- Draw one target and then look at it once: a picture that never arrived is drawn
+  --- again, up to `PLACE_ATTEMPTS`, since nothing else would ever ask.
+  local function place(path, geom, opts, key, attempt)
     if epoch_by_bufnr[bufnr] ~= epoch or not vim.api.nvim_buf_is_valid(bufnr) then
       return
     end
+    attempt = attempt or 1
+    local again = attempt < PLACE_ATTEMPTS
+        and function()
+          place(path, geom, opts, key, attempt + 1)
+        end
+      or nil
+
     local p = active.place(bufnr, path, geom, opts)
-    if p then
-      new_placements[#new_placements + 1] = p
-      conceal_notation(bufnr, geom)
+    if not p then
+      -- Refused outright: no window to bind to yet, most often.
+      if again then
+        vim.defer_fn(again, RETRY_MS)
+      end
+      return
     end
+    local handle = {
+      close = p.close,
+      ok = p.ok,
+      anchor = vim.api.nvim_buf_set_extmark(bufnr, anchor_ns, geom.row - 1, 0, {}),
+    }
+    kept[key] = kept[key] or {}
+    table.insert(kept[key], handle)
+    conceal_notation(bufnr, geom)
+
+    if not (p.ok and again) then
+      return
+    end
+    vim.defer_fn(function()
+      if epoch_by_bufnr[bufnr] ~= epoch or not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
+      local pool = kept[key] or {}
+      local index = nil
+      for i, entry in ipairs(pool) do
+        if entry == handle then
+          index = i
+        end
+      end
+      -- Closed or replaced since: what is on screen now is not this attempt's doing.
+      if not index or not failed(bufnr, handle, geom.row - 1) then
+        return
+      end
+      table.remove(pool, index)
+      drop(bufnr, handle)
+      again()
+    end, RETRY_MS)
   end
 
   --- Resolve url to a local path (via the fetchAsset cache, or a fresh LSP
   --- request) and place it. Fetch failures are silent -- this is a
   --- cosmetic feature, matching the previous curl-based behavior.
-  local function place_url(url, geom, opts, target_border)
+  local function place_url(target)
+    local key = pool_key(target)
     -- Bordered and plain variants of the same url are different files.
-    local key = url .. (target_border and '\0border' or '')
-    local cached_path = path_by_key[key]
+    local fetch_key = target.url .. (target.border and '\0border' or '')
+    local cached_path = path_by_key[fetch_key]
     if cached_path then
-      place(cached_path, geom, opts)
+      place(cached_path, target.geom, target.opts, key)
       return
     end
     lsp.request(
       'chatora/fetchAsset',
-      { project = project, url = url, border = target_border },
+      { project = project, url = target.url, border = target.border },
       function(err, result)
         if err or not result or result.ok == false then
           report_once(result and result.message)
           return
         end
-        path_by_key[key] = result.path
-        place(result.path, geom, opts)
+        path_by_key[fetch_key] = result.path
+        place(result.path, target.geom, target.opts, key)
       end
     )
   end
 
-  for _, target in ipairs(targets) do
-    place_url(target.url, target.geom, target.opts, target.border)
+  for _, target in ipairs(missing) do
+    place_url(target)
   end
 end
 
@@ -419,7 +541,7 @@ end
 --- theirs to call; nil means nothing was drawn, which callers treat as cosmetic and ignore.
 --- `on_placed` runs after the asset resolves, since that takes a round trip.
 function M.place_one(bufnr, project, url, row, col, on_placed)
-  local active = images_enabled() and backend() or nil
+  local active = images_enabled() and M.backend() or nil
   if not active then
     return
   end
@@ -448,12 +570,12 @@ function M.place_one(bufnr, project, url, row, col, on_placed)
   end)
 end
 
---- Forget that the current placements were applied, so the next refresh
---- re-places them. Needed whenever something outside this module destroys what
---- placements ride on — the buffer's extmarks, or the window they were bound
---- to — since the target set alone then still looks unchanged.
+--- Throw the current placements away so the next refresh draws them again. Needed when
+--- something outside this module invalidates what they ride on: a placement is bound to the
+--- window it was made in, and showing the buffer somewhere else strands every one of them.
 function M.invalidate(bufnr)
-  signature_by_bufnr[bufnr] = nil
+  clear_placements(bufnr)
+  width_by_bufnr[bufnr] = nil
 end
 
 --- Clear and re-render every image placement in bufnr. Both the target scan
@@ -571,7 +693,7 @@ function M.attach(bufnr, project)
         pcall(vim.api.nvim_buf_set_var, bufnr, 'chatora_images_attached', false)
         clear_placements(bufnr)
         project_by_bufnr[bufnr] = nil
-        signature_by_bufnr[bufnr] = nil
+        width_by_bufnr[bufnr] = nil
         epoch_by_bufnr[bufnr] = nil
       end)
     end,

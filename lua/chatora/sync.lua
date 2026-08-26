@@ -99,11 +99,10 @@ local function apply(bufnr, text)
   local lines = vim.split(text or '', '\n', { plain = true })
   local winid = vim.fn.bufwinid(bufnr)
   local cursor = winid ~= -1 and vim.api.nvim_win_get_cursor(winid) or nil
-  vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+  require('chatora.buftext').set(bufnr, lines)
   if cursor and vim.api.nvim_win_is_valid(winid) then
     pcall(vim.api.nvim_win_set_cursor, winid, { math.min(cursor[1], #lines), cursor[2] })
   end
-  require('chatora.images').invalidate(bufnr)
   -- The merge moved lines the reader never touched: the telomere is what says which ones.
   require('chatora.telomere').refresh(bufnr)
 end
