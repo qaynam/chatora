@@ -1,11 +1,11 @@
-import type { HttpClient } from '@chatora/core'
 import {
   type AccountStore,
   AccountStoreLive,
   CommandExecutorLive,
   CredentialStoreLive,
+  HttpClient,
 } from '@chatora/core'
-import { Effect, Layer, ManagedRuntime } from 'effect'
+import { Effect, Layer, ManagedRuntime, Option } from 'effect'
 import {
   type CompletionParams,
   createConnection,
@@ -23,6 +23,7 @@ import { type AssetCache, AssetCacheLive, type BorderParams, fetchAsset } from '
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
 import { definitionLocation, findDefinitionTarget, findUrlTarget } from './definition'
+import { isGyazoUrl, resolveGyazo } from './gyazo'
 import { HttpClientLogged } from './httpLog'
 import { computeImageTargets } from './images'
 import { activeLogPath, log } from './log'
@@ -95,7 +96,14 @@ interface Position {
 
 const toSemanticTokens = (tokens: RawToken[]): SemanticTokens => ({ data: encodeTokens(tokens) })
 
-type UrlAtResult = { ok: true; url: string | null } | { ok: false; code: string; message: string }
+type UrlAtResult =
+  | {
+      ok: true
+      url: string | null
+      /** Set when `url` is a Gyazo capture that moves: something a media player can open. */
+      play?: string
+    }
+  | { ok: false; code: string; message: string }
 
 // Marker characters an official notation already owns: the four decoration flags
 // ([* /-_]), formulas ([$ ]) and bracket-nested links ([[ ]]).
@@ -211,7 +219,18 @@ connection.onRequest(
     const doc = documents.get(params.uri)
     if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
     const lineText = normalizeCrLf(doc.getText()).split('\n')[params.line] ?? ''
-    return { ok: true, url: findUrlTarget(lineText, params.character) }
+    const url = findUrlTarget(lineText, params.character)
+    if (url === null || !isGyazoUrl(url)) return { ok: true, url }
+    // Only Gyazo knows whether one of its URLs moves, and the answer is cached per URL, so
+    // this costs one request the first time the reader follows a given capture.
+    const media = await runtime.runPromise(
+      Effect.gen(function* () {
+        const http = yield* HttpClient
+        return yield* resolveGyazo(http.fetch, currentOrigin, url)
+      }),
+    )
+    const play = Option.getOrUndefined(media)?.play
+    return play === undefined ? { ok: true, url } : { ok: true, url, play }
   },
 )
 

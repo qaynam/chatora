@@ -616,10 +616,10 @@ export const fetchAsset = (params: {
     // the other chatora/* requests.
     // Cached under the URL the page holds, fetched from the one Gyazo actually serves —
     // which only its proxy can name (see resolveGyazo).
-    const source = Option.getOrElse(
-      yield* resolveGyazo(http.fetch, session.origin, params.url),
-      () => params.url,
-    )
+    const source = Option.match(yield* resolveGyazo(http.fetch, session.origin, params.url), {
+      onNone: () => params.url,
+      onSome: (media) => media.still,
+    })
     const fetched = yield* cache.dedupe(
       params.url,
       fetchAndCache(http.fetch, headersFor, cacheDir, hash, source),

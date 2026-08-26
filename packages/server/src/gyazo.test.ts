@@ -47,18 +47,44 @@ describe('resolveGyazo', () => {
     const { fetch, calls } = testFetch(() =>
       oembed({ version: '1.0', type: 'photo', url: picture, width: 1500, height: 1301 }),
     )
-    expect(await run(resolveGyazo(fetch, ORIGIN, url))).toEqual(Option.some(picture))
+    expect(await run(resolveGyazo(fetch, ORIGIN, url))).toEqual(Option.some({ still: picture }))
     expect(calls[0]).toBe(`${ORIGIN}/api/oembed-proxy/gyazo?url=${encodeURIComponent(url)}`)
   })
 
-  test('an animated capture resolves to its still, since a terminal cannot play the video', async () => {
+  test('an animated capture draws as its still and plays from its own mp4', async () => {
+    const hash = 'aaaaaaaaaaaaaaaaaaaaaaaa'
     const thumb = 'https://thumb.gyazo.com/thumb/700_w/eyJhbGciOiJIUzI1NiJ9-gif.jpg'
     const { fetch } = testFetch(() =>
-      oembed({ type: 'video', html: '<iframe …></iframe>', thumbnail_url: thumb }),
+      oembed({
+        type: 'video',
+        html: `<iframe src="https://gyazo.com/player/${hash}"></iframe>`,
+        thumbnail_url: thumb,
+      }),
     )
+    expect(await run(resolveGyazo(fetch, ORIGIN, `https://gyazo.com/${hash}`))).toEqual(
+      Option.some({ still: thumb, play: `https://i.gyazo.com/${hash}.mp4` }),
+    )
+  })
+
+  test("a team's capture has no mp4 to guess, so its player page is what plays", async () => {
+    const hash = 'bbbbbbbbbbbbbbbbbbbbbbbb'
+    const player = `https://myteam.gyazo.com/player/${hash}`
+    const { fetch } = testFetch(() =>
+      oembed({
+        type: 'video',
+        html: `<iframe\n  src="${player}"\n  width="480">\n</iframe>`,
+        thumbnail_url: 'https://t.gyazo.com/teams/myteam/thumb/480_w/x-gif.jpg',
+      }),
+    )
+    const media = await run(resolveGyazo(fetch, ORIGIN, `https://myteam.gyazo.com/${hash}`))
+    expect(Option.getOrNull(media)?.play).toBe(player)
+  })
+
+  test('a photo has nothing to play', async () => {
+    const { fetch } = testFetch(() => oembed({ type: 'photo', url: 'https://i.gyazo.com/p.png' }))
     expect(
-      await run(resolveGyazo(fetch, ORIGIN, 'https://gyazo.com/aaaaaaaaaaaaaaaaaaaaaaaa')),
-    ).toEqual(Option.some(thumb))
+      await run(resolveGyazo(fetch, ORIGIN, 'https://gyazo.com/cccccccccccccccccccccccd')),
+    ).toEqual(Option.some({ still: 'https://i.gyazo.com/p.png' }))
   })
 
   test('one answer stands for the session: the proxy is asked once per URL', async () => {
@@ -102,7 +128,7 @@ describe('resolveGyazo', () => {
     expect(await run(resolveGyazo(fetch, ORIGIN, url))).toEqual(Option.none())
     failing = false
     expect(await run(resolveGyazo(fetch, ORIGIN, url))).toEqual(
-      Option.some('https://i.gyazo.com/f.png'),
+      Option.some({ still: 'https://i.gyazo.com/f.png' }),
     )
     expect(calls).toHaveLength(2)
   })

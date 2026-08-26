@@ -238,7 +238,9 @@ decoration ノードのフラグが全部 false のとき、ソース上 `positi
 'chatora/relatedPages' { project, title }         → { ok, links1hop: RelatedPage[], links2hop: RelatedPage[] }
 'chatora/search'      { project, query, mode? }   → { ok, pages: { title, lines?: string[] }[] }  // mode: 'fulltext'(既定)|'vector'
 'chatora/newPage'     { project, title }          → { ok, uri, text }  // 空ページとして open（保存時に新規 preview/submit）
-'chatora/urlAt'       { uri, line, character } → { ok, url: string|null }
+'chatora/urlAt'       { uri, line, character } → { ok, url: string|null, play?: string }
+   // play は Gyazo の動画のときだけ付く（素の Gyazo は i.gyazo.com/<hash>.mp4、チームは
+   // oembed の iframe が指すプレイヤーページ）。Lua 側の `video` 設定がそれを受け取る
    // カーソル位置がブラウザで開くべき URL の上にあるか。`[<画像url> <リンクurl>]` は
    // リンク側を返す（画像はレンダリング対象でしかない）。ページに解決するもの（内部リンク・
    // ハッシュタグ）と何でもない位置は null で、Lua 側は通常の定義ジャンプに落とす。

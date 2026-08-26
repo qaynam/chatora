@@ -25,6 +25,39 @@ function M.url_at(line, col)
   end
 end
 
+--- Hand `url` to whatever `video` names, and say whether it took it.
+---
+--- A function decides for itself (returning false to pass); a command is run detached, its
+--- `{url}` placeholder filled in. Anything else — the default `false` included — is a page
+--- for the browser like any other.
+local function play(url)
+  local player = config.options.video
+  if type(player) == 'function' then
+    local ok, took = pcall(player, url)
+    if not ok then
+      vim.notify('[chatora] video: ' .. tostring(took), vim.log.levels.ERROR)
+      return false
+    end
+    return took ~= false
+  end
+  if type(player) == 'string' then
+    player = { player, '{url}' }
+  end
+  if type(player) ~= 'table' or #player == 0 then
+    return false
+  end
+  local cmd = {}
+  for i, word in ipairs(player) do
+    cmd[i] = type(word) == 'string' and word:gsub('{url}', url) or word
+  end
+  local ok, err = pcall(vim.system, cmd, { detach = true })
+  if not ok then
+    vim.notify('[chatora] 再生できませんでした: ' .. tostring(err), vim.log.levels.ERROR)
+    return false
+  end
+  return true
+end
+
 --- Open `url` in the system browser, asking first unless configured otherwise.
 function M.open_external(url)
   local mode = config.options.external_link
@@ -92,6 +125,10 @@ function M.goto_definition()
       return
     end
     if result.url then
+      -- A capture that moves is worth more than its still: play it if the reader said how.
+      if result.play and play(result.play) then
+        return
+      end
       M.open_external(result.url)
     else
       follow_definition(bufnr, row, character)

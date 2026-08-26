@@ -905,6 +905,65 @@ local ok, err = pcall(function()
     assert(links.url_at('no urls here', 3) == nil, 'plain text has no URL')
   end
 
+  -- gd on a Gyazo capture that moves: the playable URL goes to whatever `video` names, and
+  -- only falls back to the browser when nothing took it.
+  do
+    local links = require('chatora.links')
+    local config = require('chatora.config')
+    local lsp = require('chatora.lsp')
+    local orig_request, orig_system = lsp.request, vim.system
+    local orig_video, orig_external = config.options.video, config.options.external_link
+
+    local url = 'https://gyazo.com/0204f06d4ed4af1554dc3c2a87a806b2'
+    local mp4 = 'https://i.gyazo.com/0204f06d4ed4af1554dc3c2a87a806b2.mp4'
+    -- Its own window: an earlier test leaves the sidebar pinning the current one.
+    vim.cmd('new')
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_name(buf, 'cosense://proj/動画')
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '動画', '[' .. url .. ']' })
+    vim.api.nvim_win_set_cursor(0, { 2, 5 })
+    lsp.request = function(method, _, cb)
+      if method == 'chatora/urlAt' then
+        cb(nil, { ok = true, url = url, play = mp4 })
+      end
+    end
+
+    local played = nil
+    config.options.video = function(given)
+      played = given
+      return true
+    end
+    links.goto_definition()
+    assert(played == mp4, 'a function is handed the playable URL, got ' .. tostring(played))
+
+    local ran = nil
+    vim.system = function(cmd)
+      ran = table.concat(cmd, ' ')
+      return { wait = function() end }
+    end
+    config.options.video = { 'mpv', '--loop', '{url}' }
+    links.goto_definition()
+    assert(ran == 'mpv --loop ' .. mp4, 'a command gets {url} filled in, got ' .. tostring(ran))
+
+    ran = nil
+    config.options.video = 'open'
+    links.goto_definition()
+    assert(ran == 'open ' .. mp4, 'a bare command name takes the URL as its argument')
+
+    -- Nothing configured: the browser path decides, and `external_link = 'ignore'` means
+    -- nothing happens at all.
+    ran, played = nil, nil
+    config.options.video = false
+    config.options.external_link = 'ignore'
+    links.goto_definition()
+    assert(ran == nil and played == nil, 'video = false leaves the link to the browser')
+
+    lsp.request, vim.system = orig_request, orig_system
+    config.options.video, config.options.external_link = orig_video, orig_external
+    vim.cmd('close')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- status: state transitions drive the icon; 'saving' shields against the
   -- modified-flag churn that writing the server's normalized text causes.
   do

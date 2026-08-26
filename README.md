@@ -204,6 +204,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | `surround` | `true` | visual モードの装飾キー。記号のリストで限定、`false` で無効 |
 | `completion` | `'auto'` | `'auto'` は外部エンジンが無いときだけ内蔵補完を有効化。`'native'` は常に、`false` は外部任せ |
 | `external_link` | `'confirm'` | 外部 URL 上の `gd`。`'open'` は確認なし、`'ignore'` は何もしない |
+| `video` | `false` | 動く Gyazo キャプチャ上の `gd` の行き先。[下記](#動画を再生する) |
 
 ### 表示
 
@@ -463,6 +464,25 @@ Neovim の conceal 置換は 1 文字までなので、`icon` が複数文字な
 （`name` / `hl` は活きる）。記号が 1 文字でない・`name` が不正・公式記法と衝突する場合は
 エントリごと無視する。`hl` を Neovim が受け付けなかった場合（キー名の間違いなど）はその旨と
 原因のキー名を知らせる。いずれも `vim.notify` で伝え、プラグインは落とさない。
+
+### 動画を再生する
+
+Gyazo の動画（GIF キャプチャを含む）は本文には静止画で出る。端末は動画を再生できないので、
+`gd` したときの行き先を `video` で決める。
+
+```lua
+video = 'open'                          -- macOS の既定のプレイヤー
+video = { 'mpv', '--loop', '{url}' }    -- コマンドと引数（'{url}' が置き換わる）
+video = function(url)                   -- 自分で決める。false を返すとブラウザに回す
+  vim.system({ 'mpv', url }, { detach = true })
+  return true
+end
+video = false                           -- 既定。ほかのリンクと同じくブラウザ
+```
+
+渡ってくる URL は、素の Gyazo なら `https://i.gyazo.com/<hash>.mp4`（プレイヤーがそのまま
+再生できる）、チーム Gyazo なら oembed が返すプレイヤーページ。どちらを渡せるかは Gyazo 側の
+都合で、`/api/oembed-proxy/gyazo` の応答から決めている。
 
 ### ファイルへのリンク
 
