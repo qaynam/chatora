@@ -124,7 +124,10 @@ local function image_nvim_backend()
         window = win,
         buffer = bufnr,
         inline = true,
-        with_virtual_padding = true,
+        -- Virtual padding is the blank rows a taller image needs reserved under its line.
+        -- A one-row icon sits in the line it is already on and needs none, and asking for
+        -- it there is what puts a gap around every icon in a row of them.
+        with_virtual_padding = (opts and opts.height) ~= 1,
         x = geom.align_indent and geom.indent_screen_col or geom.screen_col,
         y = geom.row - 1,
         height = opts and opts.height or nil,

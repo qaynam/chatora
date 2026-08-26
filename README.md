@@ -102,6 +102,7 @@ LSP サーバーが担当し、Neovim 側は薄い UI 層に徹する。
 | `<leader>cc` | 次の競合行へ | `next_conflict` |
 | `<leader>cv` | クリップボードの画像を貼り付け | `paste_image` |
 | `<leader>cd` | ページを削除（確認あり） | `delete` |
+| `<leader>cI` | インデントを半角スペースに揃える | `normalize_indent` |
 | `<leader>cy` | ページ URL をコピー | `copy_url` |
 | `<leader>cY` | リンク記法 `[タイトル]` をコピー | `copy_link` |
 | `<leader>co` | ブラウザで開く | `open_in_browser` |
@@ -204,7 +205,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 
 | オプション | 既定 | 意味 |
 |---|---|---|
-| `conceal` | `true` | 記法マークアップをカーソル行以外で隠す |
+| `conceal` | `true` | 記法マークアップを隠す。`true` はカーソル行だけ元の記法に戻す。文字列を渡すとそれが `'concealcursor'` になる（`'nc'` なら読んでいる間は戻さない＝カーソル行のインライン画像も消えない） |
 | `pads` | `true` | 箇条書きの中点。[下記](#箇条書き) |
 | `quote` | `true` | `>` 行の縦棒。[下記](#引用) |
 | `tables` | `true` | `table:` ブロックの罫線。`{ border = false, header = false }` |
@@ -321,6 +322,10 @@ pads = {
 一致する。
 
 `1.` で始まる行は自前の番号を持つので中点を描かない。
+
+インデント文字そのものを揃えたいときは `<leader>cI`。全段を半角スペース 1 個ずつに書き換える
+（段数は変えない）。描画は元から揃うので見た目のためには要らない — 手で編集しづらい混在ページ
+向け。**インデントのある全行を編集する**ので、次の保存でその全部が送られる。
 
 ### 引用
 

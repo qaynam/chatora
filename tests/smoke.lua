@@ -523,6 +523,44 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- normalize_indent: levels are preserved, the characters are not.
+  do
+    local buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(buf, 'cosense://proj/' .. vim.uri_encode('整形'))
+    vim.bo[buf].buftype = 'acwrite'
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      '整形', '　全角1', '\tタブ1', '  半角2', '　\t混在2', '素の行', '  1. 番号',
+    })
+    local prev = vim.api.nvim_get_current_buf()
+    vim.api.nvim_win_set_buf(0, buf)
+
+    local before = {}
+    for i, line in ipairs(vim.api.nvim_buf_get_lines(buf, 0, -1, false)) do
+      before[i] = require('chatora.indent').level(line)
+    end
+
+    local orig = vim.notify
+    vim.notify = function() end
+    require('chatora.actions').normalize_indent()
+    vim.notify = orig
+
+    local after = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    for i, line in ipairs(after) do
+      local levels = require('chatora.indent').scan(line)
+      assert(#levels == before[i], 'level ' .. i .. ' changed')
+      -- Checked per character, not with a pattern: a Lua character class matches bytes,
+      -- and a full-width space shares its first byte with most CJK characters.
+      for _, entry in ipairs(levels) do
+        assert(entry.char == ' ', 'line ' .. i .. ' still has a non-space indent')
+      end
+    end
+    assert(after[6] == '素の行', 'an unindented line is left alone')
+    assert(after[7] == '  1. 番号', 'text past the indent is untouched')
+
+    vim.api.nvim_win_set_buf(0, prev)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- read-only pages: locked against editing, and the lock explains itself. 'modifiable'
   -- alone answers every edit with E21, which never mentions whose project it is.
   do

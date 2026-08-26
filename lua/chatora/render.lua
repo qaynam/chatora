@@ -1,9 +1,9 @@
 -- Owner of the chatora/decorations request, which returns both the markup ranges to
 -- conceal and the quoted lines (UTF-16 columns) in one round trip.
 --
--- Concealing follows render-markdown.nvim: conceallevel=2 + concealcursor='' lets
--- Neovim itself reveal the raw source on the cursor line. The quote half is drawn by
--- chatora.quote, which has its own switch.
+-- Concealing follows render-markdown.nvim: conceallevel=2 plus a 'concealcursor' the
+-- reader picks, so the raw source can be revealed on the cursor line (the default) or left
+-- concealed there. The quote half is drawn by chatora.quote, which has its own switch.
 local M = {}
 
 local config = require('chatora.config')
@@ -20,10 +20,15 @@ local timers = {}
 local REFRESH_DEBOUNCE_MS = 60
 
 local function set_win_opts(bufnr)
-  if config.options.conceal ~= false then
+  local conceal = config.options.conceal
+  if conceal ~= false then
+    -- A string is a 'concealcursor' value. The default reveals the cursor line, which is
+    -- how markup stays editable — but it also un-draws an inline image on that one line,
+    -- so `conceal = 'nc'` is there for reading rather than writing.
+    local cursor = type(conceal) == 'string' and conceal or ''
     for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
       vim.wo[win].conceallevel = 2
-      vim.wo[win].concealcursor = ''
+      vim.wo[win].concealcursor = cursor
     end
   end
   require('chatora.quote').setup_win(bufnr)

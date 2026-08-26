@@ -72,6 +72,41 @@ function M.related_side()
   require('chatora.related').flip()
 end
 
+--- Rewrite every indent in the page as ASCII spaces, one per level.
+---
+--- Cosense counts tabs and full-width spaces as levels too and chatora draws them at the
+--- same depth, so this changes nothing about how the page reads — it is for pages that
+--- arrived with a mixture and are awkward to keep editing by hand.
+---
+--- It edits every indented line, so the next save carries all of them. That is why it is a
+--- command and not something the plugin does on its own to other people's pages.
+function M.normalize_indent()
+  local project, _, bufnr = current_page()
+  if not project then
+    return
+  end
+  if not vim.bo[bufnr].modifiable then
+    vim.notify('[chatora] このページは読み取り専用です', vim.log.levels.WARN)
+    return
+  end
+
+  local indent = require('chatora.indent')
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local changed = 0
+  for i, line in ipairs(lines) do
+    local levels, text_at = indent.scan(line)
+    local normalized = string.rep(' ', #levels) .. line:sub(text_at + 1)
+    if normalized ~= line then
+      vim.api.nvim_buf_set_lines(bufnr, i - 1, i, false, { normalized })
+      changed = changed + 1
+    end
+  end
+  vim.notify(
+    changed == 0 and '[chatora] インデントはすべて半角スペースです'
+      or ('[chatora] %d 行のインデントを半角スペースに揃えました'):format(changed)
+  )
+end
+
 --- Jump to the next line the last sync found a conflict on.
 function M.next_conflict()
   require('chatora.sync').next_conflict()
