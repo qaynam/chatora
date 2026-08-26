@@ -11,13 +11,16 @@ local function host_of(origin)
   return (origin or ''):match('^%a+://([^/]+)') or origin or ''
 end
 
-local function account_label(account)
+--- How an account is named to the user: display name plus the host it belongs to.
+function M.label(account)
   local name = account.displayName
   if not name or name == '' then
     name = account.name or ''
   end
   return name .. ' (' .. host_of(account.origin) .. ')'
 end
+
+local account_label = M.label
 
 --- cb({ active = <id or nil>, accounts = { Account, ... } })
 function M.list(cb)

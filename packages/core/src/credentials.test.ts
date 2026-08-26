@@ -16,6 +16,7 @@ const noActiveAccountStore: Layer.Layer<AccountStore> = Layer.succeed(
     add: () => Effect.die(new Error('AccountStore.add unused in these tests')),
     remove: () => Effect.die(new Error('AccountStore.remove unused in these tests')),
     setActive: () => Effect.succeed(Option.none()),
+    resolveFor: () => Effect.succeed(Option.none()),
     resolveActive: () => Effect.succeed(Option.none()),
   }),
 )
@@ -95,6 +96,7 @@ describe('CredentialStore.resolve precedence: env > active account > legacy keyc
         add: () => Effect.die(new Error('AccountStore.add unused in this test')),
         remove: () => Effect.die(new Error('AccountStore.remove unused in this test')),
         setActive: () => Effect.succeed(Option.none()),
+        resolveFor: () => Effect.succeed(Option.none()),
         resolveActive: (origin) =>
           Effect.succeed(origin === ORIGIN ? Option.some('active-pat') : Option.none()),
       }),

@@ -86,6 +86,12 @@ export interface AccountStoreShape {
   readonly remove: (id: string) => Effect.Effect<void, KeychainError>
   /** `Option.none` — and the index left untouched — when `id` isn't in the index. */
   readonly setActive: (id: string) => Effect.Effect<Option.Option<Account>>
+  /**
+   * One account's PAT, for reaching an account that is not the active one — asking each in
+   * turn is how a project is traced back to the account that holds it. `Option.none` when
+   * `id` is unknown, belongs to a different origin, or has no Keychain entry.
+   */
+  readonly resolveFor: (id: string, origin: string) => Effect.Effect<Option.Option<string>>
   /** The active account's PAT, or `Option.none` when there's no active account or it's for a different origin. */
   readonly resolveActive: (origin: string) => Effect.Effect<Option.Option<string>>
 }
@@ -137,15 +143,21 @@ export const AccountStoreLive: Layer.Layer<AccountStore, never, CommandExecutor>
         return Option.some(account)
       })
 
-    const resolveActive: AccountStoreShape['resolveActive'] = (origin) =>
+    const resolveFor: AccountStoreShape['resolveFor'] = (id, origin) =>
       Effect.gen(function* () {
         const index = yield* readIndex(indexPath())
-        if (index.active === null) return Option.none<string>()
-        const account = index.accounts.find((a) => a.id === index.active)
+        const account = index.accounts.find((a) => a.id === id)
         if (account === undefined || account.origin !== origin) return Option.none<string>()
         return yield* findGenericPassword(account.id, executor)
       })
 
-    return AccountStore.of({ list, add, remove, setActive, resolveActive })
+    const resolveActive: AccountStoreShape['resolveActive'] = (origin) =>
+      Effect.gen(function* () {
+        const index = yield* readIndex(indexPath())
+        if (index.active === null) return Option.none<string>()
+        return yield* resolveFor(index.active, origin)
+      })
+
+    return AccountStore.of({ list, add, remove, setActive, resolveFor, resolveActive })
   }),
 )

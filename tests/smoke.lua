@@ -982,6 +982,40 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- `:Chatora project <name>` switches straight to that project (and to the account the
+  -- server says holds it) instead of prompting.
+  do
+    local chatora = require('chatora')
+    local lsp = require('chatora.lsp')
+    local sidebar = require('chatora.sidebar')
+    local orig_ok, orig_start, orig_open = lsp.request_ok, lsp.ensure_start, sidebar.open
+
+    local asked, opened = nil, nil
+    lsp.ensure_start = function() end
+    lsp.request_ok = function(method, params, cb)
+      if method == 'chatora/authStatus' then
+        cb({ ok = true, authenticated = true, user = { id = 'u1', name = 'tester' } })
+      elseif method == 'chatora/useProject' then
+        asked = params.project
+        cb({ ok = true, project = params.project, foreign = false })
+      end
+    end
+    sidebar.open = function(name)
+      opened = name
+    end
+
+    chatora.dispatch('project', 'ほかのプロジェクト')
+    assert(asked == 'ほかのプロジェクト', 'expected chatora/useProject for the named project, got ' .. tostring(asked))
+    assert(opened == 'ほかのプロジェクト', 'expected the sidebar to open on it, got ' .. tostring(opened))
+    assert(
+      chatora.session.project == 'ほかのプロジェクト',
+      'expected the session to remember it, got ' .. tostring(chatora.session.project)
+    )
+
+    chatora.session.project = nil
+    lsp.request_ok, lsp.ensure_start, sidebar.open = orig_ok, orig_start, orig_open
+  end
+
   -- telomere: a bar per line, thicker the more recently the line was written, blue while
   -- it is newer than the reader's last visit, and the reader's own colour once they edit it.
   do

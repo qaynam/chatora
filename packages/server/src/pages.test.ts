@@ -113,6 +113,12 @@ const testAccountStore = (
         state = { ...state, active: Option.some(id) }
         return Effect.succeed(Option.some(account))
       },
+      // Every seeded account's PAT is its id: a test that cares which account was reached
+      // can read it off the request the handler makes.
+      resolveFor: (id) =>
+        Effect.succeed(
+          state.accounts.some((a) => a.id === id) ? Option.some(`pat-${id}`) : Option.none(),
+        ),
       resolveActive: () => Effect.succeed(Option.none()),
     }),
   )
@@ -349,6 +355,121 @@ describe('accounts / addAccount / useAccount / removeAccount', () => {
     )
     expect(result).toEqual({ ok: true, accounts: [ME_ACCOUNT], active: ME_ACCOUNT.id })
     expect(removeCalls).toEqual([OTHER_ACCOUNT.id])
+  })
+})
+
+describe('useProject', () => {
+  const OTHER: Account = {
+    id: `${ORIGIN}#u2`,
+    origin: ORIGIN,
+    userId: 'u2',
+    name: 'qaynam',
+    displayName: 'Qaynam',
+  }
+  // testAccountStore hands out `pat-<id>` for every seeded account, so the token on the
+  // request says which account the handler reached for.
+  const projectsPerToken = (byToken: Record<string, readonly string[]>) =>
+    testHttpClient((url, init) => {
+      if (!url.endsWith('/api/projects')) return json({}, 404)
+      const token = (init.headers as Record<string, string>)['x-personal-access-token'] ?? ''
+      const names = byToken[token] ?? []
+      return json({ projects: names.map((name) => ({ id: name, name })) })
+    })
+
+  test('a project the active account already has switches nothing', async () => {
+    const { layer: httpLayer, calls } = projectsPerToken({ 'secret-pat': ['mine'] })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const { layer: accountLayer, setActiveCalls } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT, OTHER],
+    })
+    const result = await runOnce(
+      handlers.useProject({ project: 'mine' }),
+      httpLayer,
+      credLayer,
+      accountLayer,
+    )
+    expect(result).toEqual({ ok: true, project: 'mine', foreign: false })
+    expect(setActiveCalls).toEqual([])
+    // Only the active account was asked.
+    expect(calls).toHaveLength(1)
+  })
+
+  test('a project on another account makes that account active', async () => {
+    const { layer: httpLayer } = projectsPerToken({
+      'secret-pat': ['mine'],
+      [`pat-${OTHER.id}`]: ['theirs'],
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const { layer: accountLayer, setActiveCalls } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT, OTHER],
+    })
+    const result = await runOnce(
+      handlers.useProject({ project: 'theirs' }),
+      httpLayer,
+      credLayer,
+      accountLayer,
+    )
+    expect(result).toEqual({ ok: true, project: 'theirs', switched: OTHER, foreign: false })
+    expect(setActiveCalls).toEqual([OTHER.id])
+  })
+
+  test('the name is matched the way Cosense writes it, case aside', async () => {
+    const { layer: httpLayer } = projectsPerToken({ 'secret-pat': ['Mine'] })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const { layer: accountLayer } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT],
+    })
+    expect(
+      await runOnce(handlers.useProject({ project: 'mine' }), httpLayer, credLayer, accountLayer),
+    ).toMatchObject({ foreign: false })
+  })
+
+  test('a project no account has is left foreign, with the active account untouched', async () => {
+    const { layer: httpLayer } = projectsPerToken({
+      'secret-pat': ['mine'],
+      [`pat-${OTHER.id}`]: ['theirs'],
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const { layer: accountLayer, setActiveCalls } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT, OTHER],
+    })
+    const result = await runOnce(
+      handlers.useProject({ project: 'help-jp' }),
+      httpLayer,
+      credLayer,
+      accountLayer,
+    )
+    expect(result).toEqual({ ok: true, project: 'help-jp', foreign: true })
+    expect(setActiveCalls).toEqual([])
+  })
+
+  test('an account whose token no longer works does not hide the project on a working one', async () => {
+    const { layer: httpLayer } = testHttpClient((url, init) => {
+      if (!url.endsWith('/api/projects')) return json({}, 404)
+      const token = (init.headers as Record<string, string>)['x-personal-access-token'] ?? ''
+      if (token === 'secret-pat') return new Response('nope', { status: 401 })
+      return json({ projects: [{ id: 'theirs', name: 'theirs' }] })
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const { layer: accountLayer, setActiveCalls } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT, OTHER],
+    })
+    expect(
+      await runOnce(handlers.useProject({ project: 'theirs' }), httpLayer, credLayer, accountLayer),
+    ).toMatchObject({ switched: OTHER })
+    expect(setActiveCalls).toEqual([OTHER.id])
+  })
+
+  test('no credential at all is unauthorized, not a foreign project', async () => {
+    const { layer: httpLayer } = projectsPerToken({})
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    const result = await runOnce(handlers.useProject({ project: 'mine' }), httpLayer, credLayer)
+    expect(result).toMatchObject({ ok: false, code: 'unauthorized' })
   })
 })
 

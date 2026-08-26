@@ -66,13 +66,16 @@ function M.open(target)
       return
     end
     auth.ensure_auth(function()
-      M.session.project = project
-      if not title then
+      -- The URL names a project, which names an account: following a link into a project
+      -- that lives on another one of the reader's accounts should not open it read-only.
+      M.use_project(project, { quiet = true }, function()
+        if not title then
+          sidebar.open(project)
+          return
+        end
         sidebar.open(project)
-        return
-      end
-      sidebar.open(project)
-      require('chatora.page').open(project, title, require('chatora.winutil').ensure_editor_win())
+        require('chatora.page').open(project, title, require('chatora.winutil').ensure_editor_win())
+      end)
     end)
     return
   end
@@ -176,11 +179,42 @@ function M.log()
   end)
 end
 
+--- Switch the session to `name`, moving to whichever stored account can see it, and call
+--- `cb(name)`. Announces the account change; `opts.quiet` drops the note about a project no
+--- account holds, which is ordinary when following a link into a public project.
+function M.use_project(name, opts, cb)
+  lsp.request_ok('chatora/useProject', { project = name }, function(result)
+    if result.switched then
+      require('chatora.keymaps').invalidate_account_cache()
+      vim.notify(
+        '[chatora] アカウントを切り替えました: ' .. require('chatora.account').label(result.switched),
+        vim.log.levels.INFO
+      )
+    elseif result.foreign and not (opts and opts.quiet) then
+      vim.notify(
+        ('[chatora] %s はどのアカウントのプロジェクトでもありません。公開なら読み取り専用で開きます'):format(
+          name
+        ),
+        vim.log.levels.WARN
+      )
+    end
+    M.session.project = result.project
+    if cb then
+      cb(result.project)
+    end
+  end)
+end
+
 --- Pick a different project and reopen the sidebar on it. Overrides both the
 --- session's remembered choice and a setup({ project = ... }) fixation until
---- the next switch (resolve_project reads the session first).
-function M.switch_project()
+--- the next switch (resolve_project reads the session first). Given a name, switches
+--- straight to it — including the account it is on — instead of prompting.
+function M.switch_project(name)
   auth.ensure_auth(function()
+    if name and name ~= '' then
+      M.use_project(name, nil, sidebar.open)
+      return
+    end
     lsp.request_ok('chatora/projects', {}, function(result)
       local projects = result.projects or {}
       if #projects == 0 then
@@ -196,9 +230,9 @@ function M.switch_project()
         if not choice then
           return
         end
-        local name = choice.name or choice.displayName
-        M.session.project = name
-        sidebar.open(name)
+        local picked = choice.name or choice.displayName
+        M.session.project = picked
+        sidebar.open(picked)
       end)
     end)
   end)
@@ -248,7 +282,7 @@ function M.dispatch(subcmd, args)
   elseif subcmd == 'related' then
     M.related()
   elseif subcmd == 'project' then
-    M.switch_project()
+    M.switch_project(args ~= '' and args or nil)
   elseif subcmd == 'account' then
     M.switch_account()
   elseif subcmd == 'logout' then

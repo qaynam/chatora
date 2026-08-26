@@ -2,17 +2,49 @@
 # Launch Neovim straight into chatora (sidebar + auth flow).
 #
 #   chatora                                        # sidebar on the configured project
+#   chatora -p my-project                          # sidebar on that project, switching to
+#                                                  # whichever stored account has it
 #   chatora https://scrapbox.io/proj/Page_Title    # straight to that page
 #
 # A leading Cosense URL is handed to :Chatora; anything else passes through to nvim.
 set -euo pipefail
 
+project=
+while :; do
+  case "${1-}" in
+    -p | --project)
+      if [ $# -lt 2 ] || [ -z "$2" ]; then
+        echo "chatora: $1 needs a project name" >&2
+        exit 2
+      fi
+      project=$2
+      shift 2
+      ;;
+    --project=*)
+      project=${1#--project=}
+      shift
+      ;;
+    -p?*)
+      project=${1#-p}
+      shift
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
 case "${1-}" in
   http://* | https://* | cosense://*)
+    # The URL names its own project (and so its account); -p has nothing left to say.
     url=$1
     shift
     exec nvim "+Chatora open $url" "$@"
     ;;
 esac
+
+if [ -n "$project" ]; then
+  exec nvim "+Chatora project $project" "$@"
+fi
 
 exec nvim "+Chatora" "$@"

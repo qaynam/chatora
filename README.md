@@ -80,7 +80,7 @@ LSP サーバーが担当し、Neovim 側は薄い UI 層に徹する。
 | `:Chatora search [query]` | 全文検索（内蔵ピッカー） |
 | `:Chatora related` | 関連ページパネルを開閉 |
 | `:Chatora account` | アカウントの切り替え・追加 |
-| `:Chatora project` | プロジェクトの切り替え |
+| `:Chatora project [name]` | プロジェクトの切り替え。名前を渡すとそのプロジェクトを持つアカウントごと切り替える |
 | `:Chatora logout` | 現在のアカウントを削除 |
 | `:Chatora log` | 診断ログを開く（`log` オプションが必要） |
 | `:Chatora reload` | プラグインを再読み込み（開発用） |
@@ -649,7 +649,18 @@ require('telescope').load_extension('chatora')
 alias chatora='/path/to/chatora/bin/chatora'
 ```
 
-以後 `chatora` だけでサイドバー付きの nvim が立ち上がる。`chatora <url>` でそのページを開く。
+```sh
+chatora                                       # サイドバー（設定のプロジェクト）
+chatora -p my-project                         # そのプロジェクトを開く
+chatora https://scrapbox.io/proj/Page_Title   # そのページを開く
+```
+
+`-p`（`--project`）で渡したプロジェクトが今のアカウントに無ければ、**保存済みの他アカウントを
+順に当たって、持っているアカウントに切り替えてから**開く。URL 指定も同じで、URL の中の
+プロジェクト名からアカウントを決める。どのアカウントにも無いプロジェクトはそのまま開く —
+公開プロジェクトなら読み取り専用で読める。
+
+残りの引数はそのまま nvim に渡る（`chatora -p proj notes.md`）。
 
 ## トラブルシューティング
 
