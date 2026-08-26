@@ -33,10 +33,6 @@ local is_plugin_win = winutil.is_plugin_win
 local find_editor_win = winutil.find_editor_win
 
 --- Options and mappings of the panel buffer.
----
---- Applied on every open rather than once at creation: `:bdelete` leaves the buffer
---- existing but unloaded, and an unloaded buffer comes back with option defaults and none
---- of its buffer-local mappings.
 local function configure_buf()
   -- acwrite (with page.lua's no-op chatora://* BufWriteCmd) so a reflexive
   -- :wq closes the window instead of E382.
@@ -53,9 +49,9 @@ local function configure_buf()
   end, { buffer = buf, nowait = true, silent = true, desc = 'chatora: 関連ページパネルを閉じる' })
 end
 
---- The panel's buffer, created on first open and set up again if it was unloaded. The
---- handle is reused rather than replaced: an unloaded buffer keeps its name, so a
---- replacement carrying the same one fails with E95.
+--- The panel's buffer, created on first open and configured again whenever it was
+--- unloaded: `:bdelete` keeps the buffer — and its name, so a replacement carrying the same
+--- one fails with E95 — but drops its options and its buffer-local mappings.
 local function ensure_buf()
   local exists = buf ~= nil and vim.api.nvim_buf_is_valid(buf)
   if exists and vim.api.nvim_buf_is_loaded(buf) then

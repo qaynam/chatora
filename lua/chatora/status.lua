@@ -232,7 +232,7 @@ local BADGE = { dirty = '● 未保存', saving = '◍ 保存中', error = '✗ 
 --- The page's numbers as one statusline string, matching what Cosense's web page menu
 --- shows: `更新 43分前 · 閲覧 39 · 被リンク 6`, led by the unsaved badge when there is one.
 --- Empty for a non-page buffer, so it can be dropped straight into lualine without a
---- condition. Plain text — pair it with `page_info_hl()` for colour.
+--- condition. Plain text — pair it with `page_info_hl()` for color.
 function M.page_info(bufnr)
   local meta = page_meta(bufnr)
   if not meta then
@@ -262,7 +262,7 @@ function M.page_info(bufnr)
   return table.concat(parts, ' · ')
 end
 
---- Highlight group for `page_info()`: the save state's colour while the buffer differs
+--- Highlight group for `page_info()`: the save state's color while the buffer differs
 --- from the server, else the muted one the rest of the statusline uses. nil when
 --- `page_info()` is empty.
 ---

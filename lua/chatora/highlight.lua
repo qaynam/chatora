@@ -86,7 +86,7 @@ end
 -- mostly rule if each one is as strong as a window border.
 local HAIRLINE_RATIO = 0.22
 
---- A colour barely off the background, for rules that divide without being looked at.
+--- A color barely off the background, for rules that divide without being looked at.
 function M.hairline()
   local base = bg_of('Normal')
   local ink = fg_of('Normal')

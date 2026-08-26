@@ -486,9 +486,9 @@ local ok, err = pcall(function()
   end
   log('sidebar reopen OK (list served from cache)')
 
-  -- :bdelete keeps the buffer (and its name) but unloads it, which drops its options and
-  -- buffer-local mappings. Reopening has to restore them: a sidebar left with buftype=''
-  -- is a plain file buffer as far as the rest of the editor is concerned.
+  -- :bdelete unloads the buffer without destroying it, dropping its options and mappings.
+  -- Reopening has to restore them: a sidebar left with buftype='' is a plain file buffer as
+  -- far as the rest of the editor is concerned.
   require('chatora.sidebar').close()
   vim.cmd('bdelete! ' .. sidebar_buf)
   require('chatora.sidebar').open('testproj')
