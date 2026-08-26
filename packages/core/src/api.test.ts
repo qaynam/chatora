@@ -371,3 +371,49 @@ describe('renamed pages and redirects', () => {
     expect(hops).toBeLessThanOrEqual(5)
   })
 })
+
+describe('searchTitles walks the whole project', () => {
+  const titlePage = (count: number, followingId: string | null) =>
+    new Response(
+      JSON.stringify(Array.from({ length: count }, (_, i) => ({ id: String(i), title: `t${i}` }))),
+      {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          ...(followingId === null ? {} : { 'x-following-id': followingId }),
+        },
+      },
+    )
+
+  // The endpoint caps a response at 10000 entries and names where the next page starts.
+  // Stopping at the first would report everything past it as a page that does not exist.
+  test('follows x-following-id until the project runs out', async () => {
+    let call = 0
+    const { layer, calls } = testHttpClient(() => {
+      call++
+      return call === 1 ? titlePage(10000, 'second') : titlePage(7, null)
+    })
+    const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+    const titles = await Effect.runPromise(api.searchTitles('big').pipe(Effect.provide(layer)))
+    expect(titles).toHaveLength(10007)
+    expect(calls[1]?.url).toContain('followingId=second')
+  })
+
+  test('a project that fits in one page is one request', async () => {
+    const { layer, calls } = testHttpClient(() => titlePage(12, null))
+    const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+    const titles = await Effect.runPromise(api.searchTitles('small').pipe(Effect.provide(layer)))
+    expect(titles).toHaveLength(12)
+    expect(calls).toHaveLength(1)
+  })
+
+  // A short page means the end even when the header still names one, and the loop is
+  // bounded anyway so a server that always names a next page cannot spin forever.
+  test('a server that always names a next page still terminates', async () => {
+    const { layer, calls } = testHttpClient(() => titlePage(10000, 'again'))
+    const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+    const titles = await Effect.runPromise(api.searchTitles('endless').pipe(Effect.provide(layer)))
+    expect(calls.length).toBeLessThanOrEqual(20)
+    expect(titles.length).toBe(calls.length * 10000)
+  })
+})

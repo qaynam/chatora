@@ -89,6 +89,8 @@ const buildHeaders = (credential: Credential, hasBody: boolean): Record<string, 
 interface RawResponse {
   readonly status: number
   readonly body: unknown
+  /** Response headers, for the few endpoints that page through one. */
+  readonly headers: Headers
 }
 
 // redirect: 'manual' + treat any 3xx as an error so credential headers never travel to a
@@ -178,7 +180,7 @@ const requestJson = (
           message: `Response body was not valid JSON: ${String(cause)}`,
         }),
     })
-    return { status: res.status, body }
+    return { status: res.status, body, headers: res.headers }
   })
 
 const decode = <A, I>(
@@ -381,14 +383,50 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
       ),
     )
 
-  const searchTitles: CosenseApiShape['searchTitles'] = (project) =>
-    request(`/api/pages/${project}/search/titles`).pipe(
+  // `search/titles` answers with at most this many entries and an `x-following-id` naming
+  // where the next page starts. A project larger than one page is common enough that
+  // stopping at the first would quietly report most of it as pages that do not exist.
+  const TITLES_PER_PAGE_CAP = 10_000
+  const MAX_TITLE_PAGES = 20
+
+  const titlesPage = (
+    project: string,
+    followingId: string | undefined,
+  ): Effect.Effect<
+    { titles: readonly TitleEntry[]; next: string | undefined },
+    CosenseApiError,
+    HttpClient
+  > =>
+    request(
+      `/api/pages/${project}/search/titles${followingId === undefined ? '' : `?followingId=${followingId}`}`,
+    ).pipe(
       Effect.flatMap((res) =>
-        Array.isArray(res.body)
+        (Array.isArray(res.body)
           ? decode(TitleEntryArraySchema, res)
-          : decode(TitleEntryEnvelopeSchema, res).pipe(Effect.map((data) => data.pages)),
+          : decode(TitleEntryEnvelopeSchema, res).pipe(Effect.map((data) => data.pages))
+        ).pipe(
+          Effect.map((titles) => {
+            const header = res.headers.get('x-following-id')
+            return { titles, next: header === null || header === '' ? undefined : header }
+          }),
+        ),
       ),
     )
+
+  const searchTitles: CosenseApiShape['searchTitles'] = (project) =>
+    Effect.gen(function* () {
+      const all: TitleEntry[] = []
+      let following: string | undefined
+      // Bounded rather than "until the header is empty": this walks a whole project, and a
+      // server that kept naming a next page would otherwise never stop.
+      for (let page = 0; page < MAX_TITLE_PAGES; page++) {
+        const { titles, next } = yield* titlesPage(project, following)
+        all.push(...titles)
+        if (next === undefined || titles.length < TITLES_PER_PAGE_CAP) break
+        following = next
+      }
+      return all
+    })
 
   /**
    * `POST /api/pages/:project/:pageId/accessed`, falling back to `GET` — the two

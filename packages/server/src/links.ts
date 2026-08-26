@@ -38,7 +38,8 @@ export const computeInternalLinks = (text: string): InternalLink[] => {
 }
 
 /**
- * Cosense matches page titles case-insensitively (its own index is keyed by `titleLc`), so
- * a link only counts as empty when nothing matches it folded.
+ * A title folded the way Cosense's own `titleLc` folds it: lowercased, with spaces written
+ * as underscores. Both halves matter — `[Side Kanban]` and `[side_kanban]` reach the same
+ * page there, so a link only counts as empty when nothing matches it folded.
  */
-export const titleKey = (title: string): string => title.toLowerCase()
+export const titleKey = (title: string): string => title.toLowerCase().replace(/ /g, '_')
