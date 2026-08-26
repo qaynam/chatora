@@ -507,7 +507,12 @@ ImageMagick（`brew install imagemagick`）、そして描画プラグインが�
 `image_height_large` の大きさで描き、文中にあるときは 1 行のまま（インラインの行に背の高い
 グリフを置く場所が無いため）。
 
-#### 画像だけの行
+#Gyazo の URL は Cosense と同じく `/api/oembed-proxy/gyazo` で解決する。`https://gyazo.com/<hash>`
+から `https://i.gyazo.com/<hash>.png` を組み立てる方法だと、GIF（Gyazo 上は video 扱い）が 404 に
+なり、チーム Gyazo（`https://<team>.gyazo.com/<hash>`）に至っては組み立てようがない。oembed が
+返す `url`（写真）または `thumbnail_url`（動画の静止画）を使うので、どちらも描ける。
+
+### 画像だけの行
 
 `[img1] [img2] [img3]` のように画像しか無い行は、web だと横に流れて折り返す。ターミナルの
 描画バックエンドは画像を **1 行分のインライン仮想テキスト**か**行の下の仮想行**のどちらかで

@@ -7,6 +7,7 @@ import { promisify } from 'node:util'
 import type { Credential, HttpClientShape } from '@chatora/core'
 import { HttpClient } from '@chatora/core'
 import { Context, Data, Deferred, Effect, Layer, Option, SynchronizedRef } from 'effect'
+import { resolveGyazo } from './gyazo'
 import { imageSizeOf } from './imageSize'
 import { log } from './log'
 import type { ErrCode, ErrEnvelope } from './pages'
@@ -558,9 +559,15 @@ export const fetchAsset = (params: {
     // `params.project` isn't read here: Lua already resolved the icon path into an absolute
     // `url` before sending this request. It stays part of the wire contract for symmetry with
     // the other chatora/* requests.
+    // Cached under the URL the page holds, fetched from the one Gyazo actually serves —
+    // which only its proxy can name (see resolveGyazo).
+    const source = Option.getOrElse(
+      yield* resolveGyazo(http.fetch, session.origin, params.url),
+      () => params.url,
+    )
     const fetched = yield* cache.dedupe(
       params.url,
-      fetchAndCache(http.fetch, headersFor, cacheDir, hash, params.url),
+      fetchAndCache(http.fetch, headersFor, cacheDir, hash, source),
     )
     const rasterized = yield* applySvgRaster(cacheDir, hash, fetched)
     return yield* withSize(yield* applyBorder(cacheDir, hash, rasterized, border))

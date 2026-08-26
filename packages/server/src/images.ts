@@ -1,6 +1,7 @@
 import type { AnyNode } from '@cosense-toolbox/parser'
 import { asImageSrc, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
+import { isGyazoUrl } from './gyazo'
 import { parseOptions } from './notations'
 
 /**
@@ -48,6 +49,15 @@ const isFetchableImage = (src: string): boolean => {
 
 const DRAWABLE: ReadonlySet<string> = new Set(['image', 'icon'])
 
+/**
+ * A bare Gyazo link is a picture. The parser only reads `https://gyazo.com/<hash>` that
+ * way — a team's `https://<team>.gyazo.com/<hash>` has no form it can turn into an image
+ * URL, so it arrives as an ordinary link — but Cosense draws both, and so does chatora:
+ * what the URL resolves to is the asset layer's problem (see gyazo.ts), not the parser's.
+ */
+const isGyazoImageLink = (node: AnyNode): boolean =>
+  node.type === 'externalLink' && node.label === node.target && isGyazoUrl(node.target)
+
 const ICON_SUFFIX = /^(.+)\.icon$/
 
 /**
@@ -81,7 +91,7 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
   const docLines = text.split('\n')
   const out: ImageTarget[] = []
 
-  visit(page, ['image', 'icon', 'decoration'], (node, ancestors) => {
+  visit(page, ['image', 'icon', 'decoration', 'externalLink'], (node, ancestors) => {
     const { line, column } = node.position.start
     const endChar = node.position.end.column
     const lineText = docLines[line] ?? ''
@@ -92,7 +102,10 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
     const gallery =
       content.length > 0 &&
       content.every(
-        (child) => DRAWABLE.has(child.type) || largeIconUser(child, lineText) !== undefined,
+        (child) =>
+          DRAWABLE.has(child.type) ||
+          isGyazoImageLink(child) ||
+          largeIconUser(child, lineText) !== undefined,
       )
     if (node.type === 'decoration') {
       const user = largeIconUser(node, lineText)
@@ -111,6 +124,19 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
       }
       return
     }
+    if (isGyazoImageLink(node) && node.type === 'externalLink') {
+      out.push({
+        line,
+        startChar: column,
+        endChar,
+        src: node.target,
+        kind: 'image',
+        standalone,
+        gallery,
+        large: false,
+      })
+      return
+    }
     if (node.type === 'image') {
       const src = asImageSrc(node.src) ?? node.src
       if (isFetchableImage(src)) {
@@ -125,7 +151,7 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
           large: node.large === true,
         })
       }
-    } else {
+    } else if (node.type === 'icon') {
       out.push({
         line,
         startChar: column,

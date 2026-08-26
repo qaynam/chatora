@@ -83,7 +83,7 @@ describe('fetchAsset', () => {
     const { layer: httpLayer, calls } = testHttpClient(() => png(1))
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
     const result = await runOnce(
-      fetchAsset({ project: 'p', url: 'https://i.gyazo.com/one.png' }),
+      fetchAsset({ project: 'p', url: 'https://cdn.example.com/one.png' }),
       httpLayer,
       credLayer,
     )
@@ -92,10 +92,31 @@ describe('fetchAsset', () => {
     expect(calls).toHaveLength(1)
   })
 
+  test('a Gyazo URL is fetched from where its proxy says the picture is', async () => {
+    const url = 'https://myteam.gyazo.com/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1'
+    const picture = 'https://t.gyazo.com/teams/myteam/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.png'
+    const { layer: httpLayer, calls } = testHttpClient((requested) =>
+      requested.includes('/api/oembed-proxy/gyazo')
+        ? new Response(JSON.stringify({ type: 'photo', url: picture }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        : png(1),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const result = await runOnce(fetchAsset({ project: 'p', url }), httpLayer, credLayer)
+
+    expect(result.ok).toBe(true)
+    expect(calls.map((call) => call.url)).toEqual([
+      `${ORIGIN}/api/oembed-proxy/gyazo?url=${encodeURIComponent(url)}`,
+      picture,
+    ])
+  })
+
   test('a second request for the same URL is a cache hit and never refetches', async () => {
     const { layer: httpLayer, calls } = testHttpClient(() => png(2))
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
-    const url = 'https://i.gyazo.com/cached.png'
+    const url = 'https://cdn.example.com/cached.png'
 
     const first = await runOnce(fetchAsset({ project: 'p', url }), httpLayer, credLayer)
     const second = await runOnce(fetchAsset({ project: 'p', url }), httpLayer, credLayer)
@@ -122,7 +143,7 @@ describe('fetchAsset', () => {
             headers: contentType !== undefined ? { 'content-type': contentType } : {},
           }),
       )
-      const url = `https://i.gyazo.com/${expectedExt.slice(1)}.bin`
+      const url = `https://cdn.example.com/${expectedExt.slice(1)}.bin`
       const result = await runOnce(fetchAsset({ project: 'p', url }), httpLayer, credLayer)
       expect(result.ok).toBe(true)
       if (result.ok) expect(result.path.endsWith(expectedExt)).toBe(true)
@@ -141,7 +162,7 @@ describe('fetchAsset', () => {
     )
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
     const result = await runOnce(
-      fetchAsset({ project: 'p', url: 'https://i.gyazo.com/broken.svg' }),
+      fetchAsset({ project: 'p', url: 'https://cdn.example.com/broken.svg' }),
       httpLayer,
       credLayer,
     )
@@ -159,7 +180,7 @@ describe('fetchAsset', () => {
       credLayer,
     )
     await runOnce(
-      fetchAsset({ project: 'p', url: 'https://i.gyazo.com/off-origin.png' }),
+      fetchAsset({ project: 'p', url: 'https://cdn.example.com/off-origin.png' }),
       httpLayer,
       credLayer,
     )
@@ -194,7 +215,7 @@ describe('fetchAsset', () => {
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
 
     const result = await runOnce(
-      fetchAsset({ project: 'p', url: 'https://i.gyazo.com/loop' }),
+      fetchAsset({ project: 'p', url: 'https://cdn.example.com/loop' }),
       httpLayer,
       credLayer,
     )
@@ -208,7 +229,7 @@ describe('fetchAsset', () => {
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
 
     const result = await runOnce(
-      fetchAsset({ project: 'p', url: 'https://i.gyazo.com/broken.png' }),
+      fetchAsset({ project: 'p', url: 'https://cdn.example.com/broken.png' }),
       httpLayer,
       credLayer,
     )
@@ -239,7 +260,7 @@ describe('fetchAsset', () => {
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
 
     await runOnce(
-      fetchAsset({ project: 'p', url: 'https://i.gyazo.com/plain.png' }),
+      fetchAsset({ project: 'p', url: 'https://cdn.example.com/plain.png' }),
       httpLayer,
       credLayer,
     )
@@ -250,7 +271,7 @@ describe('fetchAsset', () => {
   test('concurrent fetchAsset calls for the same URL are deduped into one request', async () => {
     const { layer: httpLayer, calls } = testHttpClient(() => png(6))
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
-    const url = 'https://i.gyazo.com/shared.png'
+    const url = 'https://cdn.example.com/shared.png'
 
     const program = Effect.all(
       [fetchAsset({ project: 'p', url }), fetchAsset({ project: 'p', url })],

@@ -2,6 +2,34 @@ import { describe, expect, test } from 'bun:test'
 import { computeImageTargets } from './images'
 
 describe('computeImageTargets', () => {
+  test("a team's Gyazo link is a picture, though the parser cannot see one in it", () => {
+    const url = 'https://myteam.gyazo.com/d5a22192d87effa875686051a0c5a179'
+    const targets = computeImageTargets(`タイトル\n[${url}]`)
+    expect(targets).toEqual([
+      {
+        line: 1,
+        startChar: 0,
+        endChar: `[${url}]`.length,
+        src: url,
+        kind: 'image',
+        standalone: true,
+        gallery: true,
+        large: false,
+      },
+    ])
+  })
+
+  test('a Gyazo link with a label of its own stays a link', () => {
+    const targets = computeImageTargets(
+      'タイトル\n[ラベル https://myteam.gyazo.com/d5a22192d87effa875686051a0c5a179]',
+    )
+    expect(targets).toEqual([])
+  })
+
+  test('a link to anywhere else is not a picture', () => {
+    expect(computeImageTargets('タイトル\n[https://example.com/page]')).toEqual([])
+  })
+
   test('a fragment-tagged URL (#.svg) is an image with its src untouched', () => {
     const text = 'タイトル\n[https://kanban.qaynam.dev/api/status/xxx?userId=yyy#.svg]'
     const targets = computeImageTargets(text)
