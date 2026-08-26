@@ -982,6 +982,66 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- telomere scrollbar: the changed lines' place in the whole page, marked down the right
+  -- edge — and ]u / [u stepping through them.
+  do
+    local telomere = require('chatora.telomere')
+    local scrollbar = require('chatora.scrollbar')
+    local lsp = require('chatora.lsp')
+    local orig_ok = lsp.request_ok
+    local now = os.time()
+    local changed = { [3] = true, [7] = true, [22] = true, [38] = true }
+    lsp.request_ok = function(method, _, cb)
+      if method ~= 'chatora/telomere' then
+        return
+      end
+      local lines = {}
+      for i = 1, 40 do
+        lines[i] = { updated = changed[i] and now - 60 or now - 400 * 86400, userId = 'u1' }
+      end
+      cb({ ok = true, accessed = now - 3600, lines = lines })
+    end
+
+    local buf = vim.api.nvim_create_buf(false, true)
+    local text = {}
+    for i = 1, 40 do
+      text[i] = ('%02d 行目'):format(i)
+    end
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, text)
+    vim.api.nvim_win_set_buf(0, buf)
+    telomere.attach(buf)
+    lsp.request_ok = orig_ok
+
+    local rows = {}
+    for _, mark in ipairs(telomere.rows(buf)) do
+      rows[#rows + 1] = mark.row
+    end
+    assert(vim.deep_equal(rows, { 3, 7, 22, 38 }), 'changed rows: ' .. vim.inspect(rows))
+
+    -- One mark per changed line, placed by its share of the page rather than by where the
+    -- line happens to be: every one of the four is on the bar, though only some are on screen.
+    local marks = vim.api.nvim_buf_get_extmarks(buf, scrollbar.ns, 0, -1, { details = true })
+    assert(#marks == 4, 'expected 4 scrollbar marks, got ' .. #marks)
+    local height = vim.api.nvim_win_get_height(0)
+    for _, mark in ipairs(marks) do
+      assert(mark[4].virt_text_pos == 'right_align', 'scrollbar marks live at the window edge')
+      assert(mark[2] < height, 'a mark drawn below the fold cannot be seen: row ' .. mark[2])
+    end
+
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+    telomere.jump(1)
+    assert(vim.api.nvim_win_get_cursor(0)[1] == 3, ']u must land on the first changed line')
+    telomere.jump(1)
+    assert(vim.api.nvim_win_get_cursor(0)[1] == 7, ']u must step to the next one')
+    telomere.jump(-1)
+    assert(vim.api.nvim_win_get_cursor(0)[1] == 3, '[u must step back')
+    telomere.jump(-1)
+    -- Nothing changed above line 3, so stepping back again wraps to the last one.
+    assert(vim.api.nvim_win_get_cursor(0)[1] == 38, '[u must wrap at the top')
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- `:Chatora project <name>` switches straight to that project (and to the account the
   -- server says holds it) instead of prompting.
   do
@@ -1102,6 +1162,13 @@ local ok, err = pcall(function()
       return out
     end
     assert(vim.deep_equal(titles(), { 'ページ1', 'ページ2', 'ページ3', 'ページ4', 'ページ5' }), 'initial list')
+
+    -- Switching project or account is a keystroke away from the list itself.
+    local keys = {}
+    for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+      keys[map.lhs] = true
+    end
+    assert(keys['P'] and keys['A'], 'expected P / A in the sidebar, got ' .. vim.inspect(vim.tbl_keys(keys)))
 
     -- ページ4 was just edited, so the server now lists it first.
     lsp.request = function(method, _, cb)

@@ -159,6 +159,16 @@ local function tabline()
   return table.concat(parts)
 end
 
+--- Project and account in the status line: with `p` and `a` a keystroke away, which of
+--- each is in front of the reader has to be visible without asking.
+local function apply_statusline()
+  if not is_open() then
+    return
+  end
+  local who = me and (me.displayName ~= '' and me.displayName or me.name) or nil
+  vim.wo[win].statusline = 'chatora: ' .. (project or '') .. (who and ('  ' .. who) or '')
+end
+
 local function apply_winbar()
   if not (win and vim.api.nvim_win_is_valid(win)) then
     return
@@ -566,6 +576,7 @@ local function setup_keymaps()
   vim.keymap.set('n', 's', function() M.search() end, opts('chatora: ページ検索'))
   vim.keymap.set('n', 'n', function() M.new_page() end, opts('chatora: 新規ページ'))
   vim.keymap.set('n', 'P', function() require('chatora').switch_project() end, opts('chatora: プロジェクト切替'))
+  vim.keymap.set('n', 'A', function() require('chatora').switch_account() end, opts('chatora: アカウント切替'))
   vim.keymap.set('n', 'q', function() M.close() end, opts('chatora: サイドバーを閉じる'))
   vim.keymap.set('n', '<Tab>', function() M.next_tab(1) end, opts('chatora: 次のタブ'))
   vim.keymap.set('n', '<S-Tab>', function() M.next_tab(-1) end, opts('chatora: 前のタブ'))
@@ -644,7 +655,7 @@ function M.open(proj)
   -- Pin the window to its buffer: opening a file while the sidebar is
   -- focused must not hijack this window (E1513 instead).
   vim.wo[win].winfixbuf = true
-  vim.wo[win].statusline = 'chatora: ' .. project
+  apply_statusline()
   apply_winbar()
 
   lsp.ensure_start(buf)
@@ -663,6 +674,7 @@ function M.open(proj)
   if not me then
     lsp.request('chatora/authStatus', {}, function(err, result)
       me = (not err) and result and result.ok ~= false and result.user or nil
+      apply_statusline()
       if me then
         M.load_more()
         return

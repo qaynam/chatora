@@ -50,8 +50,55 @@ end
 --- the reader has since edited holds `own = true` instead.
 local state = {}
 
-local function enabled()
-  return config.options.telomere ~= false
+local function options()
+  local opts = config.options.telomere
+  if opts == false then
+    return nil
+  end
+  if type(opts) ~= 'table' then
+    opts = {}
+  end
+  return { bar = opts.bar ~= false, scrollbar = opts.scrollbar ~= false }
+end
+
+--- What a line's history makes of it: `own` for the reader's own unsaved text, `updated`
+--- for what arrived while this buffer was open, `unread` for what changed since their last
+--- visit, and `read` for everything they have already seen.
+local function classify(line, st)
+  if not line or line.own or line.updated == 0 then
+    return 'own'
+  end
+  if line.updated > st.opened_at then
+    return 'updated'
+  end
+  if line.updated > st.accessed then
+    return 'unread'
+  end
+  return 'read'
+end
+
+local HL = {
+  own = 'ChatoraTelomereLocal',
+  updated = 'ChatoraTelomereUpdated',
+  unread = 'ChatoraTelomereUnread',
+  read = 'ChatoraTelomere',
+}
+
+--- Rows (1-based) the reader has not already seen as they are, each with its `classify`
+--- kind. Empty for a buffer with no history yet, and for a page nothing has touched.
+function M.rows(bufnr)
+  local st = state[bufnr or vim.api.nvim_get_current_buf()]
+  if not st then
+    return {}
+  end
+  local out = {}
+  for row = 1, vim.api.nvim_buf_line_count(bufnr) do
+    local kind = classify(st.lines[row], st)
+    if kind ~= 'read' then
+      out[#out + 1] = { row = row, kind = kind }
+    end
+  end
+  return out
 end
 
 local function paint(bufnr)
@@ -60,28 +107,21 @@ local function paint(bufnr)
   end
   vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
   local st = state[bufnr]
-  if not st then
-    return
-  end
-  local now = os.time()
-  for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
-    local line = st.lines[row + 1]
-    local text, hl
-    if not line or line.own or line.updated == 0 then
-      text, hl = BARS[#BARS], 'ChatoraTelomereLocal'
-    else
-      text = M.bar(now - line.updated)
-      if line.updated > st.opened_at then
-        -- Arrived while this buffer was open: a background sync brought it in.
-        hl = 'ChatoraTelomereUpdated'
-      elseif line.updated > st.accessed then
-        hl = 'ChatoraTelomereUnread'
-      else
-        hl = 'ChatoraTelomere'
-      end
+  local opts = options()
+  if st and opts and opts.bar then
+    local now = os.time()
+    for row = 0, vim.api.nvim_buf_line_count(bufnr) - 1 do
+      local line = st.lines[row + 1]
+      local kind = classify(line, st)
+      -- The reader's own text has no age of its own: it is as new as the page gets.
+      local text = kind == 'own' and BARS[#BARS] or M.bar(now - line.updated)
+      vim.api.nvim_buf_set_extmark(bufnr, M.ns, row, 0, {
+        sign_text = text,
+        sign_hl_group = HL[kind],
+      })
     end
-    vim.api.nvim_buf_set_extmark(bufnr, M.ns, row, 0, { sign_text = text, sign_hl_group = hl })
   end
+  require('chatora.scrollbar').refresh(bufnr)
 end
 
 local timers = {}
@@ -138,7 +178,7 @@ end
 --- this can outrun — see `chatora/telomere`.
 function M.refresh(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
-  if not enabled() or not vim.api.nvim_buf_is_valid(bufnr) then
+  if not options() or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
   local sent = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -191,8 +231,30 @@ local function forget(bufnr)
   end
 end
 
+--- Move the cursor to the next line the reader has not seen as it is, `direction` 1
+--- forward or -1 back, wrapping at the ends. Says so rather than moving when the page
+--- holds nothing new.
+function M.jump(direction)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local rows = M.rows(bufnr)
+  if #rows == 0 then
+    vim.notify('[chatora] 更新された行はありません')
+    return
+  end
+  local cursor = vim.api.nvim_win_get_cursor(0)[1]
+  local target = direction < 0 and rows[#rows] or rows[1]
+  for i = 1, #rows do
+    local row = direction < 0 and rows[#rows - i + 1].row or rows[i].row
+    if (direction < 0 and row < cursor) or (direction > 0 and row > cursor) then
+      target = { row = row }
+      break
+    end
+  end
+  pcall(vim.api.nvim_win_set_cursor, 0, { target.row, 0 })
+end
+
 function M.attach(bufnr)
-  if not enabled() or vim.b[bufnr].chatora_telomere_attached then
+  if not options() or vim.b[bufnr].chatora_telomere_attached then
     return
   end
   vim.b[bufnr].chatora_telomere_attached = true

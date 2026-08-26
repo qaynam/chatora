@@ -298,6 +298,87 @@ export const projects = (): Effect.Effect<
     }),
   )
 
+/** A project list that answers `[]` rather than failing: one account is not the story. */
+const listProjects = (api: CosenseApiShape) =>
+  api.projects().pipe(Effect.orElseSucceed((): readonly ProjectSummary[] => []))
+
+/**
+ * The projects a stored account other than the active one can see. Empty when its token is
+ * gone or the server refuses it — one unreachable account must not take the others down.
+ */
+const projectsOn = (
+  account: Account,
+): Effect.Effect<readonly ProjectSummary[], never, SessionState | HttpClient | AccountStore> =>
+  Effect.gen(function* () {
+    const session = yield* SessionState
+    const store = yield* AccountStore
+    const pat = yield* store.resolveFor(account.id, session.origin)
+    if (Option.isNone(pat)) return []
+    const credential: Credential = { type: 'pat', value: pat.value, source: 'keychain' }
+    return yield* listProjects(session.apiFor(credential))
+  })
+
+export interface ProjectChoice {
+  readonly name: string
+  readonly displayName: string
+  /**
+   * The account it is on. Absent for the credential in use when no account owns it — a PAT
+   * from the environment or the pre-multi-account keychain entry still has projects.
+   */
+  readonly account?: Account
+  readonly active: boolean
+}
+
+/**
+ * Every project every stored account can see, the active account's first.
+ *
+ * `projects` answers for one account, which is all a page needs; this is for choosing where
+ * to work next, where the projects on the other accounts are exactly the ones a reader
+ * cannot get to without knowing which account to switch to first.
+ *
+ * Costs one request per account, so it is for a picker the reader opened — not for
+ * anything that runs on its own.
+ */
+export const allProjects = (): Effect.Effect<
+  { readonly ok: true; readonly projects: readonly ProjectChoice[] } | ErrEnvelope,
+  never,
+  SessionState | HttpClient | AccountStore
+> =>
+  handle(
+    Effect.gen(function* () {
+      const session = yield* SessionState
+      const store = yield* AccountStore
+      const { active, accounts } = yield* store.list()
+      const apiOpt = yield* session.getApi()
+      if (Option.isNone(apiOpt)) return noCredential()
+      const choices: ProjectChoice[] = []
+      const add = (
+        list: readonly ProjectSummary[],
+        account: Account | undefined,
+        isActive: boolean,
+      ) => {
+        for (const project of list) {
+          choices.push({
+            name: project.name,
+            displayName: project.displayName,
+            ...(account ? { account } : {}),
+            active: isActive,
+          })
+        }
+      }
+      const activeAccount = accounts.find((a) => Option.isSome(active) && a.id === active.value)
+      add(yield* listProjects(apiOpt.value), activeAccount, true)
+      for (const account of accounts) {
+        if (account.id === activeAccount?.id || account.origin !== session.origin) continue
+        add(yield* projectsOn(account), account, false)
+      }
+      return {
+        ok: true as const,
+        projects: choices.sort((a, b) => Number(b.active) - Number(a.active)),
+      }
+    }),
+  )
+
 export interface UseProjectResult {
   readonly ok: true
   readonly project: string
@@ -329,8 +410,6 @@ export const useProject = (params: {
       const session = yield* SessionState
       const store = yield* AccountStore
       const wanted = params.project.toLowerCase()
-      const listProjects = (api: CosenseApiShape) =>
-        api.projects().pipe(Effect.orElseSucceed((): readonly ProjectSummary[] => []))
       const holds = (list: readonly ProjectSummary[]) =>
         list.some((project) => project.name.toLowerCase() === wanted)
 
@@ -346,10 +425,7 @@ export const useProject = (params: {
         if (isActive || account.origin !== session.origin) continue
         // An account whose token has been revoked answers nothing and is simply skipped:
         // one broken account must not hide the project on a working one.
-        const pat = yield* store.resolveFor(account.id, session.origin)
-        if (Option.isNone(pat)) continue
-        const credential: Credential = { type: 'pat', value: pat.value, source: 'keychain' }
-        if (!holds(yield* listProjects(session.apiFor(credential)))) continue
+        if (!holds(yield* projectsOn(account))) continue
         yield* store.setActive(account.id)
         yield* session.invalidateCredentials()
         return { ok: true as const, project: params.project, switched: account, foreign: false }

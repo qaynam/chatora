@@ -358,6 +358,60 @@ describe('accounts / addAccount / useAccount / removeAccount', () => {
   })
 })
 
+describe('allProjects', () => {
+  const OTHER: Account = {
+    id: `${ORIGIN}#u2`,
+    origin: ORIGIN,
+    userId: 'u2',
+    name: 'qaynam',
+    displayName: 'Qaynam',
+  }
+  const byToken = (map: Record<string, readonly string[]>) =>
+    testHttpClient((url, init) => {
+      if (!url.endsWith('/api/projects')) return json({}, 404)
+      const token = (init.headers as Record<string, string>)['x-personal-access-token'] ?? ''
+      return json({ projects: (map[token] ?? []).map((name) => ({ id: name, name })) })
+    })
+
+  test('every account answers, and the active one comes first', async () => {
+    const { layer: httpLayer } = byToken({
+      'secret-pat': ['mine'],
+      [`pat-${OTHER.id}`]: ['theirs', 'shared'],
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const { layer: accountLayer } = testAccountStore({
+      active: Option.some(ME_ACCOUNT.id),
+      accounts: [ME_ACCOUNT, OTHER],
+    })
+    const result = (await runOnce(handlers.allProjects(), httpLayer, credLayer, accountLayer)) as {
+      projects: readonly { name: string; account?: Account; active: boolean }[]
+    }
+    expect(result.projects.map((p) => [p.name, p.account?.id, p.active])).toEqual([
+      ['mine', ME_ACCOUNT.id, true],
+      ['theirs', OTHER.id, false],
+      ['shared', OTHER.id, false],
+    ])
+  })
+
+  test('a credential no stored account owns still lists its projects', async () => {
+    const { layer: httpLayer } = byToken({ 'secret-pat': ['mine'] })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const result = (await runOnce(handlers.allProjects(), httpLayer, credLayer)) as {
+      projects: readonly { name: string; account?: Account }[]
+    }
+    expect(result.projects.map((p) => [p.name, p.account])).toEqual([['mine', undefined]])
+  })
+
+  test('no credential at all is unauthorized', async () => {
+    const { layer: httpLayer } = byToken({})
+    const { layer: credLayer } = testCredentialStore(Option.none())
+    expect(await runOnce(handlers.allProjects(), httpLayer, credLayer)).toMatchObject({
+      ok: false,
+      code: 'unauthorized',
+    })
+  })
+})
+
 describe('useProject', () => {
   const OTHER: Account = {
     id: `${ORIGIN}#u2`,

@@ -213,24 +213,27 @@ function M.switch_project(name)
       M.use_project(name, nil, sidebar.open)
       return
     end
-    lsp.request_ok('chatora/projects', {}, function(result)
+    -- Every account's projects, not just the active one's: switching to a project on
+    -- another account is the case that is hard to do any other way.
+    lsp.request_ok('chatora/allProjects', {}, function(result)
       local projects = result.projects or {}
       if #projects == 0 then
-        vim.notify('[chatora] no projects available', vim.log.levels.ERROR)
+        vim.notify('[chatora] 開けるプロジェクトがありません', vim.log.levels.ERROR)
         return
       end
       vim.ui.select(projects, {
-        prompt = 'Switch chatora project',
+        prompt = 'chatora プロジェクトを切り替え',
         format_item = function(p)
-          return p.name or p.displayName or tostring(p)
+          if p.active or not p.account then
+            return p.name
+          end
+          return p.name .. '  — ' .. require('chatora.account').label(p.account)
         end,
       }, function(choice)
         if not choice then
           return
         end
-        local picked = choice.name or choice.displayName
-        M.session.project = picked
-        sidebar.open(picked)
+        M.use_project(choice.name, nil, sidebar.open)
       end)
     end)
   end)

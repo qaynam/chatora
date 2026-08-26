@@ -227,6 +227,7 @@ connection.onRequest('chatora/removeAccount', (params: { id: string }) =>
   runtime.runPromise(handlers.removeAccount(params)),
 )
 connection.onRequest('chatora/projects', () => runtime.runPromise(handlers.projects()))
+connection.onRequest('chatora/allProjects', () => runtime.runPromise(handlers.allProjects()))
 connection.onRequest('chatora/useProject', (params: { project: string }) =>
   runtime.runPromise(handlers.useProject(params)),
 )
