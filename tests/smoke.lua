@@ -982,6 +982,62 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- The sidebar follows the page the reader moves to, and a project it has listed before
+  -- comes back without asking the server again.
+  do
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local orig_start, orig_ok = lsp.ensure_start, lsp.request_ok
+
+    local listed = {}
+    lsp.ensure_start = function() end
+    lsp.request_ok = function(method, params, cb)
+      if method == 'chatora/listPages' then
+        listed[#listed + 1] = params.project
+        cb({
+          ok = true,
+          count = 1,
+          scanned = 1,
+          pages = { { id = params.project, title = params.project .. ' のページ', updated = 1 } },
+        })
+      elseif method == 'chatora/authStatus' then
+        cb({ ok = true, authenticated = true, user = { id = 'u1', name = 'me', displayName = 'Me' } })
+      end
+    end
+
+    local function listing()
+      return vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)[1]:sub(2)
+    end
+
+    sidebar.open('alpha')
+    assert(listing() == 'alpha のページ', 'sidebar opened on alpha, got ' .. listing())
+
+    vim.cmd('wincmd l')
+    local editor = vim.api.nvim_get_current_win()
+    local function enter(name)
+      local b = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(b, name)
+      vim.api.nvim_win_set_buf(editor, b)
+      vim.api.nvim_exec_autocmds('BufEnter', { buffer = b })
+      return b
+    end
+
+    enter('cosense://beta/ページ')
+    assert(listing() == 'beta のページ', 'the sidebar must follow the page, got ' .. listing())
+    assert(vim.api.nvim_get_current_win() == editor, 'following must not take the cursor along')
+    assert(require('chatora').session.project == 'beta', 'a new page belongs to the project in front')
+
+    enter('cosense://alpha/戻る')
+    assert(listing() == 'alpha のページ', 'going back must restore alpha, got ' .. listing())
+    assert(
+      vim.deep_equal(listed, { 'alpha', 'beta' }),
+      'a project listed once must not be listed again: ' .. vim.inspect(listed)
+    )
+
+    sidebar.close()
+    lsp.ensure_start, lsp.request_ok = orig_start, orig_ok
+  end
+
   -- telomere scrollbar: the changed lines' place in the whole page, marked down the right
   -- edge — and ]u / [u stepping through them.
   do

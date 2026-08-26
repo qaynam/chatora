@@ -78,6 +78,12 @@ local DEFAULT_TABS = {
 local tabs = {}
 local active = 1
 
+--- Each project's tabs, kept while the session lasts so coming back to one shows its list
+--- at once. A list is a few hundred rows of ids and titles — far cheaper to hold than the
+--- requests that would rebuild it, and the poll loop brings whichever is on screen up to
+--- date anyway.
+local sessions = {}
+
 -- Fetched once per session; a `filter = 'me'` tab cannot query until it lands.
 local me = nil
 
@@ -626,20 +632,36 @@ function ensure_buf()
   configure_buf()
 end
 
---- Open (or focus) the sidebar for project, listing its pages.
-function M.open(proj)
+--- Open the sidebar on `project`, listing its pages. Focuses the sidebar window unless
+--- `opts.focus` is false, which is how the sidebar follows the page a reader moves to
+--- without taking the cursor along with it.
+function M.open(proj, opts)
   local same_project = project == proj
+  if not same_project then
+    if project then
+      sessions[project] = { tabs = tabs, active = active }
+    end
+    local kept = sessions[proj]
+    tabs = kept and kept.tabs or {}
+    active = kept and kept.active or 1
+  end
   project = proj
   ensure_hl()
-  build_tabs(same_project)
+  -- A project seen before keeps its pages; a new one starts empty either way.
+  build_tabs(true)
 
   ensure_buf()
 
+  local focus = not (opts and opts.focus == false)
   if not (win and vim.api.nvim_win_is_valid(win)) then
+    local origin = vim.api.nvim_get_current_win()
     vim.cmd('topleft ' .. tostring(config.options.sidebar_width) .. 'vsplit')
     win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(win, buf)
-  else
+    if not focus and vim.api.nvim_win_is_valid(origin) then
+      vim.api.nvim_set_current_win(origin)
+    end
+  elseif focus then
     vim.api.nvim_set_current_win(win)
   end
 
@@ -695,11 +717,35 @@ end
 -- not enough: it doesn't fire for API-driven buffer edits, so listen to
 -- text-change events too (page.lua additionally reports state transitions
 -- through chatora.status after open/save).
+local augroup = vim.api.nvim_create_augroup('ChatoraSidebar', { clear = true })
+
 vim.api.nvim_create_autocmd({ 'BufModifiedSet', 'TextChanged', 'TextChangedI' }, {
-  group = vim.api.nvim_create_augroup('ChatoraSidebar', { clear = true }),
+  group = augroup,
   pattern = 'cosense://*',
   callback = function()
     vim.schedule(M.refresh_marks)
+  end,
+})
+
+-- The sidebar lists the project the reader is actually in: following a link into another
+-- project moves it there, and coming back to the first page moves it back. Each project
+-- keeps its own list for as long as the session lasts, so neither move costs a request.
+vim.api.nvim_create_autocmd('BufEnter', {
+  group = augroup,
+  pattern = 'cosense://*',
+  callback = function(ev)
+    if not is_open() then
+      return
+    end
+    local proj = uri.parse(vim.api.nvim_buf_get_name(ev.buf))
+    if not proj or proj == project then
+      return
+    end
+    -- The cursor stays where the reader put it; only the list moves.
+    M.open(proj, { focus = false })
+    -- New pages and searches belong to the project in front of them, not to whichever one
+    -- the session started on.
+    require('chatora').session.project = proj
   end,
 })
 
