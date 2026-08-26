@@ -28,9 +28,10 @@ const MAX_SIZE_LEVEL = 4
  *
  * > `*`や`/`だけでなく、`!"#%&'()*+,-./{|}<>_~`などの記号も使用できます
  *
- * Only a handful of them carry a look of their own; the web client turns each of the rest
- * into a CSS class (`deco-!`, `deco-{`, …) for the project's own stylesheet to pick up, and
- * chatora into a configured notation. `=` is accepted there too but documented as reserved.
+ * Only a handful of them carry a look of their own. The web client turns every character
+ * into a CSS class (`deco-!`, `deco-{`, …) and leaves the look to the project's stylesheet;
+ * chatora looks it up among the configured notations instead. `=` is accepted there too,
+ * but documented as reserved for a use of Cosense's own.
  *
  * A character in this set with no notation behind it styles nothing and stops nothing: the
  * same page warns the set changes without notice, and dropping the whole decoration —

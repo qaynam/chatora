@@ -192,9 +192,7 @@ function M.use_project(name, opts, cb)
       )
     elseif result.foreign and not (opts and opts.quiet) then
       vim.notify(
-        ('[chatora] %s はどのアカウントのプロジェクトでもありません。公開なら読み取り専用で開きます'):format(
-          name
-        ),
+        ('[chatora] %s はどのアカウントにもありません。公開プロジェクトなら読み取り専用で開きます'):format(name),
         vim.log.levels.WARN
       )
     end

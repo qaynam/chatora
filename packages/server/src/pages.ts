@@ -311,11 +311,11 @@ export interface UseProjectResult {
 }
 
 /**
- * Make `project` the one to work in, on whichever account can see it.
+ * Make `project` the one to work in, moving to whichever stored account can see it.
  *
  * A project lives on exactly one account, so naming the project says which account to use
- * more directly than naming the account does — which is the whole point of `chatora -p`.
- * The active account is asked first, so the ordinary case costs one request and no switch.
+ * more directly than naming the account does. The active account is asked first, so the
+ * ordinary case costs one request and no switch.
  */
 export const useProject = (params: {
   readonly project: string

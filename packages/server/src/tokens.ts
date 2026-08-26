@@ -124,14 +124,13 @@ export const computeTokens = (text: string): RawToken[] => {
         return undefined
       case 'decoration': {
         // A marker run wears every marker in it (`[!* x]` is both), the way Cosense's own
-        // renderer emits a CSS class per character and lets them combine. So each gets its
-        // own token over the same span, and Neovim merges what they set: overlapping marks
-        // of equal priority combine attribute by attribute, the later one winning a tie.
+        // renderer emits a CSS class per character and lets them combine. Each gets a token
+        // over the same span, and Neovim combines overlapping marks of equal priority
+        // attribute by attribute — the later one winning a tie.
         //
-        // Order is therefore the precedence: the official markers go down first, then the
-        // configured notations in reverse, leaving the first-written one on top. What the
-        // user configured beats what the syntax implied, and the earlier marker of two
-        // beats the later where both set the same colour.
+        // Order is therefore the precedence: official markers first, then the configured
+        // notations in reverse. What the user configured ends up over what the syntax
+        // implied, and the earlier marker of two over the later.
         const official = decorationTokenType(node)
         if (official) tokens.push(spanToken(official, node.position))
         for (const name of [...notationNamesForDecoration(node)].reverse()) {

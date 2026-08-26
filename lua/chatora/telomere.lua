@@ -10,8 +10,7 @@ local lsp = require('chatora.lsp')
 --- Namespace of the bars, so a caller can read what is drawn.
 M.ns = vim.api.nvim_create_namespace('chatora_telomere')
 
--- Cosense draws the bar between 1 and 10 px wide. A terminal cell has eight widths to
--- spend, and these are them, thinnest first.
+-- The eight widths a terminal cell can be filled to, thinnest first.
 local BARS = { '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█' }
 
 --- Cosense's own telomere width in px for a line written `age` seconds ago:
@@ -135,9 +134,8 @@ end
 
 --- Ask the server what it knows about the lines the buffer currently holds, and redraw.
 ---
---- Its own lines go with the request: this is called right after the buffer was replaced
---- wholesale (a save, a merge), and an answer aligned to whatever `textDocument/didChange`
---- has caught up to would land the history on the wrong rows.
+--- The lines go with the request rather than being read from the synced document, which
+--- this can outrun — see `chatora/telomere`.
 function M.refresh(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   if not enabled() or not vim.api.nvim_buf_is_valid(bufnr) then
@@ -231,13 +229,6 @@ function M.attach(bufnr)
   })
 
   M.refresh(bufnr)
-end
-
---- What the sign on `row` (1-based) is saying, as `{ updated, userId, own }` — nil for a
---- buffer with no history yet, and for a row past its end.
-function M.line(bufnr, row)
-  local st = state[bufnr or vim.api.nvim_get_current_buf()]
-  return st and st.lines[row]
 end
 
 return M

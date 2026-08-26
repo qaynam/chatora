@@ -18,7 +18,7 @@ local SECTIONS = {
       { ':Chatora new [title]', '新規ページを作成（title 省略された場合は入力プロンプトが表示される）' },
       { ':Chatora search [q]', 'ページを検索（q 省略時は入力プロンプトが表示される）' },
       { ':Chatora related', '関連ページパネルをトグル' },
-      { ':Chatora project [name]', 'プロジェクトを切り替え（name 指定でそのアカウントごと）' },
+      { ':Chatora project [name]', 'プロジェクトを切り替え（name を渡すとアカウントも切り替わる）' },
       { ':Chatora account', 'アカウントを切り替え / 追加（複数 PAT 対応）' },
       { ':Chatora logout', 'ログアウト（Keychain から PAT を削除）' },
       { ':Chatora log', '診断ログを開く（log オプションが有効にする必要がある）' },

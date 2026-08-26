@@ -366,8 +366,7 @@ describe('useProject', () => {
     name: 'qaynam',
     displayName: 'Qaynam',
   }
-  // testAccountStore hands out `pat-<id>` for every seeded account, so the token on the
-  // request says which account the handler reached for.
+  // Keyed by token because that is what identifies the account making the request.
   const projectsPerToken = (byToken: Record<string, readonly string[]>) =>
     testHttpClient((url, init) => {
       if (!url.endsWith('/api/projects')) return json({}, 404)
