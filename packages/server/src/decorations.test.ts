@@ -2,8 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { computeConcealRanges } from './decorations'
 import { setNotations } from './notations'
 
+const ORIGIN = 'https://scrapbox.io'
+
 const rangesOnLine = (text: string, line: number) =>
-  computeConcealRanges(text).filter((r) => r.line === line)
+  computeConcealRanges(text, ORIGIN).filter((r) => r.line === line)
 
 describe('computeConcealRanges', () => {
   test('decoration: hides the marker prefix and closing bracket', () => {
@@ -55,9 +57,19 @@ describe('computeConcealRanges', () => {
     ])
   })
 
+  test('a link to a file in the project marks its bracket, so the client can badge it', () => {
+    const text = 'タイトル\n[report.html https://scrapbox.io/files/6a8812d6df81a13e54b76439.html]'
+    expect(rangesOnLine(text, 1)[0]).toEqual({ line: 1, startChar: 0, endChar: 1, kind: 'file' })
+  })
+
+  test('the same path somewhere else is an ordinary link', () => {
+    const text = 'タイトル\n[report https://example.com/files/6a8812d6df81a13e54b76439.html]'
+    expect(rangesOnLine(text, 1)[0]).toEqual({ line: 1, startChar: 0, endChar: 1 })
+  })
+
   test('code block interiors produce no conceal ranges', () => {
     const text = 'タイトル\ncode:x.ts\n const a = [1]'
-    expect(computeConcealRanges(text).filter((r) => r.line >= 1)).toEqual([])
+    expect(computeConcealRanges(text, ORIGIN).filter((r) => r.line >= 1)).toEqual([])
   })
 
   test('hashtags stay visible', () => {

@@ -72,6 +72,9 @@ const buildAppLayer = (
 // chatora/* and completion handler below reads this `let` at call time, so a re-initialize
 // (uncommon, but the LSP spec doesn't forbid it) picks up the new runtime automatically.
 let runtime: AppRuntime = ManagedRuntime.make(buildAppLayer(DEFAULT_ORIGIN))
+// Read by the handlers that need to tell this Cosense's own URLs from anyone else's, and
+// replaced alongside `runtime` for the same reason.
+let currentOrigin = DEFAULT_ORIGIN
 
 const normalizeCrLf = (text: string): string => text.replace(/\r\n?/g, '\n')
 
@@ -128,6 +131,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
   const origin =
     typeof options?.origin === 'string' && options.origin !== '' ? options.origin : DEFAULT_ORIGIN
   runtime = ManagedRuntime.make(buildAppLayer(origin))
+  currentOrigin = origin
   setNotations(validateNotations(options?.notations))
   void Effect.runPromise(log('info', 'chatora server initialized', { origin }))
 
@@ -286,7 +290,11 @@ connection.onRequest(
     const doc = documents.get(params.uri)
     if (!doc) return { ok: false, code: 'error', message: 'document not synced' }
     const text = doc.getText()
-    return { ok: true, conceal: computeConcealRanges(text), quotes: computeQuoteRanges(text) }
+    return {
+      ok: true,
+      conceal: computeConcealRanges(text, currentOrigin),
+      quotes: computeQuoteRanges(text),
+    }
   },
 )
 type ImagesResult =

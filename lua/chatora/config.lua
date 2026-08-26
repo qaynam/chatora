@@ -55,6 +55,9 @@ local defaults = {
   -- 'concealcursor' instead: 'nc' keeps it concealed while reading, which also keeps an
   -- inline image drawn on the line the cursor is on.
   conceal = true,
+  -- Drawn in place of the opening bracket of a link to a file kept in the project, which is
+  -- otherwise indistinguishable from a link to a page. One character; false for none.
+  file_icon = '󰈔',
   codeblock_numbers = true,
   tables = true,
   title_margin = 1,

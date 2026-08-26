@@ -263,6 +263,8 @@ decoration ノードのフラグが全部 false のとき、ソース上 `positi
    // 絶対 http(s) URL 以外は images.ts で対象から外し、fetchAsset 側でも再度拒否する
    // （ページ本文は信頼できない入力であり、ここが唯一ネットワークを触る境界のため）。
 'chatora/fetchAsset'  { project, url, border? }   → { ok, path }  // url を取得しローカルキャッシュ（$XDG_CACHE_HOME/chatora/assets）のファイルパスを返す。資格情報ヘッダーは url が session origin と同一のときのみ付与し、リダイレクトで origin を離れた時点で外す。content-type が image/svg+xml のときは ImageMagick で density 192 で PNG にラスタライズしてから返す（端末のグラフィックプロトコルは raster しか描けないため。失敗時/ImageMagick 不在時は元の .svg パスを返す）。border = { width, color, padding } を渡すと ImageMagick（magick/convert、無ければ素通し）で透明パディング + 枠線を画像自体に合成した PNG 変体を返す（数値は 0–64 px にクランプ、color は色リテラルのみ許可、いずれも argv 配列渡しで shell を経由しない）
+   // GIF は magick で `[0]`（先頭フレーム）を PNG に切り出してから返す。フレームを指定しないと
+   // ImageMagick は 1 フレーム 1 ファイルで書き出すため、渡したパスに何も無い状態になる
    // Gyazo の URL は /api/oembed-proxy/gyazo で解決してから取りに行く（写真は url、動画は
    // thumbnail_url）。i.gyazo.com/<hash>.png の組み立てでは GIF が 404 になり、チーム Gyazo は
    // 組み立てられない。キャッシュのキーはページに書かれた URL のままなので、2 回目は解決も不要

@@ -398,6 +398,57 @@ const rasterizeSvg = (
     )
   })
 
+/**
+ * The first frame of a GIF, as a PNG.
+ *
+ * A terminal graphics protocol composites stills, and neither render backend animates; what
+ * an animated GIF costs instead is that ImageMagick writes *one file per frame* unless a
+ * frame is named, so converting `a.gif` yields `a-0.png`, `a-1.png`… and the path the
+ * backend was told to draw never appears. Naming frame 0 is what makes the picture arrive.
+ *
+ * Cached under a `g`-prefixed name, for the same reason the rasterized SVG is: it must never
+ * be picked up by the plain `findCached(hash)` lookup for the `.gif` itself.
+ */
+const flattenGif = (
+  cacheDir: string,
+  hash: string,
+  gifPath: string,
+): Effect.Effect<Option.Option<string>> =>
+  Effect.gen(function* () {
+    const frameName = `g${hash}`
+    const framePath = join(cacheDir, `${frameName}.png`)
+    const existing = yield* findCached(cacheDir, frameName)
+    if (Option.isSome(existing)) return existing
+
+    const magick = yield* Effect.promise(resolveMagick)
+    if (magick === null) return Option.none()
+
+    return yield* Effect.tryPromise(() =>
+      execFileAsync(magick.cmd, [`${gifPath}[0]`, framePath]),
+    ).pipe(
+      Effect.as(Option.some(framePath)),
+      Effect.orElseSucceed(() => Option.none<string>()),
+    )
+  })
+
+/**
+ * Unlike an SVG, a GIF that cannot be flattened is still worth handing over: a single-frame
+ * one draws as it is, and a backend of its own accord may name the frame too.
+ */
+const applyGifFrame = (
+  cacheDir: string,
+  hash: string,
+  result: FetchAssetResult,
+): Effect.Effect<FetchAssetResult> => {
+  if (!result.ok || !result.path.endsWith('.gif')) return Effect.succeed(result)
+  return Effect.map(flattenGif(cacheDir, hash, result.path), (frame) =>
+    Option.match(frame, {
+      onNone: (): FetchAssetResult => result,
+      onSome: (path): FetchAssetResult => ({ ok: true as const, path }),
+    }),
+  )
+}
+
 const SVG_HELP =
   'SVG を画像に変換できませんでした。`brew install librsvg` で表示できるようになります'
 
@@ -549,8 +600,12 @@ export const fetchAsset = (params: {
     // plain lookup short-circuits the network either way.
     const cached = yield* findCached(cacheDir, hash)
     if (Option.isSome(cached)) {
-      const rasterized = yield* applySvgRaster(cacheDir, hash, { ok: true, path: cached.value })
-      return yield* withSize(yield* applyBorder(cacheDir, hash, rasterized, border))
+      const drawable = yield* applyGifFrame(
+        cacheDir,
+        hash,
+        yield* applySvgRaster(cacheDir, hash, { ok: true, path: cached.value }),
+      )
+      return yield* withSize(yield* applyBorder(cacheDir, hash, drawable, border))
     }
 
     const credential = yield* session.getCredential()
@@ -569,6 +624,10 @@ export const fetchAsset = (params: {
       params.url,
       fetchAndCache(http.fetch, headersFor, cacheDir, hash, source),
     )
-    const rasterized = yield* applySvgRaster(cacheDir, hash, fetched)
-    return yield* withSize(yield* applyBorder(cacheDir, hash, rasterized, border))
+    const drawable = yield* applyGifFrame(
+      cacheDir,
+      hash,
+      yield* applySvgRaster(cacheDir, hash, fetched),
+    )
+    return yield* withSize(yield* applyBorder(cacheDir, hash, drawable, border))
   })

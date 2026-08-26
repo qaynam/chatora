@@ -34,6 +34,16 @@ local function set_win_opts(bufnr)
   require('chatora.quote').setup_win(bufnr)
 end
 
+--- The character standing in for a file link's opening bracket, or nil when the reader
+--- turned it off or asked for something a conceal cannot draw — Neovim shows one character.
+local function file_icon()
+  local icon = config.options.file_icon
+  if type(icon) ~= 'string' or vim.fn.strchars(icon) ~= 1 then
+    return nil
+  end
+  return icon
+end
+
 local function apply(bufnr, ranges)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -50,7 +60,8 @@ local function apply(bufnr, ranges)
         local spec = r.notation and config.notation_spec(r.notation)
         pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, r.line, sb, {
           end_col = eb,
-          conceal = spec and spec.icon or '',
+          -- The bracket is hidden either way; a file link spends it on saying so.
+          conceal = (spec and spec.icon) or (r.kind == 'file' and file_icon()) or '',
         })
         if spec and spec.rule then
           pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, r.line, 0, {

@@ -215,6 +215,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | `quote` | `true` | `>` 行の縦棒。[下記](#引用) |
 | `tables` | `true` | `table:` ブロックの罫線。`{ border = false, header = false }` |
 | `codeblock_numbers` | `true` | コードブロックの行番号 |
+| `file_icon` | `'󰈔'` | プロジェクトにアップロードしたファイルへのリンクに付くアイコン。`false` で無し |
 | `title_margin` | `1` | タイトル行の下に入れる仮想空行の数 |
 | `spacing` | `{ line = 0, code = 0 }` | 行間に挿入する仮想空行 |
 | `notations` | `{}` | ユーザー定義の装飾記法。[下記](#カスタム装飾記法) |
@@ -463,6 +464,18 @@ Neovim の conceal 置換は 1 文字までなので、`icon` が複数文字な
 エントリごと無視する。`hl` を Neovim が受け付けなかった場合（キー名の間違いなど）はその旨と
 原因のキー名を知らせる。いずれも `vim.notify` で伝え、プラグインは落とさない。
 
+### ファイルへのリンク
+
+Cosense にアップロードしたファイル（`https://<origin>/files/<id>.<ext>`）へのリンクは、開き
+括弧の位置にアイコンが出る。
+
+```
+[report.html https://scrapbox.io/files/….html]   -- 󰈔 report.html
+```
+
+括弧はもともと隠れているので、行の幅は変わらない。アイコンは `file_icon` で変えられる
+（conceal の置換は 1 文字までなので、1 文字でないものは無視して単に隠す）。
+
 ### 記法の色
 
 既定は colorscheme から借りるが、**同じ色が二度使われないことを保証する**。Cosense が
@@ -507,7 +520,12 @@ ImageMagick（`brew install imagemagick`）、そして描画プラグインが�
 `image_height_large` の大きさで描き、文中にあるときは 1 行のまま（インラインの行に背の高い
 グリフを置く場所が無いため）。
 
-#Gyazo の URL は Cosense と同じく `/api/oembed-proxy/gyazo` で解決する。`https://gyazo.com/<hash>`
+#GIF は**最初のフレームだけ**を描く。端末のグラフィックプロトコルは静止画しか合成せず、
+image.nvim も snacks.nvim もアニメーションはしない。加えて ImageMagick はフレームを指定しないと
+1 フレームにつき 1 ファイル書き出す（`a.gif` → `a-0.png`, `a-1.png`…）ので、指定しないと描画側が
+渡されたパスに何も見つけられない。サーバー側で `[0]` を切り出して PNG にしてから渡している。
+
+Gyazo の URL は Cosense と同じく `/api/oembed-proxy/gyazo` で解決する。`https://gyazo.com/<hash>`
 から `https://i.gyazo.com/<hash>.png` を組み立てる方法だと、GIF（Gyazo 上は video 扱い）が 404 に
 なり、チーム Gyazo（`https://<team>.gyazo.com/<hash>`）に至っては組み立てようがない。oembed が
 返す `url`（写真）または `thumbnail_url`（動画の静止画）を使うので、どちらも描ける。

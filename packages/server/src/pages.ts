@@ -787,7 +787,7 @@ export const previewPage = (params: {
         ok: true as const,
         text,
         tokens: computeTokens(text),
-        conceal: computeConcealRanges(text),
+        conceal: computeConcealRanges(text, session.origin),
         quotes: computeQuoteRanges(text),
         meta: toPageMeta(page),
       }

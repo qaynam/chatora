@@ -150,6 +150,40 @@ describe('fetchAsset', () => {
     }
   })
 
+  test('an animated GIF is handed over as its first frame, not as a path magick never wrote', async () => {
+    // ImageMagick writes one file per frame unless a frame is named, so an animated GIF
+    // converted whole leaves nothing at the path the backend was given.
+    const gif = Bun.spawnSync([
+      'magick',
+      '-size',
+      '8x8',
+      'xc:red',
+      'xc:green',
+      'xc:blue',
+      '-delay',
+      '20',
+      'gif:-',
+    ])
+    const bytes = new Uint8Array(gif.stdout)
+    const { layer: httpLayer } = testHttpClient(
+      () => new Response(bytes, { status: 200, headers: { 'content-type': 'image/gif' } }),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const result = await runOnce(
+      fetchAsset({ project: 'p', url: 'https://cdn.example.com/animated.gif' }),
+      httpLayer,
+      credLayer,
+    )
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.path.endsWith('.png')).toBe(true)
+    expect(await Bun.file(result.path).exists()).toBe(true)
+    // One frame's worth of pixels, and its size measured off the file the client will draw.
+    expect(result.width).toBe(8)
+    expect(result.height).toBe(8)
+  })
+
   test('an SVG that cannot be rasterized reports why instead of a path nothing can draw', async () => {
     // Terminal graphics composite raster formats only, so handing back the .svg
     // would leave the backend silently drawing nothing.

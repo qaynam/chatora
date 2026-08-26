@@ -982,6 +982,51 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- A link to a file in the project wears an icon where its bracket was; an ordinary link
+  -- keeps its bracket hidden and nothing more.
+  do
+    local render = require('chatora.render')
+    local config = require('chatora.config')
+    local lsp = require('chatora.lsp')
+    local orig_request = lsp.request
+
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      'ファイル',
+      '[report.html https://scrapbox.io/files/6a8812d6df81a13e54b76439.html]',
+      '[ラベル https://example.com/page]',
+    })
+    lsp.request = function(method, _, cb)
+      if method ~= 'chatora/decorations' then
+        return
+      end
+      cb(nil, {
+        ok = true,
+        quotes = {},
+        conceal = {
+          { line = 1, startChar = 0, endChar = 1, kind = 'file' },
+          { line = 2, startChar = 0, endChar = 1 },
+        },
+      })
+    end
+    render.refresh(buf)
+
+    local function conceal_at(row)
+      local marks = vim.api.nvim_buf_get_extmarks(buf, render.ns, { row, 0 }, { row, -1 }, { details = true })
+      return marks[1] and marks[1][4].conceal
+    end
+    assert(conceal_at(1) == config.options.file_icon, 'a file link is badged, got ' .. tostring(conceal_at(1)))
+    assert(conceal_at(2) == '', 'an ordinary link is not, got ' .. tostring(conceal_at(2)))
+
+    config.options.file_icon = false
+    render.refresh(buf)
+    assert(conceal_at(1) == '', 'file_icon = false leaves the bracket simply hidden')
+    config.options.file_icon = '󰈔'
+
+    lsp.request = orig_request
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- buftext: only the run that differs is written, so the extmarks around it survive.
   do
     local buftext = require('chatora.buftext')

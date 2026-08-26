@@ -15,14 +15,36 @@ export interface ConcealRange {
   endChar: number
   /** Set on the opening marker of a user-defined notation; the client replaces the range with that notation's icon. */
   notation?: string
+  /**
+   * Set on the opening bracket of a link to a file kept in the project. The client draws its
+   * own icon there — the bracket is hidden either way, so this costs the line no width.
+   */
+  kind?: 'file'
 }
 
-export const computeConcealRanges = (text: string): ConcealRange[] => {
+/**
+ * A link to a file someone uploaded to the project rather than to a page or a site:
+ * `<origin>/files/<id>.<ext>`. Cosense hangs these off the same origin as the API, so the
+ * session's own origin is what tells one from an ordinary link to somewhere else.
+ */
+const isProjectFile = (target: string, origin: string): boolean => {
+  try {
+    const url = new URL(target)
+    return `${url.protocol}//${url.host}` === origin && url.pathname.startsWith('/files/')
+  } catch {
+    return false
+  }
+}
+
+export const computeConcealRanges = (text: string, origin: string): ConcealRange[] => {
   const page = parse(text, parseOptions())
   // Columns index UTF-16 code units, the same unit JS string indexing uses, so
   // these lines can be sliced with the parser's own column numbers.
   const docLines = normalizeLineEndings(text).split('\n')
   const out: ConcealRange[] = []
+  const pushFile = (line: number, startChar: number, endChar: number): void => {
+    out.push({ line, startChar, endChar, kind: 'file' })
+  }
   const push = (line: number, startChar: number, endChar: number, notation?: string): void => {
     if (endChar > startChar)
       out.push(notation ? { line, startChar, endChar, notation } : { line, startChar, endChar })
@@ -62,7 +84,11 @@ export const computeConcealRanges = (text: string): ConcealRange[] => {
       case 'externalLink': {
         // A bare URL spans exactly its label and has no markup to hide.
         if (end.column - start.column <= node.label.length) return 'skip'
-        push(start.line, start.column, start.column + 1)
+        if (isProjectFile(node.target, origin)) {
+          pushFile(start.line, start.column, start.column + 1)
+        } else {
+          push(start.line, start.column, start.column + 1)
+        }
         push(end.line, end.column - 1, end.column)
 
         // `[label url]` / `[url label]` show only the label in Cosense, with
