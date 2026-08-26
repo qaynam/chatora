@@ -51,6 +51,17 @@ end
 --- colorscheme; borrowing CursorLine instead would make the badge vanish on the cursor line.
 local SHADE_RATIO = 0.14
 
+--- `from` moved `ratio` of the way toward `to`, per channel. Both are 24-bit colors.
+local function mix(from, to, ratio)
+  local mixed = 0
+  for shift = 0, 16, 8 do
+    local a = math.floor(from / 2 ^ shift) % 256
+    local b = math.floor(to / 2 ^ shift) % 256
+    mixed = mixed + math.floor(a + (b - a) * ratio + 0.5) * 2 ^ shift
+  end
+  return math.floor(mixed)
+end
+
 local badge_bg
 
 badge_bg = function()
@@ -58,14 +69,7 @@ badge_bg = function()
   if not base then
     return bg_of('CursorLine')
   end
-  local target = vim.o.background == 'light' and 0 or 0xffffff
-  local mixed = 0
-  for shift = 0, 16, 8 do
-    local from = math.floor(base / 2 ^ shift) % 256
-    local to = math.floor(target / 2 ^ shift) % 256
-    mixed = mixed + math.floor(from + (to - from) * SHADE_RATIO + 0.5) * 2 ^ shift
-  end
-  return math.floor(mixed)
+  return mix(base, vim.o.background == 'light' and 0 or 0xffffff, SHADE_RATIO)
 end
 
 -- Used only when a colorscheme has no hue left that some other token has not taken.
@@ -75,6 +79,21 @@ local EMPHASIS_FALLBACK = { level2 = 0xd78700, level3 = 0xaf5fd7 }
 --- marker line of a code block wears both, and two different greys read as a broken span.
 function M.badge_bg()
   return badge_bg()
+end
+
+-- How far a hairline travels from the background toward the text color. Enough to separate
+-- two rows at a glance, and not enough to read as a drawn line: a list of thirty of them is
+-- mostly rule if each one is as strong as a window border.
+local HAIRLINE_RATIO = 0.22
+
+--- A colour barely off the background, for rules that divide without being looked at.
+function M.hairline()
+  local base = bg_of('Normal')
+  local ink = fg_of('Normal')
+  if not base or not ink then
+    return fg_of('WinSeparator') or fg_of('Comment')
+  end
+  return mix(base, ink, HAIRLINE_RATIO)
 end
 
 local function specs()

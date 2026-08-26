@@ -486,6 +486,44 @@ local ok, err = pcall(function()
   end
   log('sidebar reopen OK (list served from cache)')
 
+  -- :bdelete keeps the buffer (and its name) but unloads it, which drops its options and
+  -- buffer-local mappings. Reopening has to restore them: a sidebar left with buftype=''
+  -- is a plain file buffer as far as the rest of the editor is concerned.
+  require('chatora.sidebar').close()
+  vim.cmd('bdelete! ' .. sidebar_buf)
+  require('chatora.sidebar').open('testproj')
+  if vim.fn.bufnr('chatora://sidebar') ~= sidebar_buf then
+    fail('sidebar buffer was replaced after :bdelete, got ' .. vim.fn.bufnr('chatora://sidebar'))
+  end
+  if vim.bo[sidebar_buf].buftype ~= 'acwrite' or vim.bo[sidebar_buf].filetype ~= 'chatora_sidebar' then
+    fail(
+      ('sidebar lost its options after :bdelete: buftype=%q filetype=%q'):format(
+        vim.bo[sidebar_buf].buftype,
+        vim.bo[sidebar_buf].filetype
+      )
+    )
+  end
+  local mapped = false
+  for _, m in ipairs(vim.api.nvim_buf_get_keymap(sidebar_buf, 'n')) do
+    if m.lhs == 'q' then
+      mapped = true
+    end
+  end
+  if not mapped then
+    fail('sidebar lost its buffer-local mappings after :bdelete')
+  end
+  local relisted = vim.api.nvim_buf_get_lines(sidebar_buf, 0, -1, false)
+  local home_back = false
+  for _, l in ipairs(relisted) do
+    if l:find('ホーム', 1, true) then
+      home_back = true
+    end
+  end
+  if not home_back then
+    fail('sidebar did not re-render after :bdelete: ' .. vim.inspect(relisted))
+  end
+  log('sidebar :bdelete reopen OK (options, mappings and list restored)')
+
   log('sidebar OK (buf ' .. sidebar_buf .. ' lists ホーム and メモ)')
 
   -- ===================================================================================

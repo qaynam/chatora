@@ -32,12 +32,12 @@ local winutil = require('chatora.winutil')
 local is_plugin_win = winutil.is_plugin_win
 local find_editor_win = winutil.find_editor_win
 
-local function ensure_buf()
-  if buf and vim.api.nvim_buf_is_valid(buf) then
-    return
-  end
-  buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_name(buf, 'chatora://related')
+--- Options and mappings of the panel buffer.
+---
+--- Applied on every open rather than once at creation: `:bdelete` leaves the buffer
+--- existing but unloaded, and an unloaded buffer comes back with option defaults and none
+--- of its buffer-local mappings.
+local function configure_buf()
   -- acwrite (with page.lua's no-op chatora://* BufWriteCmd) so a reflexive
   -- :wq closes the window instead of E382.
   vim.bo[buf].buftype = 'acwrite'
@@ -51,6 +51,21 @@ local function ensure_buf()
   vim.keymap.set('n', 'q', function()
     M.close({ by_user = true })
   end, { buffer = buf, nowait = true, silent = true, desc = 'chatora: 関連ページパネルを閉じる' })
+end
+
+--- The panel's buffer, created on first open and set up again if it was unloaded. The
+--- handle is reused rather than replaced: an unloaded buffer keeps its name, so a
+--- replacement carrying the same one fails with E95.
+local function ensure_buf()
+  local exists = buf ~= nil and vim.api.nvim_buf_is_valid(buf)
+  if exists and vim.api.nvim_buf_is_loaded(buf) then
+    return
+  end
+  if not exists then
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, 'chatora://related')
+  end
+  configure_buf()
 end
 
 --- Run `fn` with the panel's cursor and top line restored afterwards, so a

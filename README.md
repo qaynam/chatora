@@ -182,7 +182,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 |---|---|---|
 | `sidebar_width` | `32` | 幅 |
 | `sidebar_tabs` | すべて / 未読 | 上部のタブ。[下記](#サイドバーのタブ) |
-| `sidebar_separator` | `true` | 行ごとの区切り下線 |
+| `sidebar_separator` | `true` | 行ごとの区切り下線。`'#RRGGBB'` で色を指定、`false` で無効 |
 | `sidebar_poll` | `60` | n 秒ごとに自動更新。`false` で無効、最短 5 秒 |
 | `related_position` | `'bottom'` | 関連ページパネルの位置。`'right'` で全高の縦カラム |
 | `related_height` | `8` | `'bottom'` のときの高さ |

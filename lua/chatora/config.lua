@@ -13,6 +13,8 @@ local defaults = {
     { label = 'すべて' },
     { label = '未読', filter = 'me', unread_only = true },
   },
+  -- Row separators. A color string sets their shade; true derives one just off the
+  -- background so a long list does not read as a stack of rules.
   sidebar_separator = true,
   sidebar_poll = 60,
 

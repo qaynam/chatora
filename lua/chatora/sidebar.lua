@@ -24,11 +24,14 @@ local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabActive', { link = 'TabLineSel', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabInactive', { link = 'TabLine', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarPin', { link = 'Special', default = true })
-  -- Underline spans the full row, separating rows without spending a line.
-  local sep = vim.api.nvim_get_hl(0, { name = 'WinSeparator', link = false })
+  -- Underline spans the full row, separating rows without spending a line. Barely off the
+  -- background rather than a window border's colour: a list is thirty of these at once, and
+  -- at full strength the rules read louder than the titles between them. A colour given to
+  -- `sidebar_separator` wins.
+  local configured = config.options.sidebar_separator
   vim.api.nvim_set_hl(0, 'ChatoraSidebarRow', {
     underline = true,
-    sp = sep and sep.fg or nil,
+    sp = type(configured) == 'string' and configured or require('chatora.highlight').hairline(),
     default = true,
   })
 end
@@ -171,6 +174,7 @@ end
 
 -- Forward declaration: sync_spinner's tick calls render, which is defined after it.
 local render
+local ensure_buf
 
 local UNREAD_BAR = '▍'
 local READ_BAR = ' '
@@ -208,6 +212,9 @@ function render()
   if not (buf and vim.api.nvim_buf_is_valid(buf)) then
     return
   end
+  -- Writing lines into an unloaded buffer loads it, and a buffer loaded that way comes back
+  -- with option defaults, so it has to be set up again first.
+  ensure_buf()
   local separators = config.options.sidebar_separator ~= false
   local state = tabs[active] and tabs[active].state or new_state()
   line_pages = {}
@@ -567,6 +574,51 @@ local function setup_keymaps()
   end
 end
 
+--- Options, mappings and the scroll autocommand of the sidebar buffer.
+---
+--- Applied on every open rather than once at creation: `:bdelete` leaves the buffer
+--- existing but unloaded, and an unloaded buffer comes back with option defaults and none
+--- of its buffer-local mappings.
+local function configure_buf()
+  -- acwrite (with page.lua's no-op chatora://* BufWriteCmd) so a reflexive
+  -- :wq closes the window instead of E382.
+  vim.bo[buf].buftype = 'acwrite'
+  vim.bo[buf].bufhidden = 'hide'
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].filetype = 'chatora_sidebar'
+  setup_keymaps()
+  -- Infinite scroll: fetch the next batch when the cursor nears the end.
+  vim.api.nvim_create_autocmd('CursorMoved', {
+    group = vim.api.nvim_create_augroup('ChatoraSidebarBuf', { clear = true }),
+    buffer = buf,
+    callback = function()
+      if not (win and vim.api.nvim_win_is_valid(win)) then
+        return
+      end
+      local lnum = vim.api.nvim_win_get_cursor(win)[1]
+      if lnum > vim.api.nvim_buf_line_count(buf) - 20 then
+        M.load_more()
+      end
+    end,
+  })
+end
+
+--- The sidebar's buffer, created on first open and set up again if it was unloaded. The
+--- handle is reused rather than replaced: an unloaded buffer keeps its name, so a
+--- replacement carrying the same one fails with E95.
+function ensure_buf()
+  local exists = buf ~= nil and vim.api.nvim_buf_is_valid(buf)
+  if exists and vim.api.nvim_buf_is_loaded(buf) then
+    return
+  end
+  if not exists then
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, 'chatora://sidebar')
+  end
+  configure_buf()
+end
+
 --- Open (or focus) the sidebar for project, listing its pages.
 function M.open(proj)
   local same_project = project == proj
@@ -574,31 +626,7 @@ function M.open(proj)
   ensure_hl()
   build_tabs(same_project)
 
-  if not (buf and vim.api.nvim_buf_is_valid(buf)) then
-    buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_name(buf, 'chatora://sidebar')
-    -- acwrite (with page.lua's no-op chatora://* BufWriteCmd) so a reflexive
-    -- :wq closes the window instead of E382.
-    vim.bo[buf].buftype = 'acwrite'
-    vim.bo[buf].bufhidden = 'hide'
-    vim.bo[buf].swapfile = false
-    vim.bo[buf].modifiable = false
-    vim.bo[buf].filetype = 'chatora_sidebar'
-    setup_keymaps()
-    -- Infinite scroll: fetch the next batch when the cursor nears the end.
-    vim.api.nvim_create_autocmd('CursorMoved', {
-      buffer = buf,
-      callback = function()
-        if not (win and vim.api.nvim_win_is_valid(win)) then
-          return
-        end
-        local lnum = vim.api.nvim_win_get_cursor(win)[1]
-        if lnum > vim.api.nvim_buf_line_count(buf) - 20 then
-          M.load_more()
-        end
-      end,
-    })
-  end
+  ensure_buf()
 
   if not (win and vim.api.nvim_win_is_valid(win)) then
     vim.cmd('topleft ' .. tostring(config.options.sidebar_width) .. 'vsplit')
