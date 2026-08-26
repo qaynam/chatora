@@ -79,9 +79,8 @@ local function set_content(bufnr, text)
   local lines = vim.split(text or '', '\n', { plain = true })
   local ul = vim.bo[bufnr].undolevels
   vim.bo[bufnr].undolevels = -1
-  local changed = require('chatora.buftext').set(bufnr, lines)
+  require('chatora.buftext').set(bufnr, lines)
   vim.bo[bufnr].undolevels = ul
-  return changed
 end
 
 local function refresh_sidebar_marks()

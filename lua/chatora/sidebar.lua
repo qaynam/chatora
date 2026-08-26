@@ -165,7 +165,7 @@ local function tabline()
   return table.concat(parts)
 end
 
---- Project and account in the status line: with `p` and `a` a keystroke away, which of
+--- Project and account in the status line: with `P` and `A` a keystroke away, which of
 --- each is in front of the reader has to be visible without asking.
 local function apply_statusline()
   if not is_open() then
@@ -633,8 +633,7 @@ function ensure_buf()
 end
 
 --- Open the sidebar on `project`, listing its pages. Focuses the sidebar window unless
---- `opts.focus` is false, which is how the sidebar follows the page a reader moves to
---- without taking the cursor along with it.
+--- `opts.focus` is false.
 function M.open(proj, opts)
   local same_project = project == proj
   if not same_project then
@@ -728,8 +727,7 @@ vim.api.nvim_create_autocmd({ 'BufModifiedSet', 'TextChanged', 'TextChangedI' },
 })
 
 -- The sidebar lists the project the reader is actually in: following a link into another
--- project moves it there, and coming back to the first page moves it back. Each project
--- keeps its own list for as long as the session lasts, so neither move costs a request.
+-- project moves it there, and coming back to the first page moves it back.
 vim.api.nvim_create_autocmd('BufEnter', {
   group = augroup,
   pattern = 'cosense://*',

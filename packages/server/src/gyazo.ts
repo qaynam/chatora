@@ -43,8 +43,8 @@ export const isGyazoUrl = (url: string): boolean => {
 const resolved = new Map<string, string>()
 
 /**
- * The image URL behind a Gyazo URL, or `Option.none` for anything the proxy cannot name a
- * picture for — which callers answer by fetching the URL they already had.
+ * The image URL behind a Gyazo URL, or `Option.none` for a URL the proxy names no picture
+ * for — anything that is not Gyazo's, and anything it refuses.
  */
 export const resolveGyazo = (
   fetch: HttpClientShape['fetch'],

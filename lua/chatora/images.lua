@@ -14,8 +14,8 @@ M.ns = vim.api.nvim_create_namespace('chatora_images')
 
 local DEBOUNCE_MS = 200
 -- A placement the backend accepted can still fail to reach the screen: a decode that dies,
--- a terminal that drops the escape sequence, a window that was not there yet. Each attempt
--- is looked at once, after long enough for an asynchronous backend to have finished.
+-- a terminal that drops the escape sequence, a window that was not there yet. The wait is
+-- long enough for an asynchronous backend to have finished.
 local RETRY_MS = 700
 local PLACE_ATTEMPTS = 3
 local uv = vim.uv or vim.loop
@@ -207,8 +207,8 @@ local function snacks_backend()
 end
 
 --- The active render backend per config.image_backend ('auto' prefers image.nvim), or nil
---- when none is usable. Public so a caller can ask what is drawing — and so a test can
---- answer with a backend of its own.
+--- when none is usable. Whatever this returns is what draws, so replacing it replaces the
+--- backend.
 function M.backend()
   local pref = config.options.image_backend
   if pref == 'snacks' then
@@ -578,7 +578,7 @@ function M.invalidate(bufnr)
   width_by_bufnr[bufnr] = nil
 end
 
---- Clear and re-render every image placement in bufnr. Both the target scan
+--- Bring bufnr's pictures up to date with its text. Both the target scan
 --- (`chatora/images`) and each target's local file path (`chatora/fetchAsset`)
 --- are asynchronous, so this kicks off requests and returns immediately;
 --- placements land as replies arrive.
