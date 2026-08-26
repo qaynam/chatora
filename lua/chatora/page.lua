@@ -208,12 +208,14 @@ local function handle_read(ev)
   vim.bo[bufnr].buftype = 'acwrite'
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].filetype = 'cosense'
-  -- Cosense indentation: 1 whitespace char = 1 level. Make >> / <C-t> / Tab
-  -- shift by one space, and keep tabs narrow when a page contains them.
+  -- Cosense indentation: 1 whitespace char = 1 level, tabs included. Rendering a tab as
+  -- one cell is what makes that true on screen as well — at any wider tab stop a
+  -- tab-indented line sits at a different depth from its space-indented sibling, and the
+  -- pads cannot correct for it because a tab's width depends on where it starts.
   vim.bo[bufnr].expandtab = true
   vim.bo[bufnr].shiftwidth = 1
   vim.bo[bufnr].softtabstop = 1
-  vim.bo[bufnr].tabstop = 2
+  vim.bo[bufnr].tabstop = 1
   -- Indentation is structure in Cosense, not decoration: a code block is exactly the
   -- lines indented deeper than its `code:` marker, so a new line at column 0 silently
   -- *ends the block*. Carrying the previous indent is what the web editor does.

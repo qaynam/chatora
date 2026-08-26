@@ -252,8 +252,9 @@ end
 --- counted in bytes — anything multibyte before it would otherwise push the
 --- image right. pads only decorates the indent, so its own additions shift
 --- every later column by the same fixed amount.
-local function screen_col(line, byte_col, indent)
-  return vim.fn.strdisplaywidth(line:sub(1, byte_col)) + require('chatora.pads').extra_cells(line)
+local function screen_col(bufnr, line, byte_col)
+  return vim.fn.strdisplaywidth(line:sub(1, byte_col))
+    + require('chatora.pads').extra_cells(line, vim.bo[bufnr].tabstop)
 end
 
 --- Placement targets from a `chatora/images` reply. Skips a target whose line
@@ -268,14 +269,14 @@ local function build_targets(bufnr, project, origin, border, images)
       local ok_start, byte_col = pcall(vim.str_byteindex, line, 'utf-16', img.startChar, false)
       local ok_end, byte_end = pcall(vim.str_byteindex, line, 'utf-16', img.endChar, false)
       if ok_start and ok_end then
-        local indent = #(line:match('^[ \t]*') or '')
+        local indent = require('chatora.indent').text_at(line)
         local geom = {
           row = img.line + 1,
           byte_col = byte_col,
           byte_end = byte_end,
-          screen_col = screen_col(line, byte_col, indent),
+          screen_col = screen_col(bufnr, line, byte_col),
           indent_col = indent,
-          indent_screen_col = screen_col(line, indent, indent),
+          indent_screen_col = screen_col(bufnr, line, indent),
         }
 
         if img.kind == 'icon' then

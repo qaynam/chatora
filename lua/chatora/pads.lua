@@ -25,6 +25,11 @@ end
 -- `gap` is only ever extra slack.
 local DEFAULTS = { bullet = '•', guide = false, spacing = true, gap = 0 }
 
+-- Cells one level occupies once padded. A full-width space and a tab (at the default
+-- tabstop) already take two, so this is the width every level can be brought up to —
+-- shrinking one is not possible, since the characters are real buffer text.
+local LEVEL_CELLS = 2
+
 --- A line that carries its own `1.` marker; Cosense drops the bullet for it.
 local function numbered(line)
   if not line then
@@ -51,13 +56,45 @@ end
 --- Display cells the inline pads add before `line`'s text. Anything positioned by text
 --- column (inline images) must shift right by this much to stay aligned. The indent
 --- characters themselves are not counted: they are real cells the pads only draw between.
-function M.extra_cells(line)
-  local levels = indent.level(line or '')
-  if config.options.pads == false or levels == 0 then
+--- Padding to draw before each indent character so that every level ends the same number
+--- of cells in, whatever character wrote it.
+---
+--- Walked with a running column rather than computed per character, because a tab's width
+--- is not a property of the tab: it reaches the next tab stop from wherever it starts, and
+--- inserting padding ahead of it moves that. A level that has already overshot its target
+--- gets no padding — the indent is real buffer text and cannot be made narrower.
+local function level_pads(line, tabstop)
+  local levels = indent.scan(line)
+  local _, _, spacing = pad_opts()
+  local pads, col = {}, 0
+  for level, entry in ipairs(levels) do
+    local target = level * LEVEL_CELLS
+    local start = col
+    if spacing then
+      -- A tab is padded to start one cell short of the target so it ends on the tab stop
+      -- there; anything else is padded by exactly what it is short of covering.
+      start = entry.char == '\t' and math.max(col, target - 1)
+        or math.max(col, target - indent.cells(entry.char, tabstop))
+    end
+    pads[level] = start - col
+    col = entry.char == '\t' and (math.floor(start / tabstop) + 1) * tabstop
+      or start + indent.cells(entry.char, tabstop)
+  end
+  return pads
+end
+
+--- Display cells the inline pads add before `line`'s text. Anything positioned by text
+--- column (inline images) must shift right by this much to stay aligned.
+function M.extra_cells(line, tabstop)
+  line = line or ''
+  if config.options.pads == false or indent.level(line) == 0 then
     return 0
   end
-  local bullet, _, spacing, gap = pad_opts()
-  local width = spacing and levels - 1 or 0
+  local bullet, _, _, gap = pad_opts()
+  local width = 0
+  for _, pad in ipairs(level_pads(line, tabstop or vim.o.tabstop)) do
+    width = width + pad
+  end
   if not numbered(line) then
     width = width + vim.fn.strdisplaywidth(bullet) + gap
   end
@@ -98,20 +135,24 @@ function M.render(bufnr)
     -- Line 1 is the page title. Indent-only lines DO get pads — Cosense
     -- shows the bullet on an empty list item too.
     if lnum > 1 and not in_block[lnum - 1] then
-      local offsets = indent.scan(line)
-      if #offsets > 0 then
+      local levels = indent.scan(line)
+      if #levels > 0 then
         -- A line that numbers itself already has a marker, and Cosense drops the bullet for
         -- it rather than showing both. The indent still gets its widening, so a numbered
         -- item and a bulleted one at the same depth line up.
         local is_numbered = numbered(line)
-        for level, at in ipairs(offsets) do
-          local i = at
-          local last = level == #offsets
-          -- One inline run per indent character, drawn before it: the widening that makes
-          -- each level read as a step, and on the last level the bullet too.
+        local pads = level_pads(line, vim.bo[bufnr].tabstop)
+        for level, entry in ipairs(levels) do
+          local i = entry.at
+          local last = level == #levels
+          -- One inline run per indent character, drawn before it: the padding that brings
+          -- this level up to a fixed width, and on the last level the bullet too. The
+          -- padding is what makes depth mean the same thing whatever wrote it — a line
+          -- indented with spaces would otherwise sit at half the depth of a sibling
+          -- indented with tabs or full-width spaces.
           local chunks = {}
-          if level > 1 and spacing then
-            chunks[#chunks + 1] = { ' ', 'ChatoraPadGuide' }
+          if pads[level] > 0 then
+            chunks[#chunks + 1] = { string.rep(' ', pads[level]), 'ChatoraPadGuide' }
           end
           if last and not is_numbered then
             chunks[#chunks + 1] = { bullet, 'ChatoraPadBullet' }

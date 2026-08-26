@@ -635,19 +635,39 @@ local ok, err = pcall(function()
   do
     local pads = require('chatora.pads')
     local config = require('chatora.config')
-    assert(pads.extra_cells('本文') == 0, 'an unindented line gains nothing')
+    assert(pads.extra_cells('本文', 1) == 0, 'an unindented line gains nothing')
     -- Level 1 is bullet + gap; each further level adds guide + spacing.
-    assert(pads.extra_cells(' a') == 1, 'level 1: the bullet only, got ' .. pads.extra_cells(' a'))
+    -- What the reader sees is the indent's own cells plus what the pads add, and the whole
+    -- point is that it comes to the same thing at the same depth however the indent was
+    -- written — spaces, tabs and full-width spaces are all one level but not one width.
+    local function text_column(line, tabstop)
+      local cells = 0
+      for _, entry in ipairs(require('chatora.indent').scan(line)) do
+        cells = cells + require('chatora.indent').cells(entry.char, tabstop)
+      end
+      return cells + pads.extra_cells(line, tabstop)
+    end
+
+    -- tabstop 1 is what a page buffer uses: one tab is one level, so it is one cell.
+    local TS = 1
+    local one = text_column(' a', TS)
+    assert(text_column('　a', TS) == one, 'a full-width space is one level, like a space')
+    assert(text_column('\ta', TS) == one, 'so is a tab')
+    assert(text_column('　 a', TS) == text_column('  a', TS), 'and a mixed indent matches too')
+    assert(text_column('\t　a', TS) == text_column('  a', TS), 'in any combination')
+    -- The bullet is drawn once whatever the depth, so a level is worth the step alone.
     assert(
-      pads.extra_cells('  a') == 2,
-      'level 2: one level of widening + the bullet, got ' .. pads.extra_cells('  a')
+      text_column('  a', TS) - one == text_column('   a', TS) - text_column('  a', TS),
+      'every level is worth the same'
     )
-    -- A numbered item draws no bullet, so nothing shifts for it either.
-    assert(pads.extra_cells('  1. foo') == 1, 'a numbered item gains only the widening')
-    -- A full-width space is one level like an ASCII one, and three bytes wide.
-    assert(pads.extra_cells('　　a') == 2, 'a full-width indent counts in levels, not bytes')
+
+    -- A numbered item draws no bullet, so it gains only the widening.
+    assert(
+      pads.extra_cells('  1. foo', 1) == pads.extra_cells('  foo', 1) - 1,
+      'a numbered item gains everything but the bullet'
+    )
     config.options.pads = false
-    assert(pads.extra_cells('   a') == 0, 'no shift when pads are disabled')
+    assert(pads.extra_cells('   a', 1) == 0, 'no shift when pads are disabled')
     config.options.pads = true
   end
 
