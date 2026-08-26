@@ -11,6 +11,19 @@ local function host_of(origin)
   return (origin or ''):match('^%a+://([^/]+)') or origin or ''
 end
 
+--- The account's own name, without the host: for lists where every row is on the same one.
+--- `nil` for a credential no account owns (an environment PAT, say).
+function M.short(account)
+  if not account then
+    return nil
+  end
+  local name = account.displayName
+  if not name or name == '' then
+    name = account.name or ''
+  end
+  return name
+end
+
 --- How an account is named to the user: display name plus the host it belongs to.
 function M.label(account)
   local name = account.displayName

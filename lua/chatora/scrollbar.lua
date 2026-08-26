@@ -15,15 +15,26 @@ local MARK = '▐'
 -- Over the semantic tokens (125), which own the text this is drawn on top of.
 local PRIORITY = 200
 
---- Which mark wins when two of them land on the same screen row: the reader's own unsaved
---- text first, then what arrived while they were reading.
-local RANK = { own = 3, updated = 2, unread = 1 }
+--- Which mark wins when two of them land on the same row: the reader's own unsaved text
+--- first, then what arrived while they were reading, and the handle under all of it — where
+--- the view is matters less than what it is missing.
+local RANK = { own = 4, updated = 3, unread = 2, handle = 1 }
 
 local HL = {
   own = 'ChatoraTelomereLocal',
   updated = 'ChatoraTelomereUpdated',
   unread = 'ChatoraTelomereUnread',
+  handle = 'ChatoraScrollbarHandle',
 }
+
+--- The handle is the one part not saying that anything happened, so it sits at the hairline
+--- shade: enough to read as a position, not enough to read as news.
+local function ensure_hl()
+  vim.api.nvim_set_hl(0, 'ChatoraScrollbarHandle', {
+    fg = require('chatora.highlight').hairline(),
+    default = true,
+  })
+end
 
 local function enabled()
   local opts = config.options.telomere
@@ -63,28 +74,42 @@ end
 
 --- Draw the overview for one window showing `bufnr`.
 local function render(win, bufnr)
-  local marks = require('chatora.telomere').rows(bufnr)
   local total = vim.api.nvim_buf_line_count(bufnr)
-  -- A page that is new all the way through points at itself, which is no help; Cosense
-  -- hides its overlay in the same case.
-  if #marks == 0 or #marks >= total then
-    return
-  end
   local info = vim.fn.getwininfo(win)[1]
   if not info or info.height < 1 then
     return
   end
+  -- A page shorter than the window has nothing to scroll to and nothing to point at: every
+  -- one of its lines already wears its own telomere in the gutter. Measured against the
+  -- window's height rather than what is on screen right now, which lags an edit.
+  if total <= info.height then
+    return
+  end
+
+  local marks = require('chatora.telomere').rows(bufnr)
+  -- A page that is new all the way through points at itself, which is no help; Cosense
+  -- hides its overlay in the same case.
+  local newsworthy = #marks > 0 and #marks < total
 
   local rows = lines_by_row(win, info)
-  -- Marks are placed by their share of the document, the way a scrollbar is: line 1 at the
-  -- top of the window, the last line at the bottom, wherever the view happens to be.
+  -- Everything is placed by its share of the document, the way a scrollbar is: line 1 at
+  -- the top of the window, the last line at the bottom, wherever the view happens to be.
+  local at = function(line)
+    return math.max(0, math.min(info.height - 1, math.floor((line - 1) / total * info.height)))
+  end
   local strongest = {}
-  for _, mark in ipairs(marks) do
-    local row = math.floor((mark.row - 1) / total * info.height)
-    row = math.max(0, math.min(info.height - 1, row))
-    local current = strongest[row]
-    if not current or RANK[mark.kind] > RANK[current] then
-      strongest[row] = mark.kind
+  -- The handle covers what is on screen, so the marks outside it are the ones worth
+  -- scrolling to, and its size says how much of the page is in front of the reader.
+  for row = at(info.topline), at(info.botline) do
+    strongest[row] = 'handle'
+  end
+  if newsworthy then
+    for _, mark in ipairs(marks) do
+      local row = at(mark.row)
+      local current = strongest[row]
+      if not current or RANK[mark.kind] > RANK[current] then
+        strongest[row] = mark.kind
+      end
     end
   end
 
@@ -116,6 +141,7 @@ function M.refresh(bufnr)
   if not enabled() then
     return
   end
+  ensure_hl()
   for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
     if vim.api.nvim_win_is_valid(win) then
       render(win, bufnr)
@@ -130,7 +156,7 @@ function M.attach(bufnr)
     return
   end
   vim.b[bufnr].chatora_scrollbar_attached = true
-  vim.api.nvim_create_autocmd({ 'WinScrolled', 'WinResized', 'BufWinEnter' }, {
+  vim.api.nvim_create_autocmd({ 'WinScrolled', 'WinResized', 'BufWinEnter', 'ColorScheme' }, {
     group = vim.api.nvim_create_augroup('ChatoraScrollbar' .. bufnr, { clear = true }),
     buffer = bufnr,
     callback = function()

@@ -221,13 +221,20 @@ function M.switch_project(name)
         vim.notify('[chatora] 開けるプロジェクトがありません', vim.log.levels.ERROR)
         return
       end
+      -- The account goes first, in a column of its own, on every row: with two accounts'
+      -- projects in one list, whose project this is must never need working out. The
+      -- project in front of the reader right now is marked.
+      local account = require('chatora.account')
+      local width = 0
+      for _, p in ipairs(projects) do
+        width = math.max(width, vim.fn.strdisplaywidth(account.short(p.account) or ''))
+      end
       vim.ui.select(projects, {
         prompt = 'chatora プロジェクトを切り替え',
         format_item = function(p)
-          if p.active or not p.account then
-            return p.name
-          end
-          return p.name .. '  — ' .. require('chatora.account').label(p.account)
+          local who = account.short(p.account) or ''
+          local pad = string.rep(' ', width - vim.fn.strdisplaywidth(who))
+          return ('%s %s%s  %s'):format(p.name == M.session.project and '●' or ' ', who, pad, p.name)
         end,
       }, function(choice)
         if not choice then

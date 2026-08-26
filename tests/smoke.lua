@@ -1019,14 +1019,19 @@ local ok, err = pcall(function()
     assert(vim.deep_equal(rows, { 3, 7, 22, 38 }), 'changed rows: ' .. vim.inspect(rows))
 
     -- One mark per changed line, placed by its share of the page rather than by where the
-    -- line happens to be: every one of the four is on the bar, though only some are on screen.
+    -- line happens to be: every one of the four is on the bar, though only some are on
+    -- screen. The handle under them says which part of the page is in front of the reader.
     local marks = vim.api.nvim_buf_get_extmarks(buf, scrollbar.ns, 0, -1, { details = true })
-    assert(#marks == 4, 'expected 4 scrollbar marks, got ' .. #marks)
     local height = vim.api.nvim_win_get_height(0)
+    local by_hl = {}
     for _, mark in ipairs(marks) do
       assert(mark[4].virt_text_pos == 'right_align', 'scrollbar marks live at the window edge')
       assert(mark[2] < height, 'a mark drawn below the fold cannot be seen: row ' .. mark[2])
+      local hl = mark[4].virt_text[1][2]
+      by_hl[hl] = (by_hl[hl] or 0) + 1
     end
+    assert(by_hl.ChatoraTelomereUnread == 4, 'expected 4 change marks, got ' .. vim.inspect(by_hl))
+    assert((by_hl.ChatoraScrollbarHandle or 0) > 0, 'expected a handle, got ' .. vim.inspect(by_hl))
 
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
     telomere.jump(1)
@@ -1038,6 +1043,15 @@ local ok, err = pcall(function()
     telomere.jump(-1)
     -- Nothing changed above line 3, so stepping back again wraps to the last one.
     assert(vim.api.nvim_win_get_cursor(0)[1] == 38, '[u must wrap at the top')
+
+    -- A page that fits on screen has nothing to scroll to: no bar at all, and the gutter
+    -- speaks for every line it has.
+    vim.api.nvim_buf_set_lines(buf, 5, -1, false, {})
+    scrollbar.refresh(buf)
+    assert(
+      #vim.api.nvim_buf_get_extmarks(buf, scrollbar.ns, 0, -1, {}) == 0,
+      'a page that fits needs no scrollbar'
+    )
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end
