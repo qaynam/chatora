@@ -1,7 +1,7 @@
 import type { AnyNode, AnyNodeType, Decoration, Position } from '@cosense-toolbox/parser'
 import { normalizeLineEndings, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
-import { notationNameForDecoration, notationSpecs, parseOptions } from './notations'
+import { notationNamesForDecoration, notationSpecs, parseOptions } from './notations'
 import { quoteMarkerLength } from './quote'
 
 /**
@@ -123,10 +123,20 @@ export const computeTokens = (text: string): RawToken[] => {
         }
         return undefined
       case 'decoration': {
-        // A marker run can hold both kinds (`[|* x]`) but a span carries one token type,
-        // so the user-defined notation wins: it is what the user explicitly configured.
-        const type = notationNameForDecoration(node) ?? decorationTokenType(node)
-        if (type) tokens.push(spanToken(type, node.position))
+        // A marker run wears every marker in it (`[!* x]` is both), the way Cosense's own
+        // renderer emits a CSS class per character and lets them combine. So each gets its
+        // own token over the same span, and Neovim merges what they set: overlapping marks
+        // of equal priority combine attribute by attribute, the later one winning a tie.
+        //
+        // Order is therefore the precedence: the official markers go down first, then the
+        // configured notations in reverse, leaving the first-written one on top. What the
+        // user configured beats what the syntax implied, and the earlier marker of two
+        // beats the later where both set the same colour.
+        const official = decorationTokenType(node)
+        if (official) tokens.push(spanToken(official, node.position))
+        for (const name of [...notationNamesForDecoration(node)].reverse()) {
+          tokens.push(spanToken(name, node.position))
+        }
         // Descend: a decoration can wrap a link, code span or image (`[* [nuclear]]`), and
         // that child needs its own token. encodeTokens' sort emits the child last, so its
         // mark is set on top and the decoration's bold/italic combines underneath.

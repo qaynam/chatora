@@ -98,6 +98,8 @@ local ok, err = pcall(function()
           '[|* 特徴]',
           '> 引用された行',
           '[メモ#6a44c8050000000000650784]',
+          "[!' 組み合わせ]",
+          '[!| 前が勝つ]',
         }
       )
     then
@@ -307,6 +309,56 @@ local ok, err = pcall(function()
     fail('📌 conceal covers the wrong span: ' .. vim.inspect(opening))
   end
   log('custom notation OK ([|* ] tokenized as pinned, opening run concealed to 📌)')
+
+  --- Semantic token types at the first character of `row`'s body, in the order the server
+  --- sent them — which is the order Neovim stacks their highlights in.
+  local function token_types_at(row, col)
+    local ok_pos, tokens = pcall(vim.lsp.semantic_tokens.get_at_pos, page_buf, row, col)
+    local types = {}
+    if ok_pos and tokens then
+      for _, t in ipairs(tokens) do
+        types[#types + 1] = t.type
+      end
+    end
+    return types
+  end
+
+  local function row_of(text)
+    for i, l in ipairs(vim.api.nvim_buf_get_lines(page_buf, 0, -1, false)) do
+      if l == text then
+        return i - 1
+      end
+    end
+    fail('fixture drift: no line reading ' .. vim.inspect(text))
+  end
+
+  -- A marker Cosense allows in a run but nothing here configures must not take the whole
+  -- decoration down with it: the line is an important notation, not a link to a page
+  -- called "!' 組み合わせ".
+  local ride_row = row_of("[!' 組み合わせ]")
+  if not wait_for(10000, function()
+    return has_token_type(page_buf, ride_row, 'important')
+  end) then
+    fail("[!' …] lost its notation, tokens: " .. vim.inspect(token_types_at(ride_row, 0)))
+  end
+  if has_token_type(page_buf, ride_row, 'link') then
+    fail("[!' …] was read as a link")
+  end
+
+  -- Two configured markers on one run both apply, and the first written one is sent last
+  -- so its colour is the one on top.
+  local both_row = row_of('[!| 前が勝つ]')
+  local stacked = {}
+  if not wait_for(10000, function()
+    stacked = token_types_at(both_row, 0)
+    return #stacked >= 2
+  end) then
+    fail('[!| …] did not stack both notations, got ' .. vim.inspect(stacked))
+  end
+  if stacked[#stacked] ~= 'important' or stacked[#stacked - 1] ~= 'pinned' then
+    fail('[!| …] stacked in the wrong order: ' .. vim.inspect(stacked))
+  end
+  log('notation merge OK (unconfigured marker rides along, first marker ends up on top)')
 
   -- ===================================================================================
   -- STEP: quote-bar

@@ -220,6 +220,34 @@ describe('computeTokens with custom notations', () => {
     expect(findAll(tokens, 'link')).toHaveLength(1)
   })
 
+  test('a run wearing several markers gets a token each, the first written one last', () => {
+    setNotations([
+      { marker: '!', name: 'important' },
+      { marker: '{', name: 'balloon' },
+    ])
+    const src = 'Title\n[!{ body]'
+    const line = (src.split('\n')[1] as string).length
+    const spans = computeTokens(src).filter((t) => t.char === 0 && t.length === line)
+    // Later token, later extmark, higher up: the marker written first wins a shared
+    // attribute, and everything neither of them sets combines underneath.
+    expect(spans.map((t) => t.type)).toEqual(['balloon', 'important'])
+  })
+
+  test('an official marker in the run keeps its token, underneath the notation', () => {
+    setNotations([{ marker: '!', name: 'important' }])
+    const src = 'Title\n[!* body]'
+    const line = (src.split('\n')[1] as string).length
+    const spans = computeTokens(src).filter((t) => t.char === 0 && t.length === line)
+    expect(spans.map((t) => t.type)).toEqual(['bold', 'important'])
+  })
+
+  test('a decoration character with no notation behind it keeps the run tokenized', () => {
+    setNotations([{ marker: '!', name: 'important' }])
+    const tokens = computeTokens("Title\n[!' body]")
+    expect(findAll(tokens, 'important')).toHaveLength(1)
+    expect(findAll(tokens, 'link')).toHaveLength(0)
+  })
+
   test('legend-index round trip: encodeTokens indexes a custom type past TOKEN_TYPES, in marker order', () => {
     setNotations([
       { marker: '|', name: 'highlight' },

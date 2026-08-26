@@ -58,6 +58,10 @@ const makeFixturePages = (): Map<string, FixturePage> => {
       { id: 'l4', text: '[|* 特徴]', updated: LONG_AGO, userId: AUTHOR },
       { id: 'l5', text: '> 引用された行', updated: LONG_AGO, userId: AUTHOR },
       { id: 'l6', text: '[メモ#6a44c8050000000000650784]', updated: LONG_AGO, userId: AUTHOR },
+      // A configured marker beside a character Cosense allows in a run but nothing here
+      // defines, and a run wearing two configured markers at once.
+      { id: 'l7', text: "[!' 組み合わせ]", updated: LONG_AGO, userId: AUTHOR },
+      { id: 'l8', text: '[!| 前が勝つ]', updated: LONG_AGO, userId: AUTHOR },
     ],
   })
   pages.set('メモ', {

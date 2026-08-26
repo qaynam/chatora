@@ -3,6 +3,7 @@ import { parse, parseLine } from '@cosense-toolbox/parser'
 import {
   notationName,
   notationNameForDecoration,
+  notationNamesForDecoration,
   notationSpecs,
   parseOptions,
   setNotations,
@@ -82,6 +83,50 @@ describe('setNotations / parseOptions', () => {
     expect(boxedLine.children[0]?.type).toBe('decoration')
     expect(notationName('|')).toBe('highlight')
     expect(notationName('=')).toBe('boxed')
+    setNotations([])
+  })
+
+  test('a decoration character with no notation behind it rides along in the run', () => {
+    setNotations([{ marker: '!', name: 'important' }])
+    const node = parseLine("[!' お願い]", parseOptions()).children[0]
+    expect(node?.type).toBe('decoration')
+    if (node?.type === 'decoration') {
+      expect(node.value).toBe('お願い')
+      expect(node.markers).toEqual(['!', "'"])
+      expect(notationNamesForDecoration(node)).toEqual(['important'])
+    }
+    setNotations([])
+  })
+
+  test('a character Cosense would not take as a marker ends the run, leaving a link', () => {
+    setNotations([{ marker: '!', name: 'important' }])
+    expect(parseLine('[!x お願い]', parseOptions()).children[0]?.type).toBe('internalLink')
+    setNotations([])
+  })
+
+  test("a configured marker outside Cosense's own set still opens a run", () => {
+    setNotations([{ marker: '=', name: 'boxed' }])
+    expect(parseLine('[=! 予約文字でも設定次第]', parseOptions()).children[0]?.type).toBe(
+      'decoration',
+    )
+    setNotations([])
+  })
+
+  test('every configured notation in a run is reported, in the order written', () => {
+    setNotations([
+      { marker: '!', name: 'important' },
+      { marker: '{', name: 'balloon' },
+    ])
+    for (const [src, expected] of [
+      ['[!{ text]', ['important', 'balloon']],
+      ['[{! text]', ['balloon', 'important']],
+      ['[!!{ text]', ['important', 'balloon']],
+    ] as const) {
+      const node = parseLine(src, parseOptions()).children[0]
+      expect(node?.type).toBe('decoration')
+      if (node?.type === 'decoration')
+        expect(notationNamesForDecoration(node)).toEqual([...expected])
+    }
     setNotations([])
   })
 

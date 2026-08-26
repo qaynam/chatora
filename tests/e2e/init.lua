@@ -29,6 +29,8 @@ require('chatora').setup({
   project = 'testproj',
   server_cmd = { 'node', repo_root .. '/packages/server/dist/main.js', '--stdio' },
   notations = {
-    ['|'] = { name = 'pinned', icon = '📌', hl = { bold = true, underline = true } },
+    -- Both carry a foreground, so a run wearing the two of them says which marker won.
+    ['|'] = { name = 'pinned', icon = '📌', hl = { bold = true, underline = true, fg = '#000000' } },
+    ['!'] = { name = 'important', hl = { bg = '#ff000d', fg = '#ffffff' } },
   },
 })

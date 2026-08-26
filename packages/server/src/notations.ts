@@ -23,9 +23,24 @@ const OFFICIAL_MARKERS = {
 /** Cosense stops growing emphasis at five asterisks; sizeLevel is 0-indexed. */
 const MAX_SIZE_LEVEL = 4
 
+/**
+ * Every character Cosense accepts inside a marker run, from help-jp/文字装飾記法:
+ *
+ * > `*`や`/`だけでなく、`!"#%&'()*+,-./{|}<>_~`などの記号も使用できます
+ *
+ * Only a handful of them carry a look of their own; the web client turns each of the rest
+ * into a CSS class (`deco-!`, `deco-{`, …) for the project's own stylesheet to pick up, and
+ * chatora into a configured notation. `=` is accepted there too but documented as reserved.
+ *
+ * A character in this set with no notation behind it styles nothing and stops nothing: the
+ * same page warns the set changes without notice, and dropping the whole decoration —
+ * leaving `[!' text]` to read as a link to a page named `!' text` — is the worse answer.
+ */
+const DECORATION_CHARS = new Set(`!"#%&'()*+,-./{|}<>_~`.split(''))
+
 interface MarkerRun {
-  /** Name of the first user-defined notation in the run. */
-  readonly notation: string
+  /** Names of the user-defined notations in the run, in the order they were written. */
+  readonly notations: readonly string[]
   /** The marker characters as written, in order and without repeats. */
   readonly markers: readonly string[]
   /** Offset of the body within `inner`, past the run and the whitespace after it. */
@@ -51,7 +66,7 @@ const scanMarkerRun = (
 ): MarkerRun | undefined => {
   const flags = { bold: false, italic: false, strike: false, underline: false }
   const written: string[] = []
-  let notation: string | undefined
+  const notations: string[] = []
   let asterisks = 0
   let end = 0
   const record = (char: string) => {
@@ -67,18 +82,20 @@ const scanMarkerRun = (
       continue
     }
     const name = markers.get(char)
-    if (name === undefined) break
+    // A configured marker is in the run whatever Cosense thinks of the character; an
+    // unconfigured one only if Cosense would have taken it as part of the run too.
+    if (name === undefined && !DECORATION_CHARS.has(char)) break
     record(char)
-    notation ??= name
+    if (name !== undefined && !notations.includes(name)) notations.push(name)
   }
-  if (notation === undefined) return undefined
+  if (notations.length === 0) return undefined
 
   let bodyStart = end
   while (bodyStart < inner.length && WHITESPACE_RE.test(inner[bodyStart] as string)) bodyStart++
   if (bodyStart === end || bodyStart === inner.length) return undefined
 
   return {
-    notation,
+    notations,
     markers: written,
     bodyStart,
     ...flags,
@@ -136,16 +153,22 @@ export const notationSpecs = (): readonly NotationSpec[] => currentSpecs
 export const notationName = (marker: string): string | undefined => markerToName.get(marker)
 
 /**
- * Which user-defined notation (if any) opened a given decoration node — undefined for the
- * official ones (`[* x]`, `[-_ x]`, `[[x]]`), whose markers are never configurable.
+ * The user-defined notations a decoration node wears, in the order they were written —
+ * empty for the official ones (`[* x]`, `[-_ x]`, `[[x]]`), whose markers are never
+ * configurable.
  *
- * A run can hold several (`[|@ text]`); the first configured one names the node, matching
- * the rule the bracket rule applied when it built it.
+ * A run carries all of them at once, the way Cosense's own renderer emits one CSS class per
+ * marker character and lets the stylesheet combine them.
  */
-export const notationNameForDecoration = (node: Decoration): string | undefined => {
+export const notationNamesForDecoration = (node: Decoration): readonly string[] => {
+  const names: string[] = []
   for (const marker of node.markers) {
     const name = markerToName.get(marker)
-    if (name !== undefined) return name
+    if (name !== undefined && !names.includes(name)) names.push(name)
   }
-  return undefined
+  return names
 }
+
+/** The notation that names the node: the first one written, or undefined for an official run. */
+export const notationNameForDecoration = (node: Decoration): string | undefined =>
+  notationNamesForDecoration(node)[0]
