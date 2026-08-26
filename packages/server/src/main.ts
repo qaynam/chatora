@@ -182,7 +182,7 @@ connection.onCompletion(async (params: CompletionParams) => {
   return { isIncomplete: true, items }
 })
 
-connection.onDefinition((params: DefinitionParams) => {
+connection.onDefinition(async (params: DefinitionParams) => {
   const doc = documents.get(params.textDocument.uri)
   if (!doc) return null
   const parsed = parseUri(params.textDocument.uri)
@@ -190,7 +190,13 @@ connection.onDefinition((params: DefinitionParams) => {
 
   const lineText = normalizeCrLf(doc.getText()).split('\n')[params.position.line] ?? ''
   const target = findDefinitionTarget(lineText, params.position.character, parsed.project)
-  return target ? definitionLocation(target) : null
+  if (!target) return null
+  // `[title#lineId]` names a line, and where that line sits is only knowable from the page.
+  const row =
+    target.lineId === undefined
+      ? 0
+      : await runtime.runPromise(handlers.lineRow(target.project, target.title, target.lineId))
+  return definitionLocation(target, row)
 })
 
 // Async like every other envelope-returning handler: onRequest only infers the

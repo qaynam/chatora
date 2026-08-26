@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { definitionLocation, findDefinitionTarget, findUrlTarget } from './definition'
+import { definitionLocation, findDefinitionTarget, findUrlTarget, splitLineRef } from './definition'
 
 describe('findDefinitionTarget', () => {
   test('internalLink under the cursor resolves within the current project', () => {
@@ -74,5 +74,46 @@ describe('findUrlTarget', () => {
     expect(findUrlTarget('see [ページ名] here', 6)).toBeNull()
     expect(findUrlTarget('#tag', 2)).toBeNull()
     expect(findUrlTarget('just text', 3)).toBeNull()
+  })
+})
+
+describe('line links', () => {
+  // Cosense writes `[title#lineId]` for a link to one line of a page. A title may contain a
+  // `#` of its own, so only the 24-hex-character shape of a line id counts as one.
+  test('splits a line reference off the page title', () => {
+    expect(splitLineRef('pagetitle#6a44c8050000000000650784')).toEqual({
+      title: 'pagetitle',
+      lineId: '6a44c8050000000000650784',
+    })
+  })
+
+  test('leaves a title that merely contains # alone', () => {
+    expect(splitLineRef('C#入門')).toEqual({ title: 'C#入門' })
+    expect(splitLineRef('page#short')).toEqual({ title: 'page#short' })
+    expect(splitLineRef('#hash')).toEqual({ title: '#hash' })
+  })
+
+  test('gd on one reports the page and the line', () => {
+    const target = findDefinitionTarget('[メモ#6a44c8050000000000650784] を見る', 2, 'proj')
+    expect(target).toEqual({
+      project: 'proj',
+      title: 'メモ',
+      lineId: '6a44c8050000000000650784',
+    })
+  })
+
+  test('a project link can name a line too', () => {
+    const target = findDefinitionTarget('[/other/メモ#6a44c8050000000000650784]', 3, 'proj')
+    expect(target).toMatchObject({
+      project: 'other',
+      title: 'メモ',
+      lineId: '6a44c8050000000000650784',
+    })
+  })
+
+  test('the location points at the row the caller resolved', () => {
+    const at = definitionLocation({ project: 'proj', title: 'メモ' }, 7)
+    expect(at.range.start.line).toBe(7)
+    expect(at.range.end.line).toBe(7)
   })
 })

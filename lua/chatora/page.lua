@@ -13,6 +13,28 @@ local status = require('chatora.status')
 local uv = vim.uv or vim.loop
 local autosave_timers = {}
 
+-- A row requested for a page that is not open yet, kept by uri until its text arrives.
+-- Following a `[title#lineId]` link is the one thing that asks for this.
+local pending_row = {}
+
+--- Put the cursor on the row this page was opened for, if it was opened for one.
+local function apply_pending_row(bufnr)
+  local wanted = pending_row[vim.api.nvim_buf_get_name(bufnr)]
+  if not wanted then
+    return
+  end
+  pending_row[vim.api.nvim_buf_get_name(bufnr)] = nil
+  local winid = vim.fn.bufwinid(bufnr)
+  if winid == -1 then
+    return
+  end
+  local last = vim.api.nvim_buf_line_count(bufnr)
+  pcall(vim.api.nvim_win_set_cursor, winid, { math.min(wanted, last), 0 })
+  vim.api.nvim_win_call(winid, function()
+    vim.cmd('normal! zz')
+  end)
+end
+
 -- Forward declaration: autosave fires the save, which is defined with the write path.
 local send_save
 
@@ -227,6 +249,7 @@ local function handle_read(ev)
       return
     end
     set_content(bufnr, result.text)
+    apply_pending_row(bufnr)
     vim.b[bufnr].chatora_meta = result.meta
     -- Following a [/other-project/page] link lands on a project this session may only read.
     -- The buffer says so rather than letting the edit fail at save time, hours later.
@@ -472,14 +495,29 @@ vim.api.nvim_create_autocmd('ExitPre', {
 })
 
 --- Open project/title (edits the cosense:// URI), optionally in target_win.
-function M.open(project, title, target_win)
+---
+--- `opts.row` is a 1-based line to put the cursor on once the page has loaded. It cannot be
+--- set here: the buffer has no lines until the fetch lands, so it is remembered and applied
+--- by the read handler.
+function M.open(project, title, target_win, opts)
   if target_win and vim.api.nvim_win_is_valid(target_win) then
     vim.api.nvim_set_current_win(target_win)
   end
   local uri_str = uri.format(project, title)
+  if opts and opts.row then
+    pending_row[uri_str] = opts.row
+  end
+  local already_loaded = vim.b[vim.fn.bufnr(uri_str)] ~= nil
+    and vim.fn.bufnr(uri_str) ~= -1
+    and vim.b[vim.fn.bufnr(uri_str)].chatora_attached == true
   -- magic.file=false: the URI contains %XX escapes that :edit would otherwise
   -- expand as the "current file" special character (E499 on Japanese titles).
   vim.cmd({ cmd = 'edit', args = { uri_str }, magic = { file = false } })
+  -- `:edit` on a buffer that already holds its page does not read it again, so nothing
+  -- would come along to apply the row. When the text is already there, apply it now.
+  if already_loaded then
+    apply_pending_row(vim.fn.bufnr(uri_str))
+  end
 end
 
 return M

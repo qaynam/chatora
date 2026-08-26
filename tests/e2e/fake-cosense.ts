@@ -46,6 +46,7 @@ const makeFixturePages = (): Map<string, FixturePage> => {
       // A marker run mixing the harness's custom `|` notation with the official `*`.
       { id: 'l4', text: '[|* 特徴]' },
       { id: 'l5', text: '> 引用された行' },
+      { id: 'l6', text: '[メモ#6a44c8050000000000650784]' },
     ],
   })
   pages.set('メモ', {
@@ -55,6 +56,8 @@ const makeFixturePages = (): Map<string, FixturePage> => {
     lines: [
       { id: 'm1', text: 'メモ' },
       { id: 'm2', text: '検索ヒット行' },
+      // A line id in the shape a real one has, so a `[メモ#<id>]` link resolves to this row.
+      { id: '6a44c8050000000000650784', text: 'リンクの飛び先' },
     ],
   })
   return pages

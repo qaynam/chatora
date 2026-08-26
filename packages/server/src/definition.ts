@@ -34,25 +34,56 @@ export const findDefinitionTarget = (
   lineText: string,
   character: number,
   currentProject: string,
-): { project: string; title: string } | null => {
+): DefinitionTarget | null => {
   const line = parseLine(lineText, parseOptions())
-  let target: { project: string; title: string } | null = null
+  let target: DefinitionTarget | null = null
+
+  const to = (project: string, raw: string): DefinitionTarget => {
+    const { title, lineId } = splitLineRef(raw)
+    return { project, title, ...(lineId === undefined ? {} : { lineId }) }
+  }
 
   visit(line, (node) => {
     const inRange = character >= node.position.start.column && character < node.position.end.column
     if (!inRange) return undefined
 
-    if (node.type === 'internalLink') target = { project: currentProject, title: node.target }
-    else if (node.type === 'hashtag') target = { project: currentProject, title: node.value }
-    else if (node.type === 'projectLink') target = { project: node.project, title: node.title }
+    if (node.type === 'internalLink') target = to(currentProject, node.target)
+    else if (node.type === 'hashtag') target = to(currentProject, node.value)
+    else if (node.type === 'projectLink') target = to(node.project, node.title)
     return target ? 'exit' : undefined
   })
 
   return target
 }
 
-/** Builds the LSP Location for a definition target: the top of the target page. */
-export const definitionLocation = (target: { project: string; title: string }) => ({
+export interface DefinitionTarget {
+  readonly project: string
+  readonly title: string
+  /** Set for a `title#lineId` link, which names one line of the page rather than the page. */
+  readonly lineId?: string
+}
+
+// A Cosense line id is the same 24 hex characters a page id is, and a title is free to
+// contain a `#` — `[C#入門]` is one page, not a line of another — so the suffix is only a
+// line reference when it has exactly that shape.
+const LINE_REF_RE = /^(.*[^#])#([0-9a-f]{24})$/
+
+/**
+ * Splits `title#lineId` into the page and the line it points at. Cosense writes this form
+ * when a link is made to one line of a page rather than to the page itself.
+ */
+export const splitLineRef = (
+  target: string,
+): { readonly title: string; readonly lineId?: string } => {
+  const matched = LINE_REF_RE.exec(target)
+  return matched ? { title: matched[1] as string, lineId: matched[2] as string } : { title: target }
+}
+
+/**
+ * Builds the LSP Location for a definition target: the top of the target page, or the line
+ * a `title#lineId` link names once `rowOf` has found it.
+ */
+export const definitionLocation = (target: { project: string; title: string }, row = 0) => ({
   uri: formatUri(target.project, target.title),
-  range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+  range: { start: { line: row, character: 0 }, end: { line: row, character: 0 } },
 })

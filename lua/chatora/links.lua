@@ -40,6 +40,36 @@ function M.open_external(url)
   end
 end
 
+--- Follow the LSP definition ourselves rather than through `vim.lsp.buf.definition()`.
+---
+--- The built-in jump edits the target and sets the cursor in one breath, which works for a
+--- file that is on disk. A cosense:// buffer is filled by a request, so at that moment it
+--- has no lines yet and the row a `[title#lineId]` link resolved to has nowhere to land.
+--- The row is handed to the page instead, which applies it once the text arrives.
+local function follow_definition(bufnr, row, character)
+  local params = {
+    textDocument = { uri = vim.uri_from_bufnr(bufnr) },
+    position = { line = row - 1, character = character },
+  }
+  vim.lsp.buf_request(bufnr, 'textDocument/definition', params, function(err, result)
+    local location = result
+    if vim.islist(location) then
+      location = location[1]
+    end
+    if err or not location or not location.uri then
+      return
+    end
+    local project, title = require('chatora.uri').parse(location.uri)
+    if not project then
+      return
+    end
+    local target_row = location.range and location.range.start and location.range.start.line or 0
+    require('chatora.page').open(project, title, require('chatora.winutil').ensure_editor_win(), {
+      row = target_row + 1,
+    })
+  end)
+end
+
 --- The `gd` handler for cosense buffers.
 function M.goto_definition()
   local bufnr = vim.api.nvim_get_current_buf()
@@ -57,14 +87,14 @@ function M.goto_definition()
       if fallback then
         M.open_external(fallback)
       else
-        vim.lsp.buf.definition()
+        follow_definition(bufnr, row, character)
       end
       return
     end
     if result.url then
       M.open_external(result.url)
     else
-      vim.lsp.buf.definition()
+      follow_definition(bufnr, row, character)
     end
   end)
 end

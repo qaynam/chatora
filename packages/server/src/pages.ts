@@ -648,6 +648,36 @@ export const previewPage = (params: {
     }),
   )
 
+/**
+ * Which row of `project`'s page `title` holds the line with `lineId`, or 0.
+ *
+ * A `[title#lineId]` link names a line, and only the page itself says where that line is.
+ * The lookup reads the session's copy when the page is already open and fetches otherwise;
+ * either way it answers 0 rather than failing, since a link to a line that has since been
+ * deleted should still open the page it is on.
+ */
+export const lineRow = (
+  project: string,
+  title: string,
+  lineId: string,
+): Effect.Effect<number, never, SessionState | HttpClient> =>
+  Effect.gen(function* () {
+    const session = yield* SessionState
+    const open = yield* session.getPage(formatUri(project, title))
+    if (Option.isSome(open)) {
+      const row = open.value.baseLines.findIndex((line) => line.id === lineId)
+      if (row >= 0) return row
+    }
+    const apiOpt = yield* session.getApi()
+    if (Option.isNone(apiOpt)) return 0
+    const page = yield* apiOpt.value
+      .getPage(project, title)
+      .pipe(Effect.orElseSucceed(() => Option.none<PageDetail>()))
+    if (Option.isNone(page)) return 0
+    const row = page.value.lines.findIndex((line) => line.id === lineId)
+    return row < 0 ? 0 : row
+  })
+
 // ---------------------------------------------------------------------------
 // deletePage
 // ---------------------------------------------------------------------------

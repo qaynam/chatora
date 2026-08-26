@@ -91,7 +91,14 @@ local ok, err = pcall(function()
     if
       not vim.deep_equal(
         lines,
-        { 'ホーム', 'これは[メモ]へのリンク', '#tag もある', '[|* 特徴]', '> 引用された行' }
+        {
+          'ホーム',
+          'これは[メモ]へのリンク',
+          '#tag もある',
+          '[|* 特徴]',
+          '> 引用された行',
+          '[メモ#6a44c8050000000000650784]',
+        }
       )
     then
       return false
@@ -396,7 +403,7 @@ local ok, err = pcall(function()
   end
 
   local saved_lines = vim.api.nvim_buf_get_lines(page_buf, 0, -1, false)
-  if #saved_lines ~= 6 or saved_lines[6] ~= 'あたらしい行' then
+  if saved_lines[#saved_lines] ~= 'あたらしい行' then
     fail('unexpected buffer content after save: ' .. vim.inspect(saved_lines))
   end
   log('save OK (modified=false, buffer has the new line)')
@@ -598,6 +605,39 @@ local ok, err = pcall(function()
     fail('picker: timed out waiting for メモ to open after accept')
   end
   log('picker OK (recent list, live query, accept opens page)')
+
+  -- ===================================================================================
+  -- STEP: line-link
+  -- ===================================================================================
+  step('line-link')
+
+  -- `[メモ#<lineId>]` names one line of another page. Following it has to open that page
+  -- and land on that line — which the built-in definition jump cannot do, because the
+  -- buffer has no lines yet at the moment it would set the cursor.
+  require('chatora.page').open('testproj', 'ホーム')
+  local link_buf = vim.api.nvim_get_current_buf()
+  if not wait_for(10000, function()
+    return vim.api.nvim_buf_get_lines(link_buf, 5, 6, false)[1] == '[メモ#6a44c8050000000000650784]'
+  end) then
+    fail('line-link: the fixture line did not load')
+  end
+  vim.api.nvim_win_set_cursor(0, { 6, 2 })
+  require('chatora.links').goto_definition()
+
+  local landed = nil
+  if not wait_for(10000, function()
+    local buf = vim.api.nvim_get_current_buf()
+    local name = vim.api.nvim_buf_get_name(buf)
+    if not name:find('メモ', 1, true) then
+      return false
+    end
+    local row = vim.api.nvim_win_get_cursor(0)[1]
+    landed = vim.api.nvim_buf_get_lines(buf, row - 1, row, false)[1]
+    return landed == 'リンクの飛び先'
+  end) then
+    fail('line-link: expected the cursor on the linked line, got ' .. vim.inspect(landed))
+  end
+  log('line link opened メモ with the cursor on its own line')
 
   -- ===================================================================================
   -- STEP: sync
