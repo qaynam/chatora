@@ -12,6 +12,7 @@ import type {
 } from '@chatora/core'
 import { CredentialStore, makeCosenseApi } from '@chatora/core'
 import { Clock, Context, Effect, Layer, Option, Ref, SynchronizedRef } from 'effect'
+import { loadTitles, saveTitles } from './titleStore'
 
 export interface BasePageState {
   readonly project: string
@@ -22,7 +23,10 @@ export interface BasePageState {
   readonly exists: boolean
 }
 
-const TITLES_CACHE_TTL_MS = 60_000
+// Long enough that starting Neovim does not re-download a whole project's titles, and
+// tolerable because the two things that change it locally — creating a page, deleting one —
+// update the list in place rather than waiting for it to expire.
+const TITLES_CACHE_TTL_MS = 300_000
 // A project's roster changes far more slowly than its pages, and it is only ever read to
 // put a name on an author, so a stale entry costs nothing worse than a stale display name.
 const USERS_CACHE_TTL_MS = 600_000
@@ -91,8 +95,16 @@ export interface SessionStateShape {
   ) => Effect.Effect<readonly VectorResultPage[], CosenseApiError, HttpClient>
   /** `project`'s id and everyone who can be named as an author in it. Empty when unreadable. */
   readonly getProjectUsers: (project: string) => Effect.Effect<ProjectUsers, never, HttpClient>
-  /** Forget `project`'s cached title index, after something changed which pages exist. */
-  readonly invalidateTitles: (project: string) => Effect.Effect<void>
+  /**
+   * Record that `title` now exists in `project`, or no longer does. Keeping the index
+   * current in place is what lets it be cached for minutes: a page saved for the first time
+   * stops reading as an empty link straight away, without re-downloading the whole list.
+   */
+  readonly noteTitle: (
+    project: string,
+    title: string,
+    exists: boolean,
+  ) => Effect.Effect<void, never, HttpClient>
   readonly getTitles: (
     project: string,
   ) => Effect.Effect<readonly TitleEntry[], CosenseApiError, HttpClient>
@@ -246,27 +258,48 @@ export const makeSessionStateLayer = (
           return value
         })
 
-      const invalidateTitles: SessionStateShape['invalidateTitles'] = (project) =>
-        Ref.update(titlesCacheRef, (map) => {
-          if (!map.has(project)) return map
-          const next = new Map(map)
-          next.delete(project)
-          return next
+      const noteTitle: SessionStateShape['noteTitle'] = (project, title, exists) =>
+        Effect.gen(function* () {
+          const cache = yield* Ref.get(titlesCacheRef)
+          const cached = cache.get(project)
+          if (cached === undefined) return
+          const without = cached.titles.filter((entry) => entry.title !== title)
+          if (exists && without.length === cached.titles.length) {
+            // The id is the index's own; a page this session just created has one, but the
+            // index is only ever read for its titles, so a placeholder is enough.
+            without.push({ id: '', title, titleLc: '', updated: 0, image: null })
+          } else if (exists) {
+            return
+          }
+          const entry = { fetchedAt: cached.fetchedAt, titles: without }
+          yield* Ref.update(titlesCacheRef, (map) => new Map(map).set(project, entry))
+          yield* saveTitles(project, entry)
         })
 
       const getTitles: SessionStateShape['getTitles'] = (project) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
+          const fresh = (at: number) => now - at < TITLES_CACHE_TTL_MS
           const cache = yield* Ref.get(titlesCacheRef)
           const cached = cache.get(project)
-          if (cached && now - cached.fetchedAt < TITLES_CACHE_TTL_MS) return cached.titles
+          if (cached && fresh(cached.fetchedAt)) return cached.titles
+
+          // Disk before network: a project's titles are hundreds of kilobytes, and paying
+          // for them again at every startup delays the first page's links for no reason.
+          if (cached === undefined) {
+            const stored = yield* loadTitles(project)
+            if (stored && fresh(stored.fetchedAt)) {
+              yield* Ref.update(titlesCacheRef, (map) => new Map(map).set(project, stored))
+              return stored.titles
+            }
+          }
 
           const apiOpt = yield* getApi()
           if (Option.isNone(apiOpt)) return []
           const titles = yield* apiOpt.value.searchTitles(project)
-          yield* Ref.update(titlesCacheRef, (map) =>
-            new Map(map).set(project, { fetchedAt: now, titles }),
-          )
+          const entry = { fetchedAt: now, titles }
+          yield* Ref.update(titlesCacheRef, (map) => new Map(map).set(project, entry))
+          yield* saveTitles(project, entry)
           return titles
         })
 
@@ -297,7 +330,7 @@ export const makeSessionStateLayer = (
         removeCredential,
         searchVectorCached,
         getProjectUsers,
-        invalidateTitles,
+        noteTitle,
         getTitles,
         getPage,
         setPage,

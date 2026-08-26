@@ -515,6 +515,9 @@ export const openPage = (params: {
         baseLines: [],
         exists: false,
       })
+      // Following a link to a page that turns out not to be there is the cheapest correction
+      // the index gets: no request, and the link goes red without waiting for a refresh.
+      yield* session.noteTitle(params.project, params.title, false)
       return {
         ok: true as const,
         uri,
@@ -690,9 +693,9 @@ export const deletePage = (
       const submit = yield* api.submitEdit(base.project, preview.previewId)
 
       yield* session.deletePage(uri)
-      // The page is gone from the project, so the title index that still lists it would
-      // keep answering link questions with it.
-      yield* session.invalidateTitles(base.project)
+      // The index still lists it, and would go on answering link questions with a page
+      // that is no longer there.
+      yield* session.noteTitle(base.project, base.title, false)
       return { ok: true as const, title: submit.pageDeleted?.title ?? base.title }
     }),
   )
@@ -904,8 +907,12 @@ export const savePage = (
       if (newUri !== uri) yield* session.deletePage(uri)
       yield* session.setPage(newUri, newBase)
       // A page saved for the first time is not in the cached title index, so every link
-      // pointing at it would keep reading as empty until that cache aged out on its own.
-      if (!base.exists || newUri !== uri) yield* session.invalidateTitles(base.project)
+      // pointing at it would go on reading as empty until the cache aged out.
+      if (!base.exists) yield* session.noteTitle(base.project, finalTitle, true)
+      if (finalTitle !== base.title) {
+        yield* session.noteTitle(base.project, base.title, false)
+        yield* session.noteTitle(base.project, finalTitle, true)
+      }
 
       return {
         ok: true as const,

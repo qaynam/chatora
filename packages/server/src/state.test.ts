@@ -163,7 +163,9 @@ describe('SessionState.ensureVerified', () => {
   })
 })
 
-describe('SessionState.getTitles (60s TTL cache)', () => {
+// Each test uses its own project name: the index is cached on disk as well as in memory,
+// so two tests sharing one would share the file the first of them wrote.
+describe('SessionState.getTitles (cached in memory and on disk)', () => {
   test('serves repeated calls for the same project from cache', async () => {
     const { layer: httpLayer, calls } = testHttpClient(() =>
       json([{ id: 't1', title: 'A', titleLc: 'a', updated: 1, image: null }]),
@@ -171,25 +173,59 @@ describe('SessionState.getTitles (60s TTL cache)', () => {
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
     const program = Effect.gen(function* () {
       const session = yield* SessionState
-      yield* session.getTitles('proj')
-      return yield* session.getTitles('proj')
+      yield* session.getTitles('cached')
+      return yield* session.getTitles('cached')
     })
     const result = await run(program, httpLayer, credLayer)
     expect(result).toHaveLength(1)
     expect(calls).toHaveLength(1)
   })
 
-  test('refetches once the 60s TTL has elapsed', async () => {
+  test('refetches once the TTL has elapsed', async () => {
     const { layer: httpLayer, calls } = testHttpClient(() => json([]))
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))
     const program = Effect.gen(function* () {
       const session = yield* SessionState
-      yield* session.getTitles('proj')
-      yield* TestClock.adjust('61 seconds')
-      yield* session.getTitles('proj')
+      yield* session.getTitles('expiring')
+      yield* TestClock.adjust('301 seconds')
+      yield* session.getTitles('expiring')
     })
     await run(program, httpLayer, credLayer)
     expect(calls).toHaveLength(2)
+  })
+
+  // The list is worth hundreds of kilobytes per project, so a fresh session reads what the
+  // last one stored instead of downloading it again before the first link can be judged.
+  test('a second session reads the stored list instead of refetching', async () => {
+    const entry = { id: 't1', title: 'A', titleLc: 'a', updated: 1, image: null }
+    const first = testHttpClient(() => json([entry]))
+    const second = testHttpClient(() => json([entry]))
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const read = Effect.gen(function* () {
+      const session = yield* SessionState
+      return yield* session.getTitles('persisted')
+    })
+    await run(read, first.layer, credLayer)
+    const result = await run(read, second.layer, credLayer)
+    expect(result).toHaveLength(1)
+    expect(second.calls).toHaveLength(0)
+  })
+
+  test('noteTitle adds a page the session just created, without refetching', async () => {
+    const { layer: httpLayer, calls } = testHttpClient(() =>
+      json([{ id: 't1', title: 'A', titleLc: 'a', updated: 1, image: null }]),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      const session = yield* SessionState
+      yield* session.getTitles('noted')
+      yield* session.noteTitle('noted', 'B', true)
+      yield* session.noteTitle('noted', 'A', false)
+      return yield* session.getTitles('noted')
+    })
+    const titles = await run(program, httpLayer, credLayer)
+    expect(titles.map((t) => t.title)).toEqual(['B'])
+    expect(calls).toHaveLength(1)
   })
 
   test('without a credential, returns [] without caching (so a later login can retry)', async () => {
@@ -197,7 +233,7 @@ describe('SessionState.getTitles (60s TTL cache)', () => {
     const { layer: credLayer } = testCredentialStore(Option.none())
     const program = Effect.gen(function* () {
       const session = yield* SessionState
-      return yield* session.getTitles('proj')
+      return yield* session.getTitles('anonymous')
     })
     const result = await run(program, httpLayer, credLayer)
     expect(result).toEqual([])
