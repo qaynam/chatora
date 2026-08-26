@@ -24,7 +24,18 @@ const PROJECT = 'testproj'
 interface FixtureLine {
   id: string
   text: string
+  /** Unix seconds, as Cosense reports per line — what the telomere is drawn from. */
+  updated: number
+  userId: string
 }
+
+// The telomere grades a line by age, so the fixture needs one line from each end of the
+// scale, positioned around a last visit that leaves the recent one unread.
+const NOW = Math.floor(Date.now() / 1000)
+const LONG_AGO = NOW - 400 * 86400
+const JUST_NOW = NOW - 60
+const LAST_VISIT = NOW - 3600
+const AUTHOR = 'u1'
 
 interface FixturePage {
   id: string
@@ -40,13 +51,13 @@ const makeFixturePages = (): Map<string, FixturePage> => {
     title: 'ホーム',
     commitId: 'c1',
     lines: [
-      { id: 'l1', text: 'ホーム' },
-      { id: 'l2', text: 'これは[メモ]へのリンク' },
-      { id: 'l3', text: '#tag もある' },
+      { id: 'l1', text: 'ホーム', updated: LONG_AGO, userId: AUTHOR },
+      { id: 'l2', text: 'これは[メモ]へのリンク', updated: JUST_NOW, userId: AUTHOR },
+      { id: 'l3', text: '#tag もある', updated: LONG_AGO, userId: AUTHOR },
       // A marker run mixing the harness's custom `|` notation with the official `*`.
-      { id: 'l4', text: '[|* 特徴]' },
-      { id: 'l5', text: '> 引用された行' },
-      { id: 'l6', text: '[メモ#6a44c8050000000000650784]' },
+      { id: 'l4', text: '[|* 特徴]', updated: LONG_AGO, userId: AUTHOR },
+      { id: 'l5', text: '> 引用された行', updated: LONG_AGO, userId: AUTHOR },
+      { id: 'l6', text: '[メモ#6a44c8050000000000650784]', updated: LONG_AGO, userId: AUTHOR },
     ],
   })
   pages.set('メモ', {
@@ -54,10 +65,15 @@ const makeFixturePages = (): Map<string, FixturePage> => {
     title: 'メモ',
     commitId: 'c1',
     lines: [
-      { id: 'm1', text: 'メモ' },
-      { id: 'm2', text: '検索ヒット行' },
+      { id: 'm1', text: 'メモ', updated: LONG_AGO, userId: AUTHOR },
+      { id: 'm2', text: '検索ヒット行', updated: LONG_AGO, userId: AUTHOR },
       // A line id in the shape a real one has, so a `[メモ#<id>]` link resolves to this row.
-      { id: '6a44c8050000000000650784', text: 'リンクの飛び先' },
+      {
+        id: '6a44c8050000000000650784',
+        text: 'リンクの飛び先',
+        updated: LONG_AGO,
+        userId: AUTHOR,
+      },
     ],
   })
   return pages
@@ -86,7 +102,12 @@ const isDelete = (c: RawChange): c is RawDeleteChange => '_delete' in c
 const applyChanges = (page: FixturePage, changes: readonly RawChange[]): void => {
   for (const change of changes) {
     if (isInsert(change)) {
-      const newLine: FixtureLine = { id: change.lines.id, text: change.lines.text }
+      const newLine: FixtureLine = {
+        id: change.lines.id,
+        text: change.lines.text,
+        updated: Math.floor(Date.now() / 1000),
+        userId: AUTHOR,
+      }
       if (change._insert === '_end') {
         page.lines.push(newLine)
         continue
@@ -191,7 +212,12 @@ export const startFakeCosense = (): FakeCosenseHandle => {
           if (line) line.text = text
         }
         for (const text of edit.append ?? []) {
-          page.lines.push({ id: `remote${page.lines.length}`, text })
+          page.lines.push({
+            id: `remote${page.lines.length}`,
+            text,
+            updated: Math.floor(Date.now() / 1000),
+            userId: 'u2',
+          })
         }
         page.commitId = `${page.commitId}+remote`
         return jsonResponse({ ok: true, lines: page.lines }, 200)
@@ -330,6 +356,7 @@ export const startFakeCosense = (): FakeCosenseHandle => {
               persistent: true,
               lines: page.lines,
               updated: 1700000000,
+              accessed: LAST_VISIT,
               views: 42,
               linked: 6,
             },

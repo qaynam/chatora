@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { computeChanges } from './changes'
+import { alignLines, computeChanges } from './changes'
 
 const idSeq = (): (() => string) => {
   let n = 0
@@ -118,5 +118,50 @@ describe('computeChanges', () => {
 
   test('both empty is a no-op', () => {
     expect(computeChanges([], [], idSeq())).toEqual([])
+  })
+})
+
+describe('alignLines', () => {
+  const base = [
+    { id: 'a', text: 'A', updated: 100 },
+    { id: 'b', text: 'B', updated: 200 },
+    { id: 'c', text: 'C', updated: 300 },
+  ]
+
+  test('an untouched document maps every line onto its own base line', () => {
+    expect(alignLines(base, ['A', 'B', 'C']).map((l) => l?.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  test('inserted lines map to nothing, and the lines around them keep their base', () => {
+    expect(alignLines(base, ['A', 'new', 'B', 'C']).map((l) => l?.id)).toEqual([
+      'a',
+      undefined,
+      'b',
+      'c',
+    ])
+  })
+
+  test('an edited line loses its base line: its text is no longer what the server holds', () => {
+    expect(alignLines(base, ['A', 'B edited', 'C']).map((l) => l?.id)).toEqual([
+      'a',
+      undefined,
+      'c',
+    ])
+  })
+
+  test('a deleted line shifts nothing: the survivors keep their own base lines', () => {
+    expect(alignLines(base, ['A', 'C']).map((l) => l?.id)).toEqual(['a', 'c'])
+  })
+
+  test('the whole base line comes back, not just its id', () => {
+    expect(alignLines(base, ['B'])[0]).toEqual({ id: 'b', text: 'B', updated: 200 })
+  })
+
+  test('an empty document aligns to nothing at all', () => {
+    expect(alignLines(base, [])).toEqual([])
+  })
+
+  test('every line of a document with no base is unmatched', () => {
+    expect(alignLines([], ['A', 'B'])).toEqual([undefined, undefined])
   })
 })

@@ -124,7 +124,7 @@ describe('CosenseApi happy paths', () => {
         id: 'page1',
         title: 'My Page',
         commitId: 'commit1',
-        lines: [{ id: 'line1', text: 'hello' }],
+        lines: [{ id: 'line1', text: 'hello', updated: 0, userId: '' }],
         created: 0,
         updated: 1700000000,
         accessed: 0,

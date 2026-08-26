@@ -72,6 +72,10 @@ export interface PageSummary {
 export interface PageDetailLine {
   readonly id: string
   readonly text: string
+  /** Unix seconds the line was last written. 0 when the response omits it. */
+  readonly updated: number
+  /** Cosense id of whoever wrote it last; '' when the response omits it. */
+  readonly userId: string
 }
 
 /**

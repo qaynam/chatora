@@ -168,6 +168,7 @@ local function finalize_buffer(bufnr, project, title)
 
   codeblock.attach(bufnr)
   images.attach(bufnr, project)
+  require('chatora.telomere').attach(bufnr)
   pads.attach(bufnr)
   require('chatora.table').attach(bufnr)
   require('chatora.render').attach(bufnr)
@@ -335,6 +336,9 @@ local function apply_save(bufnr, uri_str, save_err, save_result, tick)
   -- Success feedback is one cmdline echo + the ✓ icon, not a toast; failures
   -- above still use vim.notify, where demanding attention is the point.
   status.set(bufnr, 'clean', '保存しました')
+  -- What was the reader's own unsaved text a moment ago is now the server's, with a
+  -- timestamp to match.
+  require('chatora.telomere').refresh(bufnr)
 
   if result.titleChanged then
     -- Renaming the buffer in place would desync the LSP client (didOpen was sent for the

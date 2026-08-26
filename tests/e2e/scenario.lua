@@ -382,6 +382,36 @@ local ok, err = pcall(function()
   log('related panel OK (buf ' .. related_buf .. ' contains メモ)')
 
   -- ===================================================================================
+  -- STEP: telomere — a bar per line, graded by how recently the server wrote it
+  -- ===================================================================================
+  step('telomere')
+
+  local telomere = require('chatora.telomere')
+  local function telomere_bars()
+    local out = {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(page_buf, telomere.ns, 0, -1, { details = true })) do
+      out[mark[2] + 1] = { text = vim.trim(mark[4].sign_text or ''), hl = mark[4].sign_hl_group }
+    end
+    return out
+  end
+
+  if not wait_for(10000, function()
+    return telomere_bars()[2] ~= nil
+  end) then
+    fail('timed out waiting for telomere bars')
+  end
+  local bars = telomere_bars()
+  -- The fixture writes line 2 a minute ago and everything else over a year ago, with the
+  -- last visit an hour back: newest is a full block and unread, the rest thin and read.
+  if bars[2].text ~= '█' or bars[2].hl ~= 'ChatoraTelomereUnread' then
+    fail('the freshly written line should be a thick unread bar, got ' .. vim.inspect(bars[2]))
+  end
+  if bars[1].text ~= '▏' or bars[1].hl ~= 'ChatoraTelomere' then
+    fail('a year-old line should be a thin read bar, got ' .. vim.inspect(bars[1]))
+  end
+  log('telomere OK (line 2 ' .. bars[2].text .. ' unread, line 1 ' .. bars[1].text .. ' read)')
+
+  -- ===================================================================================
   -- STEP: save
   -- ===================================================================================
   step('save')

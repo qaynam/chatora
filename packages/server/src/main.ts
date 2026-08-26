@@ -257,6 +257,9 @@ connection.onRequest('chatora/savePage', (params: { uri: string }) =>
 connection.onRequest('chatora/syncPage', (params: { uri: string }) =>
   runtime.runPromise(handlers.syncPage(params.uri, documents.get(params.uri)?.getText())),
 )
+connection.onRequest('chatora/telomere', (params: { uri: string; lines: string[] }) =>
+  runtime.runPromise(handlers.telomere(params)),
+)
 connection.onRequest('chatora/deletePage', (params: { uri: string }) =>
   runtime.runPromise(handlers.deletePage(params.uri)),
 )

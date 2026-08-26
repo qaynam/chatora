@@ -982,6 +982,63 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- telomere: a bar per line, thicker the more recently the line was written, blue while
+  -- it is newer than the reader's last visit, and the reader's own colour once they edit it.
+  do
+    local telomere = require('chatora.telomere')
+    local lsp = require('chatora.lsp')
+    local orig_ok = lsp.request_ok
+    local now = os.time()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'タイトル', '去年の行', '先週の行', 'さっきの行' })
+    lsp.request_ok = function(method, _, cb)
+      if method ~= 'chatora/telomere' then
+        return
+      end
+      cb({
+        ok = true,
+        accessed = now - 3600,
+        lines = {
+          { updated = now - 400 * 86400, userId = 'u1' },
+          { updated = now - 365 * 86400, userId = 'u1' },
+          { updated = now - 7 * 86400, userId = 'u1' },
+          { updated = now - 60, userId = 'u2' },
+        },
+      })
+    end
+    telomere.attach(buf)
+    lsp.request_ok = orig_ok
+
+    local function bars()
+      local out = {}
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, telomere.ns, 0, -1, { details = true })) do
+        out[mark[2] + 1] = { text = vim.trim(mark[4].sign_text or ''), hl = mark[4].sign_hl_group }
+      end
+      return out
+    end
+
+    local drawn = bars()
+    assert(#drawn == 4, 'expected a bar on every line, got ' .. #drawn)
+    assert(drawn[3].text ~= drawn[4].text, 'a week-old line must not look like a minute-old one')
+    assert(drawn[4].text == '█', 'the newest line takes the full block, got ' .. drawn[4].text)
+    assert(drawn[1].text == '▏', 'a year-old line thins to a rule, got ' .. drawn[1].text)
+    assert(drawn[1].hl == 'ChatoraTelomere', 'a line older than the last visit is read')
+    assert(drawn[4].hl == 'ChatoraTelomereUnread', 'a line newer than the last visit is unread')
+
+    -- Editing a line takes it away from the server's history: it is the reader's own text
+    -- until it is saved.
+    vim.api.nvim_buf_set_lines(buf, 1, 2, false, { '書き換えた行' })
+    assert(
+      vim.wait(500, function()
+        return (bars()[2] or {}).hl == 'ChatoraTelomereLocal'
+      end),
+      'expected an edited line to be drawn as the reader\'s own, got '
+        .. vim.inspect(bars()[2])
+    )
+    assert(bars()[4].hl == 'ChatoraTelomereUnread', 'an untouched line keeps its history')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- sidebar polling: a refetched first batch replaces the head and pulls an
   -- edited page up out of the tail, without duplicating it or dropping the
   -- rest of what infinite scroll already loaded.

@@ -104,6 +104,8 @@ local function apply(bufnr, text)
     pcall(vim.api.nvim_win_set_cursor, winid, { math.min(cursor[1], #lines), cursor[2] })
   end
   require('chatora.images').invalidate(bufnr)
+  -- The merge moved lines the reader never touched: the telomere is what says which ones.
+  require('chatora.telomere').refresh(bufnr)
 end
 
 --- Show the merge a refused save came back with. The buffer keeps its modified flag: this

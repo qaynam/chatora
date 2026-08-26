@@ -684,6 +684,76 @@ const BEFORE = [
   { id: 'l2', text: 'alpha' },
 ]
 
+describe('telomere', () => {
+  const LINES = [
+    { id: 'l1', text: 'Page', updated: 1000, userId: 'u1' },
+    { id: 'l2', text: 'alpha', updated: 2000, userId: 'u2' },
+  ]
+  const page = (accessed: number) =>
+    json({
+      id: 'pg1',
+      title: 'Page',
+      commitId: 'c1',
+      persistent: true,
+      lines: LINES,
+      accessed,
+    })
+
+  test('each line answers with its own history, and the page with the visit before this one', async () => {
+    const { layer: httpLayer } = testHttpClient(() => page(1500))
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      return yield* handlers.telomere({ uri: 'cosense://proj/Page', lines: ['Page', 'alpha'] })
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toEqual({
+      ok: true,
+      accessed: 1500,
+      lines: [
+        { updated: 1000, userId: 'u1' },
+        { updated: 2000, userId: 'u2' },
+      ],
+    })
+  })
+
+  test('a line the buffer has edited has no history of its own yet', async () => {
+    const { layer: httpLayer } = testHttpClient(() => page(0))
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      return yield* handlers.telomere({
+        uri: 'cosense://proj/Page',
+        lines: ['Page', 'alpha edited', 'brand new'],
+      })
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toMatchObject({
+      ok: true,
+      lines: [{ updated: 1000 }, { updated: 0, userId: '' }, { updated: 0, userId: '' }],
+    })
+  })
+
+  test('the visit survives a sync, so a line stays unread until the reader comes back', async () => {
+    let accessed = 1500
+    const { layer: httpLayer } = testHttpClient(() => page(accessed))
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      // Opening reported the visit to Cosense, so every later fetch carries the new one.
+      accessed = 9999
+      yield* handlers.syncPage('cosense://proj/Page', 'Page\nalpha\n')
+      return yield* handlers.telomere({ uri: 'cosense://proj/Page', lines: ['Page', 'alpha'] })
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toMatchObject({ accessed: 1500 })
+  })
+
+  test('a page that was never opened is an error, not an empty telomere', async () => {
+    const { layer: httpLayer } = testHttpClient(() => page(0))
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = handlers.telomere({ uri: 'cosense://proj/Missing', lines: ['x'] })
+    expect(await runOnce(program, httpLayer, credLayer)).toMatchObject({ ok: false })
+  })
+})
+
 describe('savePage conflict recovery', () => {
   test('a remote edit elsewhere is merged in and the save goes through', async () => {
     const after = [...BEFORE, { id: 'l3', text: 'theirs' }]

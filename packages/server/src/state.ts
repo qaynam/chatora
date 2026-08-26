@@ -21,6 +21,12 @@ export interface BasePageState {
   readonly commitId?: string
   readonly baseLines: readonly PageDetailLine[]
   readonly exists: boolean
+  /**
+   * Unix seconds of the visit before this one — the line the read/unread split is drawn at,
+   * so it is captured when the page is opened and carried unchanged through every refetch.
+   * Taking it from a later response would move it to now and call everything read.
+   */
+  readonly accessed?: number
 }
 
 // Long enough that starting Neovim does not re-download a whole project's titles, and

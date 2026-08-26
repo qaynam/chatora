@@ -136,6 +136,25 @@ export const buildSegments = (
 }
 
 /**
+ * For each line of `next`, the base line it is a copy of, or `undefined` where the edit
+ * introduced it.
+ *
+ * Matching is by text, through the same LCS the save diff walks, so an edited line counts
+ * as introduced: whatever the base line says about itself — who wrote it, when — stopped
+ * being true of the text now sitting there.
+ */
+export const alignLines = <T extends BaseLine>(
+  base: readonly T[],
+  next: readonly string[],
+): readonly (T | undefined)[] => {
+  const aligned = new Array<T | undefined>(next.length).fill(undefined)
+  for (const op of buildOps(base, next)) {
+    if (op.kind === 'match') aligned[op.nextIndex] = base[op.baseIndex]
+  }
+  return aligned
+}
+
+/**
  * Line-level diff producing page-edit-for-ai RawChange ops (see docs/ARCHITECTURE.md and
  * cosense-cli src/commands/previewEdit.ts).
  */

@@ -84,9 +84,13 @@ export const PageSummarySchema = Schema.Struct({
   pin: optionalNumber,
 })
 
+// Every line carries its own authorship and mtime, which is what Cosense's telomere is
+// drawn from: how recently the line changed, and whether it changed since your last visit.
 export const PageDetailLineSchema = Schema.Struct({
   id: optionalString,
   text: optionalString,
+  updated: optionalNumber,
+  userId: optionalString,
 })
 
 export const RelatedPageSchema = Schema.Struct({

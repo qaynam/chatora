@@ -48,6 +48,8 @@ local defaults = {
 
   pads = true,
   quote = true,
+  -- Per-line update bars in the sign column (Cosense's テロメア).
+  telomere = true,
   -- true conceals markup and reveals it on the cursor line. A string is passed to
   -- 'concealcursor' instead: 'nc' keeps it concealed while reading, which also keeps an
   -- inline image drawn on the line the cursor is on.

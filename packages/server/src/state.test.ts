@@ -300,7 +300,7 @@ describe('SessionState page state', () => {
     const base = {
       project: 'proj',
       title: 'Page',
-      baseLines: [{ id: 'l1', text: 'Page' }],
+      baseLines: [{ id: 'l1', text: 'Page', updated: 1700000000, userId: 'u1' }],
       exists: true,
       pageId: 'pg1',
       commitId: 'c1',

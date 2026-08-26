@@ -217,6 +217,10 @@ decoration ノードのフラグが全部 false のとき、ソース上 `positi
 'chatora/syncPage'    { uri }                     → { ok, changed, text, conflicts: MergeConflict[], meta? }
    // ポーリングと <leader>cf の実体。openPage と違い上書きではなくマージで、バッファの未保存分は
    // 残したまま base を取得結果に張り替える。changed=false ならバッファは既にマージ結果と同一
+'chatora/telomere'    { uri, lines: string[] }    → { ok, accessed, lines: { updated, userId }[] }
+   // 行ごとの更新時刻（テロメア）。バッファの行を渡すのは、保存やマージ直後に呼ばれるため
+   // didChange の到着を待つ同期文書ではズレるから。base 行と一致しない行＝ローカルの未保存分で
+   // updated:0。accessed はページを開いた時点の「前回訪問」で、再取得しても動かさない
 'chatora/emptyLinks'  { uri }                     → { ok, links: { line, startChar, endChar }[] }
    // 実体のないページを指す内部リンク（Cosense の赤リンク）。プロジェクトのタイトル索引
    // （60 秒キャッシュ、補完と共用）で判定するので最大 1 分遅れる

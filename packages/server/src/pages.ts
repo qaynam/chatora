@@ -16,7 +16,13 @@ import type {
   SubmitResponse,
   TitleEntry,
 } from '@chatora/core'
-import { AccountStore, computeChanges, createNewLineId, mergeThreeWay } from '@chatora/core'
+import {
+  AccountStore,
+  alignLines,
+  computeChanges,
+  createNewLineId,
+  mergeThreeWay,
+} from '@chatora/core'
 import { Effect, Either, Option } from 'effect'
 import { type ConcealRange, computeConcealRanges } from './decorations'
 import { textToLines } from './lines'
@@ -496,6 +502,8 @@ export const openPage = (params: {
           commitId: page.commitId,
           baseLines: page.lines,
           exists: true,
+          // Read before markAccessed lands, so it is still the *previous* visit.
+          accessed: page.accessed,
         })
         return {
           ok: true as const,
@@ -590,6 +598,7 @@ export const syncPage = (
         commitId: page.commitId,
         baseLines: page.lines,
         exists: true,
+        ...(base.accessed === undefined ? {} : { accessed: base.accessed }),
       })
 
       const text = merged.join('\n')
@@ -677,6 +686,58 @@ export const lineRow = (
     const row = page.value.lines.findIndex((line) => line.id === lineId)
     return row < 0 ? 0 : row
   })
+
+// ---------------------------------------------------------------------------
+// telomere
+// ---------------------------------------------------------------------------
+
+export interface TelomereLine {
+  /** Unix seconds the server last wrote this line; 0 for a line it has never seen. */
+  readonly updated: number
+  /** Cosense id of whoever wrote it; '' when unknown. */
+  readonly userId: string
+}
+
+export interface TelomereResult {
+  readonly ok: true
+  /**
+   * The visit the read/unread split is drawn at: a line updated after it has changed since
+   * the reader last looked. 0 when the page has never been visited, which makes all of it
+   * unread — the same answer Cosense's own grid gives.
+   */
+  readonly accessed: number
+  /** One entry per line handed in, in order. */
+  readonly lines: readonly TelomereLine[]
+}
+
+/**
+ * Per-line history for the lines a buffer currently holds — Cosense's テロメア.
+ *
+ * The caller sends its own lines rather than leaving the server to read the synced
+ * document, because this is asked for right after the client has replaced the buffer
+ * (a save, a merge) and the answer has to describe the text on screen, not whatever
+ * `textDocument/didChange` has caught up to.
+ *
+ * A line the buffer has edited matches no base line and so has no history: it is the
+ * reader's own unsaved text, which the client draws as the newest thing on the page.
+ */
+export const telomere = (params: {
+  readonly uri: string
+  readonly lines: readonly string[]
+}): Effect.Effect<TelomereResult | ErrEnvelope, never, SessionState> =>
+  handle(
+    Effect.gen(function* () {
+      const session = yield* SessionState
+      const baseOpt = yield* session.getPage(params.uri)
+      if (Option.isNone(baseOpt)) return err('error', 'page state not found; reopen the page')
+      const base = baseOpt.value
+      const lines = alignLines(base.baseLines, params.lines).map((line) => ({
+        updated: line?.updated ?? 0,
+        userId: line?.userId ?? '',
+      }))
+      return { ok: true as const, accessed: base.accessed ?? 0, lines }
+    }),
+  )
 
 // ---------------------------------------------------------------------------
 // deletePage
@@ -914,6 +975,7 @@ export const savePage = (
         },
       })
 
+      const visit = base.accessed === undefined ? {} : { accessed: base.accessed }
       const newBase: BasePageState = Option.match(refetchedOpt, {
         onSome: (refetched): BasePageState => ({
           project: base.project,
@@ -922,6 +984,7 @@ export const savePage = (
           exists: true,
           pageId: refetched.id,
           commitId: refetched.commitId,
+          ...visit,
         }),
         onNone: (): BasePageState => ({
           project: base.project,
@@ -930,6 +993,7 @@ export const savePage = (
           exists: true,
           ...(base.pageId !== undefined ? { pageId: base.pageId } : {}),
           commitId: submit.commitId,
+          ...visit,
         }),
       })
 
