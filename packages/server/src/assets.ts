@@ -401,10 +401,9 @@ const rasterizeSvg = (
 /**
  * The first frame of a GIF, as a PNG.
  *
- * A terminal graphics protocol composites stills, and neither render backend animates; what
- * an animated GIF costs instead is that ImageMagick writes *one file per frame* unless a
- * frame is named, so converting `a.gif` yields `a-0.png`, `a-1.png`… and the path the
- * backend was told to draw never appears. Naming frame 0 is what makes the picture arrive.
+ * A terminal graphics protocol composites stills, and neither render backend animates. The
+ * catch is that ImageMagick writes *one file per frame* unless a frame is named: converting
+ * `a.gif` yields `a-0.png`, `a-1.png`… and never the path it was handed, so frame 0 is named.
  *
  * Cached under a `g`-prefixed name, for the same reason the rasterized SVG is: it must never
  * be picked up by the plain `findCached(hash)` lookup for the `.gif` itself.

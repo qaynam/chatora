@@ -25,11 +25,8 @@ function M.url_at(line, col)
   end
 end
 
---- Hand `url` to whatever `video` names, and say whether it took it.
----
---- A function decides for itself (returning false to pass); a command is run detached, its
---- `{url}` placeholder filled in. Anything else — the default `false` included — is a page
---- for the browser like any other.
+--- Hand `url` to whatever `video` names, and say whether it took it. A function declines by
+--- returning false, and so does anything naming no player — the default included.
 local function play(url)
   local player = config.options.video
   if type(player) == 'function' then
@@ -125,7 +122,6 @@ function M.goto_definition()
       return
     end
     if result.url then
-      -- A capture that moves is worth more than its still: play it if the reader said how.
       if result.play and play(result.play) then
         return
       end

@@ -96,7 +96,6 @@ local function ensure_bar(win, height)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = 'wipe'
   vim.bo[buf].filetype = 'chatora_scrollbar'
-  -- Never focused and never in the way: it is a picture of the page, not a place to be.
   local ok, float = pcall(vim.api.nvim_open_win, buf, false, {
     focusable = false,
     style = 'minimal',
@@ -166,7 +165,6 @@ local function mark_rows(marks, total, height)
   return kinds
 end
 
---- Draw the bar for one window showing `bufnr`.
 local function render(win, bufnr)
   local total = vim.api.nvim_buf_line_count(bufnr)
   local info = vim.fn.getwininfo(win)[1]
@@ -230,7 +228,7 @@ function M.refresh(bufnr)
   end
 end
 
---- The line that bar row `row` (0-based) stands for. The inverse of where `bar_rows` puts a
+--- The line that bar row `row` (0-based) stands for. The inverse of where `mark_rows` puts a
 --- mark, so following one lands on the change it points at.
 function M.line_at(row, total, height)
   return math.max(1, math.min(total, math.floor(row / height * total) + 1))

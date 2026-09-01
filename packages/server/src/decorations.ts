@@ -15,10 +15,7 @@ export interface ConcealRange {
   endChar: number
   /** Set on the opening marker of a user-defined notation; the client replaces the range with that notation's icon. */
   notation?: string
-  /**
-   * Set on the opening bracket of a link to a file kept in the project. The client draws its
-   * own icon there — the bracket is hidden either way, so this costs the line no width.
-   */
+  /** Set on the opening bracket of a link to a file kept in the project; the client badges it. */
   kind?: 'file'
 }
 

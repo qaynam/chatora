@@ -1,5 +1,6 @@
--- Inline image rendering, over 3rd/image.nvim or snacks.nvim (both need a
--- Kitty-graphics terminal). A no-op when neither is usable.
+-- Inline image rendering, over 3rd/image.nvim, snacks.nvim, or a backend the reader wrote
+-- themselves (`image_backend`). Which terminal graphics protocol the pixels travel in is the
+-- backend's business, not chatora's. A no-op when none of them is usable.
 --
 -- What to draw comes from `chatora/images`; where the bytes come from is
 -- `chatora/fetchAsset`, which attaches session credentials for same-origin
@@ -111,9 +112,9 @@ end
 --
 --   place(bufnr, path, geom, opts) -> { close = fn, ok = fn? } | nil
 --
--- `close()` takes the picture down. `ok()` answers whether it is actually on screen: true
+-- `close()` takes the picture down. `ok()` answers whether it reached the screen: true
 -- drawn, false failed for good, nil "cannot say" (which is also what a backend without one
--- says) — it is what the retry above the placement acts on. `path` is always a local file.
+-- says); a false is what draws it again. `path` is always a local file.
 -- `geom` carries the notation's position in both coordinate systems the two
 -- backends disagree about: `row` (1-based), `byte_col`/`byte_end` (0-based byte
 -- offsets into the line) and `screen_col` (display cells, which is what the

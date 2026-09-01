@@ -11,9 +11,8 @@ local M = {}
 --- something was written.
 function M.set(bufnr, lines)
   local current = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  -- An empty buffer is not a document to patch. Its single empty line would pair up with
-  -- the trailing one the page text ends in, and the whole page would be written *above* it
-  -- — leaving the cursor on the blank line the load pushed to the bottom.
+  -- An empty buffer is not a document to patch: its one empty line would pair up with the
+  -- trailing one the page text ends in, leaving the whole page written above the cursor.
   if #current == 1 and current[1] == '' then
     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
     return #lines > 1 or lines[1] ~= ''

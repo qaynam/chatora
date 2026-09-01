@@ -33,10 +33,8 @@ local defaults = {
   sync = { interval = 30, on_focus = true, notify = true },
   completion = 'auto',
   external_link = 'confirm',
-  -- `gd` on a Gyazo capture that moves. A function is handed the playable URL (its own
-  -- `.mp4` where Gyazo has one, else the player page) and returns true when it took it; a
-  -- string or list is run as a command, with '{url}' replaced. false leaves it to the
-  -- browser, like any other link.
+  -- Where `gd` goes on a Gyazo capture that moves: a function handed the playable URL, a
+  -- command with `{url}` filled in, or false to leave it to the browser. See README.
   video = false,
   keymaps = true,
   -- Visual-mode decoration keys: `*` wraps the selection in [* ], `[` in [ ], and so on.

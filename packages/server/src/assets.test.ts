@@ -179,7 +179,6 @@ describe('fetchAsset', () => {
     if (!result.ok) return
     expect(result.path.endsWith('.png')).toBe(true)
     expect(await Bun.file(result.path).exists()).toBe(true)
-    // One frame's worth of pixels, and its size measured off the file the client will draw.
     expect(result.width).toBe(8)
     expect(result.height).toBe(8)
   })
