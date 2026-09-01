@@ -40,6 +40,23 @@ local ok, err = pcall(function()
     assert(p == nil and t == nil, 'a titleless URI must not parse as a page')
   end
 
+  -- A page named `next.js` is a page, not JavaScript: whatever asks about the buffer's
+  -- name — `:filetype detect`, or a plugin calling vim.filetype.match — has to say so, or
+  -- another language server attaches to the page and starts linting it.
+  do
+    local page = vim.filetype.match({ filename = 'cosense://proj/next.js' })
+    assert(page == 'cosense', 'a page whose title ends in .js is still cosense, got ' .. tostring(page))
+    assert(vim.filetype.match({ filename = 'next.js' }) == 'javascript', 'ordinary files still detect as themselves')
+
+    vim.cmd('new')
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_name(buf, 'cosense://proj/next.js')
+    vim.cmd('filetype detect')
+    assert(vim.bo[buf].filetype == 'cosense', 'detection must not take the page for JavaScript')
+    vim.cmd('close')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   local project, title = uri.parse(formatted)
   assert(project == 'myproject', 'parse() project mismatch: ' .. tostring(project))
   assert(title == tricky_title, 'parse() title mismatch: ' .. tostring(title))

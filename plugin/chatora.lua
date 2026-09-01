@@ -5,6 +5,15 @@ if vim.g.loaded_chatora then
 end
 vim.g.loaded_chatora = true
 
+-- A page title is not a file name, but Neovim reads the end of one the same way: a page
+-- called `next.js` matches the `*.js` rule, and everything that keys off filetype — another
+-- language server attaching, treesitter, format-on-save — then takes the page for
+-- JavaScript. `chatora/page` sets the filetype itself when it loads a page, which settles
+-- the buffer but not the question: a plugin asking `vim.filetype.match`, or anything that
+-- runs `:filetype detect`, still gets an answer from the name alone. A pattern outranks an
+-- extension, so this is what makes that answer `cosense` too.
+vim.filetype.add({ pattern = { ['cosense://.*'] = 'cosense' } })
+
 local subcommands = { 'open', 'toggle', 'new', 'search', 'related', 'project', 'account', 'logout', 'log', 'reload', 'help' }
 
 vim.api.nvim_create_user_command('Chatora', function(opts)
