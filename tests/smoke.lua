@@ -1278,77 +1278,116 @@ local ok, err = pcall(function()
     lsp.ensure_start, lsp.request_ok = orig_start, orig_ok
   end
 
-  -- telomere scrollbar: the changed lines' place in the whole page, marked down the right
-  -- edge — and ]u / [u stepping through them.
+  -- telomere scrollbar: a minimap of the whole page down the right edge — the changes
+  -- wherever they are, a handle sized like a scrollbar's, and ]u / [u stepping through them.
   do
     local telomere = require('chatora.telomere')
     local scrollbar = require('chatora.scrollbar')
     local lsp = require('chatora.lsp')
     local orig_ok = lsp.request_ok
     local now = os.time()
-    local changed = { [3] = true, [7] = true, [22] = true, [38] = true }
+    local TOTAL = 200
+    local changed = { [3] = true, [70] = true, [140] = true, [199] = true }
     lsp.request_ok = function(method, _, cb)
       if method ~= 'chatora/telomere' then
         return
       end
       local lines = {}
-      for i = 1, 40 do
+      for i = 1, TOTAL do
         lines[i] = { updated = changed[i] and now - 60 or now - 400 * 86400, userId = 'u1' }
       end
       cb({ ok = true, accessed = now - 3600, lines = lines })
     end
 
-    local buf = vim.api.nvim_create_buf(false, true)
+    vim.cmd('new')
+    local buf = vim.api.nvim_get_current_buf()
     local text = {}
-    for i = 1, 40 do
-      text[i] = ('%02d 行目'):format(i)
+    for i = 1, TOTAL do
+      text[i] = ('%03d 行'):format(i)
     end
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, text)
-    vim.api.nvim_win_set_buf(0, buf)
     telomere.attach(buf)
+    scrollbar.attach(buf)
     lsp.request_ok = orig_ok
 
     local rows = {}
     for _, mark in ipairs(telomere.rows(buf)) do
       rows[#rows + 1] = mark.row
     end
-    assert(vim.deep_equal(rows, { 3, 7, 22, 38 }), 'changed rows: ' .. vim.inspect(rows))
+    assert(vim.deep_equal(rows, { 3, 70, 140, 199 }), 'changed rows: ' .. vim.inspect(rows))
 
-    -- One mark per changed line, placed by its share of the page rather than by where the
-    -- line happens to be: every one of the four is on the bar, though only some are on
-    -- screen. The handle under them says which part of the page is in front of the reader.
-    local marks = vim.api.nvim_buf_get_extmarks(buf, scrollbar.ns, 0, -1, { details = true })
-    local height = vim.api.nvim_win_get_height(0)
-    local by_hl = {}
-    for _, mark in ipairs(marks) do
-      assert(mark[4].virt_text_pos == 'right_align', 'scrollbar marks live at the window edge')
-      assert(mark[2] < height, 'a mark drawn below the fold cannot be seen: row ' .. mark[2])
-      local hl = mark[4].virt_text[1][2]
-      by_hl[hl] = (by_hl[hl] or 0) + 1
+    --- The bar's own window, and what it has drawn: `handle` rows and `mark` rows.
+    local function bar()
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(win).relative ~= '' then
+          local fbuf = vim.api.nvim_win_get_buf(win)
+          local handle, marks = {}, {}
+          for _, m in ipairs(vim.api.nvim_buf_get_extmarks(fbuf, scrollbar.ns, 0, -1, { details = true })) do
+            table.insert(m[4].line_hl_group and handle or marks, m[2])
+          end
+          table.sort(handle)
+          table.sort(marks)
+          return { win = win, handle = handle, marks = marks }
+        end
+      end
+      return nil
     end
-    assert(by_hl.ChatoraTelomereUnread == 4, 'expected 4 change marks, got ' .. vim.inspect(by_hl))
-    assert((by_hl.ChatoraScrollbarHandle or 0) > 0, 'expected a handle, got ' .. vim.inspect(by_hl))
+
+    local function scroll_to(line)
+      vim.api.nvim_win_set_cursor(0, { line, 0 })
+      vim.cmd('normal! zt')
+      scrollbar.refresh(buf)
+      return bar()
+    end
+
+    local height = vim.api.nvim_win_get_height(0)
+    local top = scroll_to(1)
+    assert(top, 'a page taller than the window gets a bar')
+    -- Every change is on the bar wherever it is in the page: this is the whole point, and
+    -- line 199 is nowhere near the screen at the top of a 200-line page.
+    local expected = {}
+    for _, line in ipairs({ 3, 70, 140, 199 }) do
+      local row = math.floor((line - 1) / TOTAL * height)
+      if not vim.tbl_contains(expected, row) then
+        expected[#expected + 1] = row
+      end
+    end
+    table.sort(expected)
+    assert(vim.deep_equal(top.marks, expected), 'marks: ' .. vim.inspect(top.marks) .. ' want ' .. vim.inspect(expected))
+
+    -- The handle is sized by the share of the page on screen and keeps that size wherever
+    -- it slides to, the way a browser's does.
+    local size = #top.handle
+    assert(size >= 1, 'the handle is at least a row')
+    local bottom = scroll_to(TOTAL)
+    assert(#bottom.handle == size, 'the handle must not change size while scrolling')
+    assert(vim.deep_equal(bottom.marks, expected), 'the marks must not move while scrolling')
+    assert(bottom.handle[1] > top.handle[1], 'the handle slides down as the page does')
+    assert(bottom.handle[#bottom.handle] == height - 1, 'the end of the page puts it at the bottom')
+
+    -- Following the bar: the row a mark sits on leads back to the line it stands for.
+    assert(scrollbar.line_at(expected[1], TOTAL, height) <= 3, 'the first mark leads to the top')
+    local last_line = scrollbar.line_at(expected[#expected], TOTAL, height)
+    assert(last_line > TOTAL - TOTAL / height - 1, 'the last mark leads near the end, got ' .. last_line)
 
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
     telomere.jump(1)
     assert(vim.api.nvim_win_get_cursor(0)[1] == 3, ']u must land on the first changed line')
     telomere.jump(1)
-    assert(vim.api.nvim_win_get_cursor(0)[1] == 7, ']u must step to the next one')
+    assert(vim.api.nvim_win_get_cursor(0)[1] == 70, ']u must step to the next one')
     telomere.jump(-1)
     assert(vim.api.nvim_win_get_cursor(0)[1] == 3, '[u must step back')
     telomere.jump(-1)
     -- Nothing changed above line 3, so stepping back again wraps to the last one.
-    assert(vim.api.nvim_win_get_cursor(0)[1] == 38, '[u must wrap at the top')
+    assert(vim.api.nvim_win_get_cursor(0)[1] == 199, '[u must wrap at the top')
 
     -- A page that fits on screen has nothing to scroll to: no bar at all, and the gutter
     -- speaks for every line it has.
     vim.api.nvim_buf_set_lines(buf, 5, -1, false, {})
     scrollbar.refresh(buf)
-    assert(
-      #vim.api.nvim_buf_get_extmarks(buf, scrollbar.ns, 0, -1, {}) == 0,
-      'a page that fits needs no scrollbar'
-    )
+    assert(bar() == nil, 'a page that fits needs no scrollbar')
 
+    vim.cmd('close')
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
