@@ -212,9 +212,13 @@ end
 --- The active render backend per config.image_backend, or nil when none is usable.
 ---
 --- `'auto'` prefers image.nvim and falls back to snacks; a name picks one of them outright.
---- A table (or a function returning one — which is how a backend that is not loaded yet gets
---- a chance to exist) is a backend of the reader's own: whatever satisfies the contract
---- above draws, which is the way out for a terminal neither plugin will speak to.
+--- A table is a backend of the reader's own: whatever satisfies the contract above draws,
+--- which is the way out for a terminal neither plugin will speak to.
+---
+--- A function is asked at draw time and may answer with either — a name or a backend. Which
+--- protocol a terminal takes is not something chatora can know (image.nvim is set up with
+--- one for good, and a picture drawn in the wrong one is silence), so choosing per terminal
+--- has to be something the reader can express.
 function M.backend()
   local pref = config.options.image_backend
   if type(pref) == 'function' then

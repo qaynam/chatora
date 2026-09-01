@@ -579,10 +579,30 @@ image_backend = 'image_nvim'  -- 固定
 image_backend = 'snacks'
 ```
 
+**端末ごとに変えたいとき**は関数を渡す。描画のたびに呼ばれ、名前を返しても、後述のバックエンド
+そのものを返してもよい。
+
+```lua
+-- kitty プロトコルが通る端末では snacks、通らない VS Code では sixel に設定した image.nvim
+image_backend = function()
+  return vim.env.TERM_PROGRAM == 'vscode' and 'image_nvim' or 'snacks'
+end
+```
+
+どのプロトコルで送るかは image.nvim / snacks の設定であって chatora からは見えない。image.nvim を
+`backend = 'sixel'` にすると **その nvim では常に sixel** になるので、`'auto'`（image.nvim 優先）の
+ままだと kitty しか解さない端末（Ghostty など。Ghostty は sixel デコーダを持たない）で何も出なく
+なる。両方の端末を行き来するなら上の形にする。
+
 ```lua
 -- 端末が sixel しか受けないなら image.nvim 側で指定する（chatora の設定ではない）
 require('image').setup({ backend = 'sixel', processor = 'magick_cli' })
 ```
+
+| 端末 | 通るプロトコル | 使うもの |
+|---|---|---|
+| kitty / Ghostty / WezTerm | kitty graphics | snacks か image.nvim（`backend = 'kitty'`） |
+| VS Code 統合ターミナル | sixel・iTerm IIP（kitty は実装途中） | image.nvim（`backend = 'sixel'`） |
 
 どちらのプラグインも「この端末はグラフィックスに対応しているか」を環境変数で判定するので、
 VS Code の統合ターミナルのように判定から漏れる端末では描画をやめてしまう。VS Code 側は

@@ -1128,6 +1128,18 @@ local ok, err = pcall(function()
     end
     assert(images.backend() == mine, 'a function is asked for one')
 
+    -- A function may answer with a name instead, which is how a reader picks per terminal:
+    -- the protocol a terminal takes is not chatora's to know.
+    config.options.image_backend = function()
+      return 'snacks'
+    end
+    local named = images.backend()
+    config.options.image_backend = 'snacks'
+    assert(
+      (named == nil) == (images.backend() == nil),
+      'a name from a function must resolve like the name itself'
+    )
+
     -- No place() to call: chatora says so once and carries on with what it can find, which
     -- in a headless test is nothing at all.
     config.options.image_backend = { close = function() end }
