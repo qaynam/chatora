@@ -1107,6 +1107,19 @@ local ok, err = pcall(function()
     )
 
     assert(not buftext.set(buf, vim.api.nvim_buf_get_lines(buf, 0, -1, false)), 'identical text writes nothing')
+
+    -- Loading a page into the buffer it was opened in: the text arrives whole and the
+    -- cursor stays at the top, rather than riding a blank line to the bottom.
+    vim.cmd('new')
+    local fresh = vim.api.nvim_get_current_buf()
+    buftext.set(fresh, { 'タイトル', '一行目', '二行目', '' })
+    assert(vim.api.nvim_win_get_cursor(0)[1] == 1, 'a load must leave the cursor on line 1')
+    assert(
+      vim.deep_equal(vim.api.nvim_buf_get_lines(fresh, 0, -1, false), { 'タイトル', '一行目', '二行目', '' }),
+      'and the buffer holding exactly the page'
+    )
+    vim.cmd('close')
+    vim.api.nvim_buf_delete(fresh, { force = true })
     assert(buftext.set(buf, { 'タイトル' }), 'a shorter document is written')
     assert(#vim.api.nvim_buf_get_lines(buf, 0, -1, false) == 1, 'and ends up short')
     vim.api.nvim_buf_delete(buf, { force = true })
