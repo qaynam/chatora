@@ -1112,6 +1112,31 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- image_backend: a backend of the reader's own is what draws, in table or function form,
+  -- and a broken one says so instead of leaving the page blank.
+  do
+    local images = require('chatora.images')
+    local config = require('chatora.config')
+    local orig_backend = config.options.image_backend
+
+    local mine = { place = function() end }
+    config.options.image_backend = mine
+    assert(images.backend() == mine, 'a table with place() is the backend')
+
+    config.options.image_backend = function()
+      return mine
+    end
+    assert(images.backend() == mine, 'a function is asked for one')
+
+    -- No place() to call: chatora says so once and carries on with what it can find, which
+    -- in a headless test is nothing at all.
+    config.options.image_backend = { close = function() end }
+    local fell_back = images.backend()
+    assert(fell_back ~= mine, 'a table without place() is not used')
+
+    config.options.image_backend = orig_backend
+  end
+
   -- images: a page that changes one line keeps the pictures that did not move, redraws the
   -- one that did, and tries again when the backend accepted a placement that never arrived.
   do

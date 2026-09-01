@@ -226,7 +226,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | オプション | 既定 | 意味 |
 |---|---|---|
 | `images` | `'auto'` | 描画バックエンドが使えるときだけ描く。`false` で無効 |
-| `image_backend` | `'auto'` | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック |
+| `image_backend` | `'auto'` | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック。`'image_nvim'` / `'snacks'` で固定、テーブル（か、それを返す関数）で自前。[下記](#描画バックエンドを差し替える) |
 | `image_height` | `20` | 単独行の画像の高さ（行数）。文中のインライン画像は常に 1 行 |
 | `image_height_large` | `image_height * 2` | `[[…]]`（大きい記法）の高さ。画像とアイコンの両方に効く |
 | `image_gallery` | `true` | 画像だけの行を大きく描く。[下記](#画像だけの行) |
@@ -567,6 +567,56 @@ Gyazo の URL は Cosense と同じく `/api/oembed-proxy/gyazo` で解決する
 | `image_gallery = true`（既定） | ❌ 縦に積む | ✅ |
 
 積むときは各画像を行のインデントに揃えるので、階段状にならず一列になる。
+
+### 描画バックエンドを差し替える
+
+どのプロトコル（kitty / sixel / iTerm）で送るかは image.nvim や snacks.nvim 側の設定で、
+chatora はそのどちらを使うかを選ぶだけ。
+
+```lua
+image_backend = 'auto'        -- 既定。image.nvim があればそれ、無ければ snacks
+image_backend = 'image_nvim'  -- 固定
+image_backend = 'snacks'
+```
+
+```lua
+-- 端末が sixel しか受けないなら image.nvim 側で指定する（chatora の設定ではない）
+require('image').setup({ backend = 'sixel', processor = 'magick_cli' })
+```
+
+どちらのプラグインも「この端末はグラフィックスに対応しているか」を環境変数で判定するので、
+VS Code の統合ターミナルのように判定から漏れる端末では描画をやめてしまう。VS Code 側は
+`terminal.integrated.enableImages`（要 GPU アクセラレーション）で kitty / sixel / iTerm の
+いずれも受けるので、判定のほうを外す:
+
+```lua
+{ 'folke/snacks.nvim', opts = { image = { force = true } } }  -- 判定を無視して送る
+```
+
+それでも合わないときは、自分で描くものを渡せる。テーブル（読み込み順の都合があるなら、それを
+返す関数）で `place` を実装する:
+
+```lua
+image_backend = {
+  --- bufnr の (row, col) に path の画像を置き、閉じ方を返す。描けなければ nil。
+  --- geom = { row(1始まり), byte_col, byte_end, screen_col, indent_col, indent_screen_col,
+  ---          align_indent }、opts = { height | max_height, max_width }。
+  --- path は必ずローカルファイル（取得とキャッシュは chatora 側で済んでいる）。
+  place = function(bufnr, path, geom, opts)
+    local handle = my_renderer.draw(bufnr, path, geom.row, geom.screen_col, opts)
+    if not handle then
+      return nil
+    end
+    return {
+      close = function() handle:clear() end,
+      -- 省略可。true=描けている / false=描けなかった（chatora が描き直す） / nil=不明
+      ok = function() return handle:visible() end,
+    }
+  end,
+}
+```
+
+`place` の無いテーブルを渡した場合は一度だけ警告して既定のバックエンドに戻る。
 
 ### 画像の貼り付け
 

@@ -45,6 +45,8 @@ local defaults = {
   log = false,
 
   images = 'auto',
+  -- 'auto' (image.nvim, else snacks), 'image_nvim', 'snacks', or a backend of your own:
+  -- a table with `place` (or a function returning one). See README.
   image_backend = 'auto',
   image_height = 20,
   image_height_large = nil,

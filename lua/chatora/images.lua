@@ -107,10 +107,13 @@ local function snacks_image()
   return snacks.image
 end
 
--- Backend contract: place(bufnr, path, geom, opts) -> { close = fn, ok = fn? } | nil.
--- `ok()` answers whether the picture is actually on screen: true drawn, false failed for
--- good, nil "cannot say" (which is also what a backend without one says). It is what the
--- retry above the placement acts on.
+-- Backend contract, which `image_backend` lets a reader implement themselves:
+--
+--   place(bufnr, path, geom, opts) -> { close = fn, ok = fn? } | nil
+--
+-- `close()` takes the picture down. `ok()` answers whether it is actually on screen: true
+-- drawn, false failed for good, nil "cannot say" (which is also what a backend without one
+-- says) — it is what the retry above the placement acts on. `path` is always a local file.
 -- `geom` carries the notation's position in both coordinate systems the two
 -- backends disagree about: `row` (1-based), `byte_col`/`byte_end` (0-based byte
 -- offsets into the line) and `screen_col` (display cells, which is what the
@@ -206,11 +209,28 @@ local function snacks_backend()
   }
 end
 
---- The active render backend per config.image_backend ('auto' prefers image.nvim), or nil
---- when none is usable. Whatever this returns is what draws, so replacing it replaces the
---- backend.
+--- The active render backend per config.image_backend, or nil when none is usable.
+---
+--- `'auto'` prefers image.nvim and falls back to snacks; a name picks one of them outright.
+--- A table (or a function returning one — which is how a backend that is not loaded yet gets
+--- a chance to exist) is a backend of the reader's own: whatever satisfies the contract
+--- above draws, which is the way out for a terminal neither plugin will speak to.
 function M.backend()
   local pref = config.options.image_backend
+  if type(pref) == 'function' then
+    local ok, built = pcall(pref)
+    pref = ok and built or nil
+    if not ok then
+      report_once('image_backend の関数が失敗しました: ' .. tostring(built))
+    end
+  end
+  if type(pref) == 'table' then
+    if type(pref.place) == 'function' then
+      return pref
+    end
+    report_once('image_backend に place 関数がありません。既定のバックエンドを使います')
+    pref = 'auto'
+  end
   if pref == 'snacks' then
     return snacks_backend()
   end
