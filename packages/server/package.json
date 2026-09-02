@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsdown",
+    "build": "bunx --bun tsdown",
     "typecheck": "tsc -p tsconfig.json",
     "test": "bun test",
     "smoke": "node scripts/smoke.mjs"
