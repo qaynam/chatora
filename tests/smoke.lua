@@ -99,12 +99,16 @@ local ok, err = pcall(function()
         ['='] = { name = 'boxed', hl = { link = 'WarningMsg' } },
         ['@'] = { name = 'bad_icon', icon = 'ab', hl = {} },
         ['??'] = { name = 'bad', hl = {} },
+        -- One glyph, two codepoints: U+25B6 and a variation selector. Counting codepoints
+        -- rejects it, and Neovim conceals it perfectly well.
+        ['>'] = { name = 'point', icon = '▶️' },
       },
     })
 
     local notations = require('chatora.config').options.notations
     assert(notations['??'] == nil, 'expected the 2-char marker entry to be dropped')
     assert(notations['|'].icon == '📌', 'expected the 1-char icon to be kept')
+    assert(notations['>'].icon == '▶️', 'an emoji with a variation selector is one character')
     assert(notations['@'] ~= nil, 'expected the bad-icon entry to survive')
     assert(notations['@'].icon == nil, 'expected the multi-char icon to be dropped')
     assert(notations['@'].name == 'bad_icon', 'expected name to survive a dropped icon')

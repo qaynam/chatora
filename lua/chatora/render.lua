@@ -38,10 +38,7 @@ end
 --- turned it off or asked for something a conceal cannot draw — Neovim shows one character.
 local function file_icon()
   local icon = config.options.file_icon
-  if type(icon) ~= 'string' or vim.fn.strchars(icon) ~= 1 then
-    return nil
-  end
-  return icon
+  return config.is_single_char(icon) and icon or nil
 end
 
 local function apply(bufnr, ranges)

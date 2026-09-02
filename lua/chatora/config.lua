@@ -80,6 +80,13 @@ local function file_exists(path)
   return stat ~= nil and stat.type == 'file'
 end
 
+--- Whether `value` is the one character a conceal can draw. Composing characters do not
+--- count: an emoji like `▶️` is U+25B6 followed by a variation selector, which `strchars`
+--- reports as two — and Neovim conceals it as the single glyph it looks like.
+function M.is_single_char(value)
+  return type(value) == 'string' and vim.fn.strchars(value, 1) == 1
+end
+
 -- Markers reserved by official notation ([* ], [/ ], [- ], [_ ], [$ ], [[ ]]).
 local RESERVED_MARKERS = {
   ['*'] = true,
@@ -95,7 +102,7 @@ local RESERVED_MARKERS = {
 local function validate_notations(notations)
   local out = {}
   for marker, spec in pairs(notations or {}) do
-    if type(marker) ~= 'string' or vim.fn.strchars(marker) ~= 1 then
+    if not M.is_single_char(marker) then
       vim.notify(
         '[chatora] notations: marker must be exactly one character, ignoring ' .. vim.inspect(marker),
         vim.log.levels.WARN
@@ -113,9 +120,9 @@ local function validate_notations(notations)
     else
       -- Neovim's extmark `conceal` only ever shows one character, so a
       -- multi-character icon is dropped rather than silently truncated.
-      if spec.icon ~= nil and (type(spec.icon) ~= 'string' or vim.fn.strchars(spec.icon) ~= 1) then
+      if spec.icon ~= nil and not M.is_single_char(spec.icon) then
         vim.notify(
-          '[chatora] notations: icon for marker "' .. marker .. '" must be exactly one character, ignoring',
+          '[chatora] notations: icon for marker "' .. marker .. '" must be one character, ignoring',
           vim.log.levels.WARN
         )
         spec.icon = nil
