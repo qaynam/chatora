@@ -1,0 +1,43 @@
+name: バグ報告
+description: 動かない・落ちる・表示がおかしい
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: 何が起きたか
+      description: 期待した動きと、実際の動きを書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順
+      placeholder: |
+        1. :Chatora を実行
+        2. ページを開く
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: nvim
+    attributes:
+      label: Neovim のバージョン
+      description: "`nvim --version | head -1` の出力"
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: ターミナル
+      description: Ghostty / kitty / WezTerm / VS Code の内蔵ターミナル など
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: ログ
+      description: |
+        `log = true` を設定して `:Chatora log` を開き、関係のある行を貼ってください。
+        **PAT が写っていないか確認してから貼ってください。**
+      render: text

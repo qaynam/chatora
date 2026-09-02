@@ -365,6 +365,28 @@ nvim --headless --clean -u NORC -c "luafile tests/smoke.lua"
 bun tests/e2e/run.ts     # 偽 Cosense サーバー + headless nvim
 ```
 
+## 参考にしたもの
+
+Cosense の API には公式のドキュメントがありません。挙動は次のものを読むか、実際に通信を測って
+確かめました。
+
+- [helpfeel/cosense-cli](https://github.com/helpfeel/cosense-cli) — 公式の CLI。認証ヘッダー、
+  `page-edit-for-ai` の 2 段階書き込み、タイトルのエンコード規則は、すべてここのソースが一次情報です
+- [cosense-toolbox/parser](https://www.npmjs.com/package/@cosense-toolbox/parser) — 記法のパーサー。
+  ハイライトも補完もこれが吐く AST の上に載っています
+- [Cosense](https://scrapbox.io/) 本体の web クライアント — 補完が vector 検索を叩いていることや、
+  テロメアの計算式は、実際の通信を記録して合わせました
+
+プラグインとしては次のものを参考にしています。
+
+- [3rd/image.nvim](https://github.com/3rd/image.nvim) と
+  [folke/snacks.nvim](https://github.com/folke/snacks.nvim) — 画像の描画。どちらもバックエンドとして
+  そのまま使えます
+- [petertriho/nvim-scrollbar](https://github.com/petertriho/nvim-scrollbar) — 右端のミニマップを
+  作るときに読みました
+- [folke/lazy.nvim](https://github.com/folke/lazy.nvim) — プラグインが自分の spec を配れること
+  （`lazy.lua`）を使っています
+
 ## ライセンス
 
 [MIT](LICENSE)
