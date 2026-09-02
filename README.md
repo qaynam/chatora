@@ -84,7 +84,7 @@ Linux や Windows でも、環境変数 `COSENSE_PAT` に PAT を入れておけ
 {
   'qaynam/chatora',
   version = '*',
-  build = 'bun install && bun run build',
+  build = 'sh scripts/install-server.sh',
   cmd = 'Chatora',
   -- 画像を出すなら（任意）。snacks.nvim を既に入れているなら、そちらでも描けます
   dependencies = { { '3rd/image.nvim', opts = { processor = 'magick_cli' } } },
@@ -95,16 +95,22 @@ Linux や Windows でも、環境変数 `COSENSE_PAT` に PAT を入れておけ
 }
 ```
 
-`build` は必須です。LSP サーバーのバンドルはリポジトリに含めていない（`dist/` を追跡していない）
-ため、ここでビルドしないとサーバーが起動しません。lazy.nvim はこの `build` を**インストール時と
-更新時の両方**で実行するので、Lua 側とサーバー側がズレることはありません。なお、更新されるのは
-`:Lazy update` を実行したときだけで、自動では更新されません。
+`build` は必須です。LSP サーバーはリポジトリに含めていない（`dist/` を追跡していない）ため、
+これが無いとサーバーが起動しません。
 
-リポジトリには `lazy.lua` を同梱してあり、そこにも同じ `build` が書いてあります。そのため
-lazy.nvim であれば、上の例で `build` を書き忘れてもビルドは走ります。
+**リリースタグを使っている場合（`version = '*'`）、ビルドは走りません。** タグに添付してある
+ビルド済みのサーバーを取ってきて、チェックサムを検証するだけです。そのため bun も node の
+バージョンも関係ありません。タグ以外（`main` を追う、手元のディレクトリを使う）のときだけ、
+ソースからビルドします。**そのときは bun が必要です。**
+
+lazy.nvim はこの `build` を**インストール時と更新時の両方**で実行するので、Lua 側とサーバー側が
+ズレることはありません。なお、更新されるのは `:Lazy update` を実行したときだけで、自動では
+更新されません。
+
+リポジトリには `lazy.lua` を同梱してあるので、上の例で `build` を書き忘れても動きます。
 
 手元のリポジトリを使う場合は、`'qaynam/chatora'` の代わりに `dir = '/path/to/chatora'` を
-指定してください。`build` はそのままで構いません。
+指定してください。
 
 ## はじめかた
 

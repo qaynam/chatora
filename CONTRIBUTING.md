@@ -9,6 +9,9 @@ bun install
 bun run build          # LSP サーバーを packages/server/dist/main.js に吐く
 ```
 
+リリースを使う人はビルド済みのサーバーを落としてきますが（`scripts/install-server.sh`）、タグの
+上に居ない開発中のチェックアウトは常にソースからビルドします。つまり**開発には bun が要ります**。
+
 Neovim からは、プラグインマネージャに `dir` でこのディレクトリを指してもらえば読み込めます。
 
 ```lua
