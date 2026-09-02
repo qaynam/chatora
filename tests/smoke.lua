@@ -283,6 +283,42 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- A block chatora cannot colour says so once, and only for a language `:TSInstall` can
+  -- actually fetch — a code block named for a file, not for a language, is the common case.
+  do
+    local orig_parsers = package.loaded['nvim-treesitter.parsers']
+    local orig_notify = vim.notify
+    package.loaded['nvim-treesitter.parsers'] = {
+      get_parser_configs = function()
+        return { php = {}, php_only = {}, python = {} }
+      end,
+    }
+    local said = {}
+    vim.notify = function(msg)
+      said[#said + 1] = msg
+    end
+
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      'コード',
+      -- No `<?` anywhere: only php_only would colour this one, so php is not the fix.
+      'code:index.php', ' echo 1;',
+      'code:page.php', ' <?php echo 2;',
+      -- Already spoken for, and never a language anyone wrote a parser for.
+      'code:another.php', ' echo 3;',
+      'code:メモ', ' 買い物',
+    })
+    codeblock.refresh(buf)
+    codeblock.refresh(buf)
+
+    assert(#said == 2, 'one message per language: ' .. vim.inspect(said))
+    assert(said[1]:find(':TSInstall php_only', 1, true), 'tagless PHP asks for php_only, got ' .. said[1])
+    assert(said[2]:find(':TSInstall php）', 1, true), 'a tagged block asks for php, got ' .. said[2])
+
+    vim.notify, package.loaded['nvim-treesitter.parsers'] = orig_notify, orig_parsers
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- codeblock.refresh must be a no-op (never error) on a buffer with no
   -- code blocks at all -- this is the shape of buffers the e2e test uses.
   do

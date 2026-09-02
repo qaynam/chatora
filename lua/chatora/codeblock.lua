@@ -63,10 +63,58 @@ function M.find_blocks(lines)
   return blocks
 end
 
+--- Whether nvim-treesitter could fetch a parser for `lang`. Its two branches keep the
+--- catalogue in different places, and a reader on neither has no `:TSInstall` to run.
+local function installable(lang)
+  local ok, parsers = pcall(require, 'nvim-treesitter.parsers')
+  if ok and type(parsers) == 'table' then
+    if type(parsers.get_parser_configs) == 'function' then
+      local list = parsers.get_parser_configs()
+      return type(list) == 'table' and list[lang] ~= nil
+    end
+    if type(parsers[lang]) == 'table' then
+      return true
+    end
+  end
+  local ok_config, tsconfig = pcall(require, 'nvim-treesitter.config')
+  if ok_config and type(tsconfig) == 'table' and type(tsconfig.get_available) == 'function' then
+    local available = tsconfig.get_available()
+    return type(available) == 'table' and vim.tbl_contains(available, lang)
+  end
+  return false
+end
+
+-- Languages already named, so a page of PHP asks for the parser once.
+local reported = {}
+
+--- A block that cannot be coloured is silent everywhere else: a missing parser is not an
+--- error in Neovim, just an absence of highlights, so nothing but this would ever say why.
+---
+--- Only for a language someone has actually written a parser for. `code:` takes a file
+--- name, and Cosense pages are full of `code:メモ` and `code:構成` — names that resolve to
+--- a "language" no `:TSInstall` will ever have.
+local function report_missing(lang)
+  if reported[lang] or not installable(lang) then
+    return
+  end
+  reported[lang] = true
+  vim.notify(
+    ('[chatora] %s のパーサーが無いので色が付きません（:TSInstall %s）'):format(lang, lang),
+    vim.log.levels.WARN
+  )
+end
+
+--- `lang` if its parser is loadable, else nil. vim.treesitter.language.add does NOT error
+--- on a missing parser; it returns (nil, message), so the result is what answers.
+local function loadable(lang)
+  local ok, added = pcall(vim.treesitter.language.add, lang)
+  return (ok and added) and lang or nil
+end
+
 --- Resolve a treesitter lang for a `code:<name>` marker, or nil if no
 --- parser is available. Tries filetype-by-extension first, then falls back
 --- to treating the whole name as the lang (`code:lua`, `code:bash`, ...).
-local function resolve_lang(name)
+local function resolve_lang(name, text)
   local ok_ft, filetype = pcall(vim.filetype.match, { filename = name })
   if not ok_ft or not filetype or filetype == '' then
     filetype = name
@@ -75,10 +123,22 @@ local function resolve_lang(name)
   if not ok_get or not lang then
     lang = filetype
   end
-  -- vim.treesitter.language.add does NOT error on a missing parser; it
-  -- returns (nil, message). Check the actual result, not just pcall's ok.
-  local ok_add, added = pcall(vim.treesitter.language.add, lang)
-  if not ok_add or not added then
+  -- tree-sitter's `php` grammar starts *outside* PHP, in the HTML a .php file may open
+  -- with, so a block carrying no `<?` tag at all parses as text and comes out with nothing
+  -- highlighted (measured: 0 captures against 7). `php_only` is the same grammar entered at
+  -- the code, which is what a page pasted from the middle of a file holds. A block that
+  -- does open a tag is left to `php`, which is the grammar actually written for it.
+  if lang == 'php' and not text:find('<?', 1, true) then
+    local only = loadable('php_only')
+    if only then
+      return only
+    end
+    -- Installing `php` would not colour this block either, so that is not what to ask for.
+    report_missing('php_only')
+    return nil
+  end
+  if not loadable(lang) then
+    report_missing(lang)
     return nil
   end
   return lang
@@ -114,13 +174,13 @@ local function block_text(lines, block)
 end
 
 local function highlight_block(bufnr, lines, block)
-  local lang = resolve_lang(block.name)
-  if not lang then
+  local text, common_indent = block_text(lines, block)
+  if not text or text == '' then
     return
   end
 
-  local text, common_indent = block_text(lines, block)
-  if not text or text == '' then
+  local lang = resolve_lang(block.name, text)
+  if not lang then
     return
   end
 
