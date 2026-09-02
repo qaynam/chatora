@@ -1158,6 +1158,32 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- Indent guides land in every column of Cosense's one-space-per-level indent, on top of
+  -- the bullets. The plugins that can be told per buffer are told, including one that only
+  -- exists after the reader opens some other file.
+  do
+    local render = require('chatora.render')
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'インデント', ' 子', '  孫' })
+    render.attach(buf)
+    assert(vim.b[buf].snacks_indent == false, 'snacks.indent must be told to skip the page')
+    assert(vim.b[buf].miniindentscope_disable == true, 'so must mini.indentscope')
+
+    -- indent-blankline arrives late: it loads on the first real file, long after the page
+    -- was opened, so being told once at startup would not have been enough.
+    local told = nil
+    package.loaded.ibl = {
+      setup_buffer = function(bufnr, opts)
+        told = { bufnr = bufnr, enabled = opts.enabled }
+      end,
+    }
+    render.attach(buf)
+    package.loaded.ibl = nil
+    assert(told and told.bufnr == buf and told.enabled == false, 'ibl must be told once it exists')
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- buftext: only the run that differs is written, so the extmarks around it survive.
   do
     local buftext = require('chatora.buftext')

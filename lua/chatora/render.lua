@@ -19,7 +19,28 @@ local timers = {}
 -- milliseconds on a few hundred lines, so this is nearly all of the delay a reader sees.
 local REFRESH_DEBOUNCE_MS = 60
 
+--- Ask the indent-guide plugins to leave this buffer alone.
+---
+--- Cosense indents one space per level, so a guide stands in every column of the indent —
+--- under the bullets chatora draws in those same columns. The plugins that offer a
+--- buffer-local opt-out get one; indent-blankline is told directly, but only once it is
+--- loaded. It usually loads on the first real file the reader opens, which is why the lines
+--- can appear on a page that was clean a moment ago, so this is retried on every render
+--- until it lands.
+local function quiet_indent_guides(bufnr)
+  vim.b[bufnr].snacks_indent = false
+  vim.b[bufnr].miniindentscope_disable = true
+  if vim.b[bufnr].chatora_indent_guides_off then
+    return
+  end
+  local ibl = package.loaded.ibl
+  if ibl and pcall(ibl.setup_buffer, bufnr, { enabled = false }) then
+    vim.b[bufnr].chatora_indent_guides_off = true
+  end
+end
+
 local function set_win_opts(bufnr)
+  quiet_indent_guides(bufnr)
   local conceal = config.options.conceal
   if conceal ~= false then
     -- A string is a 'concealcursor' value. The default reveals the cursor line, which is
@@ -111,7 +132,10 @@ function M.attach(bufnr)
     return
   end
   vim.b[bufnr].chatora_render_attached = true
-  vim.api.nvim_create_autocmd('BufWinEnter', {
+  -- BufEnter as well as BufWinEnter: coming back from another window leaves the page
+  -- displayed where it was, and it is exactly then that a plugin loaded in the meantime has
+  -- started drawing over it.
+  vim.api.nvim_create_autocmd({ 'BufWinEnter', 'BufEnter' }, {
     buffer = bufnr,
     callback = function()
       set_win_opts(bufnr)
