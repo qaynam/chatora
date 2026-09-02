@@ -10,9 +10,9 @@ Cosense（旧 Scrapbox）を Neovim から読み書きするためのプラグ�
 
 **記法比較**
 
-![Image from Gyazo](https://gyazo.com/64a2afa81502a5152d53530239ae5950.png)
-![Image from Gyazo](https://gyazo.com/68b9ab61aebd4976a1ac66be235cc7ea.png)
-![Image from Gyazo](https://gyazo.com/5424457517ae6a2f9cca2d5c7592c03b.png)
+[![Image from Gyazo](https://gyazo.com/64a2afa81502a5152d53530239ae5950.png)](https://gyazo.com/64a2afa81502a5152d53530239ae5950)
+[![Image from Gyazo](https://gyazo.com/68b9ab61aebd4976a1ac66be235cc7ea.png)](https://gyazo.com/68b9ab61aebd4976a1ac66be235cc7ea)
+[![Image from Gyazo](https://gyazo.com/5424457517ae6a2f9cca2d5c7592c03b.png)](https://gyazo.com/5424457517ae6a2f9cca2d5c7592c03b)
 
 ## 名前の由來
 
