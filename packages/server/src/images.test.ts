@@ -229,7 +229,7 @@ describe('the large form applied to an icon', () => {
       {
         line: 1,
         startChar: 0,
-        endChar: 24,
+        endChar: 23,
         src: '/qaynam/qaynam',
         kind: 'icon',
         iconUser: '/qaynam/qaynam',

@@ -1,2 +1,8 @@
+# A contributor's own npm config may point somewhere private, and bun would resolve — and
+# then rewrite the lockfile — against that registry. The lockfile is committed with public
+# URLs, so the registry is pinned here rather than left to whoever runs `bun install`.
+[install]
+registry = "https://registry.npmjs.org"
+
 [test]
 preload = ["./tests/preload.ts"]
