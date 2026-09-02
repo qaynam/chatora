@@ -77,8 +77,8 @@ let runtime: AppRuntime = ManagedRuntime.make(buildAppLayer(DEFAULT_ORIGIN))
 // replaced alongside `runtime` for the same reason.
 let currentOrigin = DEFAULT_ORIGIN
 
-// Replaced at build time by tsdown; running from source (`bun run src/main.ts`) leaves the
-// name undeclared, which `typeof` tolerates and a bare reference would not.
+// tsdown replaces this at build time; running from source leaves it undeclared, which
+// `typeof` tolerates and a bare reference would not.
 declare const __CHATORA_VERSION__: string | undefined
 const VERSION = typeof __CHATORA_VERSION__ === 'string' ? __CHATORA_VERSION__ : 'dev'
 
@@ -149,8 +149,6 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
   void Effect.runPromise(log('info', 'chatora server initialized', { origin, version: VERSION }))
 
   return {
-    // Shown by `:LspInfo` and `:checkhealth vim.lsp`, so a reader can say which build they
-    // are running without being asked to go looking for it.
     serverInfo: { name: 'chatora', version: VERSION },
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,

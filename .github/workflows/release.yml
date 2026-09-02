@@ -13,8 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The build stamps itself with `git describe`; without the tags it would ship
-          # calling itself a bare sha.
+          # `git describe` stamps the build; without tags it would ship as a bare sha.
           fetch-tags: true
           fetch-depth: 0
 

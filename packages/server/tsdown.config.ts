@@ -1,14 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { defineConfig } from 'tsdown'
 
-/**
- * What this build calls itself, taken from git rather than from a file somebody has to
- * remember to edit: `v0.1.2` on a release, `v0.1.2-3-gabc1234` three commits past one,
- * `-dirty` with uncommitted changes, a bare sha with no tags at all. The server reports it
- * on initialize, which is how a bug report can name the build it came from.
- *
- * CI must fetch tags (`fetch-tags: true`); a checkout without them describes as a sha.
- */
+/** What this build calls itself — from git, so there is no file to keep in sync. */
 const version = (() => {
   try {
     return execFileSync('git', ['describe', '--tags', '--always', '--dirty'], {

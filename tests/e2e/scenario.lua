@@ -864,7 +864,6 @@ local ok, err = pcall(function()
   -- ===================================================================================
   step('final-checks')
 
-  -- The server names the build it was made from, so a report can say which one it is.
   local client = vim.lsp.get_clients({ name = 'chatora' })[1]
   local reported = client and client.server_info and client.server_info.version
   if not reported or reported == '' then
