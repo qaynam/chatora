@@ -2,12 +2,16 @@
 
 ## 概要
 
-chatora は Cosense（旧 Scrapbox）の Neovim クライアント。構成は 2 層:
+chatora は Cosense（旧 Scrapbox）の Neovim クライアントで、2 つの層でできている。
 
-1. **Lua プラグイン**（リポジトリ直下の `lua/` と `plugin/`）— サイドバー・関連ページパネル・検索・バッファ管理などの薄い UI 層
-2. **TypeScript LSP サーバー**（`packages/server`、`@chatora/server`）— `@cosense-toolbox/parser` によるハイライト（semantic tokens）・リンク補完・定義ジャンプ、および `chatora/*` カスタムリクエストで Cosense API を仲介
+**Lua プラグイン**（`lua/` と `plugin/`）は UI だけを持つ薄い層で、サイドバー・関連ページパネル・
+検索・バッファ管理を担当する。**TypeScript の LSP サーバー**（`packages/server` =
+`@chatora/server`）は、`@cosense-toolbox/parser` を使ったハイライト（semantic tokens）・リンク補完・
+定義ジャンプを標準の LSP 機能として提供し、それに加えて `chatora/*` という独自リクエストで
+Cosense API を仲介する。
 
-API クライアント・認証・diff などの純ロジックは `packages/core`（`@chatora/core`）に分離し、単体テスト可能にする。
+この 2 つに挟まれる純ロジック — API クライアント、認証、行の diff — は `packages/core`
+（`@chatora/core`）に分けてある。UI にも LSP にも依存しないので、単体テストで直接叩ける。
 
 ```
 ┌─ Neovim ────────────────────────────────────┐
@@ -40,37 +44,59 @@ tests/e2e/              # 偽 Cosense サーバー + headless nvim の E2E
 docs/ARCHITECTURE.md    # 本ドキュメント
 ```
 
-- ランタイム: 開発は bun、サーバー実行は `node`（>=20）。ビルドは tsdown で `packages/server/dist/main.js`（単一 ESM バンドル）を生成。
-- Lint/format: biome（ユーザーの他リポジトリと同じ流儀）。TS は strict。
-- テスト: `bun test`（core / server の純ロジック）。
+開発には bun を使うが、**サーバーを動かすのは `node`（>= 20）**で、bun は要らない。ビルドは
+tsdown が担当し、`packages/server/dist/main.js` という単一の ESM バンドルを吐く。lint と
+format は biome、TypeScript は strict、テストは `bun test` で core と server の純ロジックを回す。
 
 ## Cosense API（公式 cosense-cli 準拠）
 
-一次情報は https://github.com/helpfeel/cosense-cli （`src/lib/request.ts`, `src/commands/*.ts`）。
-origin は既定 `https://scrapbox.io`（設定で変更可能に）。
+Cosense の API に公式のドキュメントは無い。一次情報は
+[helpfeel/cosense-cli](https://github.com/helpfeel/cosense-cli) のソース、とくに
+`src/lib/request.ts` と `src/commands/*.ts` で、ここに書いてあることはすべてそこか実測から来て
+いる。origin は既定で `https://scrapbox.io`、設定で変更できる。
 
 ### 認証
 
-- ヘッダー: PAT は `x-personal-access-token: <token>`、Service Account は `x-service-account-access-key: cs_...`
-- PAT 発行ページ: `<origin>/settings/personal-access-tokens`
-- **資格情報の解決順**（chatora 独自管理。cosense-cli の settings.json は読まない）:
-  1. 環境変数 `COSENSE_PAT`
-  2. アカウント索引の active アカウント → macOS Keychain: `security find-generic-password -s chatora -a <accountId> -w`
-  3. レガシー: macOS Keychain: `security find-generic-password -s chatora -a <origin> -w`
-- ログイン保存は Keychain のみ: `security add-generic-password -U -s chatora -a <accountId> -w <pat>`
-- PAT は絶対にログ・エラーメッセージ・LSP レスポンスに含めない。
+認証ヘッダーは PAT なら `x-personal-access-token: <token>`、Service Account なら
+`x-service-account-access-key: cs_...`（**Bearer ではない**）。PAT の発行ページは
+`<origin>/settings/personal-access-tokens`。
+
+資格情報は chatora が独自に管理し、**cosense-cli の `settings.json` は読まない**。解決の順序は次の
+とおり。
+
+1. 環境変数 `COSENSE_PAT`
+2. アカウント索引の active なアカウント →
+   `security find-generic-password -s chatora -a <accountId> -w`
+3. レガシー経路 → `security find-generic-password -s chatora -a <origin> -w`
+
+保存先は macOS Keychain だけで、ファイルには書かない
+（`security add-generic-password -U -s chatora -a <accountId> -w <pat>`）。
+
+**PAT は絶対に、ログにもエラーメッセージにも LSP のレスポンスにも入れない。**
 
 #### 複数アカウント
 
-- 1 つの PAT = 1 アカウント（`{ id, origin, userId, name, displayName, photo? }`）。`id` = `` `${origin}#${userId}` `` で、Keychain の account（`-a`）にもそのまま使う。
-- PAT 本体は上記の通り Keychain のみに保存する。PAT を含まないアカウント索引（メタデータ + どれが active か）は JSON ファイルに永続化する: `${CHATORA_STATE_DIR}` があればそこ、なければ `${XDG_STATE_HOME:-$HOME/.local/state}/chatora/accounts.json`（`CHATORA_STATE_DIR` はテスト用の差し替え口）。ファイルは 0600。壊れた JSON は空の索引として扱う。
+1 つの PAT が 1 つのアカウントに対応する（`{ id, origin, userId, name, displayName, photo? }`）。
+`id` は `` `${origin}#${userId}` `` で、Keychain の account（`-a`）にもそのまま使う。
+
+PAT 本体は上記のとおり Keychain にしか置かない。一方、**PAT を含まないアカウント索引**
+（メタデータと、どれが active か）は JSON ファイルに永続化する。場所は `${CHATORA_STATE_DIR}` が
+あればそこ、無ければ `${XDG_STATE_HOME:-$HOME/.local/state}/chatora/accounts.json`
+（`CHATORA_STATE_DIR` はテスト用の差し替え口）。ファイルのパーミッションは 0600 で、壊れた JSON は
+空の索引として扱う。
   ```json
   { "active": "https://scrapbox.io#abc123",
     "accounts": [ { "id": "https://scrapbox.io#abc123", "origin": "https://scrapbox.io",
                     "userId": "abc123", "name": "qaynam", "displayName": "Qaynam", "photo": "https://..." } ] }
   ```
-- `@chatora/core` の `AccountStore`（`list` / `add` / `remove` / `setActive` / `resolveActive`）がこの索引 + Keychain を仲介する。`CredentialStore.resolve` は `AccountStore.resolveActive(origin)` を上記解決順 2 段目として呼ぶ。
-- 後方互換: 旧バージョンは Keychain の account = `<origin>`（上記解決順 3 段目）に PAT を持つ。このレガシーエントリを削除する移行処理はない（読めれば動く、を維持）。`chatora/login` はレガシー経路ではなく `AccountStore.add` を通る（＝アカウント追加 + active 化のエイリアス）。
+この索引と Keychain の両方を仲介するのが `@chatora/core` の `AccountStore`
+（`list` / `add` / `remove` / `setActive` / `resolveActive`）で、`CredentialStore.resolve` は解決順の
+2 段目としてその `resolveActive(origin)` を呼ぶ。
+
+古いバージョンは Keychain の account に `<origin>` を使って PAT を持っていた（解決順の 3 段目）。
+このレガシーエントリを消す移行処理は**書かない**。読めるものは読めたままにしておく、という方針
+である。`chatora/login` はレガシー経路ではなく `AccountStore.add` を通る（アカウントの追加と
+active 化を兼ねる）。
 
 ### Read エンドポイント
 
@@ -85,7 +111,11 @@ origin は既定 `https://scrapbox.io`（設定で変更可能に）。
 | ベクトル検索 | `GET /api/pages/:project/search/vector/titles?q=`（HTTP 490 = 機能無効 → 空配列扱い） |
 | タイトル一覧（補完用） | `GET /api/pages/:project/search/titles` |
 
-タイトルの URL エンコードは cosense-cli の `encodeTitleForUrl` 方式（`CosenseApi` 内部で処理）。レスポンス型は寛容にパースする（未知フィールドを許容、必要フィールドだけ検証。zod は使わず手書きの narrow で十分）。
+タイトルの URL エンコードは cosense-cli の `encodeTitleForUrl` 方式に合わせてあり、`CosenseApi` の
+内部で処理する。呼び出し側は生のタイトルを渡すだけでよい。
+
+レスポンスは寛容にパースする。未知のフィールドは黙って通し、必要なフィールドだけを検証する。
+Cosense の API は予告なく増えるので、知らないフィールドが来たことをデコード失敗にしてはいけない。
 
 ### Write（2 段階 REST、page-edit-for-ai）
 
@@ -97,15 +127,27 @@ origin は既定 `https://scrapbox.io`（設定で変更可能に）。
 2. `POST /api/pages/v2/:project/page-edit-for-ai/submit`
    - body: `{ previewId }`（**使い捨て・5 分で失効**）
    - res: `{ commitId, page: {title}|null, titleChanged?: {from,to} }`
-- エラー: `409 {"error":"NotFastForward"}`（楽観ロック競合 → 再取得して再 preview）、`409 DuplicateTitle`、`422`（不正な lineId 等）
-- 新規挿入行の `id` はクライアント生成の 24 桁 lowercase hex。cosense-cli 実装は `randomBytes(12).toString('hex')`（unixtime や userId は**含まない**）。`@chatora/core` の `createNewLineId()` が実装済み。
-- **存在しないページは 404 にならない**: `GET /api/pages/v2/...` は HTTP 200 + `persistent: false` + 偽の id/commitId/行 id を返す。偽 id をアンカーに使うと事故るため、`CosenseApi.getPage()` は `persistent:false` を `null` に畳み込み済み。
-- HTTP パス上のタイトルエンコードは encodeURIComponent ではなく cosense-cli の `encodeTitleForUrl` 方式（`% / ? #` のみ encode、空白→`_`、unicode は生）。これは `CosenseApi` 内部に実装済みで、呼び出し側は生タイトルを渡すだけでよい。**cosense:// URI スキームは最小限エンコード（下記）** であり別物（HTTP パスとは無関係）。
+エラーは 3 つある。`409 {"error":"NotFastForward"}` は楽観ロックの競合で、再取得してから preview を
+やり直す。`409 DuplicateTitle` は同名ページ、`422` は不正な lineId などである。
+
+新しく挿入する行の `id` は**クライアントが生成する** 24 桁の lowercase hex で、cosense-cli の実装は
+`randomBytes(12).toString('hex')`。unixtime も userId も**含まない**。`@chatora/core` の
+`createNewLineId()` がこれに合わせてある。
+
+**存在しないページは 404 にならない。** `GET /api/pages/v2/...` は HTTP 200 を返し、
+`persistent: false` と、偽の id・commitId・行 id を一緒に返してくる。この偽 id を挿入のアンカーに
+使うと事故るので、`CosenseApi.getPage()` が `persistent: false` を `null` に畳み込んでいる。
+
+HTTP パス上のタイトルエンコードは `encodeURIComponent` ではなく、cosense-cli の
+`encodeTitleForUrl` 方式である（`% / ? #` だけをエンコードし、空白は `_`、unicode は生のまま）。
+これは `CosenseApi` の内部にあるので、呼び出し側は生のタイトルを渡すだけでよい。後述の
+`cosense://` URI スキームとは**別物**なので注意すること。
 
 ## @chatora/core 公開 API（effect-ts、サーバーが依存する契約）
 
-TS 層は effect-ts（^3.22）全面採用。サービスは Context.Tag + Layer、エラーは Data.TaggedError、
-レスポンスは寛容な Schema でデコード（現行 API が受理するレスポンスをデコード失敗にしない）。
+TypeScript 層は effect-ts（^3.22）を全面的に使う。サービスは Context.Tag と Layer で組み立て、
+エラーは Data.TaggedError、レスポンスは寛容な Schema でデコードする。**どの操作も throw せず、
+`Effect<A, E, R>` を返す。**
 
 ```ts
 // errors.ts — throw しない。全操作が Effect<A, E, R> を返す
@@ -135,49 +177,81 @@ computeChanges(base, next, newLineId): readonly RawChange[]
 createNewLineId(userId): string   // 24 hex（userId は未使用、cosense-cli 互換）
 ```
 
-サーバー側は initialize 時に origin を受けて ManagedRuntime を構築し、LSP コールバックの縁で
-`runtime.runPromise` する。セッション状態（credential/検証結果/タイトル・vector キャッシュ/
-ページ base 状態）は SynchronizedRef/Ref を持つ SessionState サービス（TTL は Clock 経由）。
+サーバーは initialize で origin を受け取って ManagedRuntime を構築し、LSP のコールバックの縁で
+`runtime.runPromise` する。Effect の世界と LSP の世界の境目はここだけになる。
+
+セッション状態 — 資格情報、その検証結果、タイトルと vector のキャッシュ、ページの base 状態 — は
+SessionState サービスが SynchronizedRef と Ref で保持する。TTL は Clock 経由なので、テストから
+時間を進められる。
 
 ## LSP プロトコル
 
 ### 標準機能
 
 - `textDocument/semanticTokens/full`（+ range）: parser AST → トークン。**トークンは行をまたげない**ので複数行ノード（codeBlock 等）は行ごとに分割して出す。
-- `textDocument/completion`: trigger characters `[` `#` ` `（スペースはクライアントが単語区切りでメニューを閉じた後の再表示用）。リンク補完は**閉じた `[...]` ペアの内側にカーソルがある時だけ**発火し、クエリはカーソル位置に依らず**ブラケット内の全文**（Cosense と同じセマンティクス）。確定時はペア全体を置換。候補の第一ソースは **vector（意味）検索** `GET /api/pages/:project/search/vector/titles?q=`（本家 Web エディタがキーストロークごとに叩いているのを HAR で実測確認。score 順・`exists:false` = 赤リンク）。ローカルのタイトルインデックス（exact > prefix > substring > asearch ファジー階層）を後段にマージし、vector が使えないプロジェクト（490/404）ではローカルのみで動く。textEdit で `[title]` / `#title` 全体を置換。コードブロック内・inlineCode 内では発火しない。`isIncomplete: true` で毎キーストローク再クエリ。
+- `textDocument/completion`: 詳しくは下記。
 - `textDocument/definition`: カーソル下の internalLink / hashtag / projectLink → `cosense://<project>/<title>` の Location。
 - sync: `TextDocuments` ヘルパー（incremental）。
+
+#### リンク補完
+
+trigger character は `[` `#` と空白の 3 つ。空白が入っているのは、クライアントが単語の切れ目で
+メニューを閉じたあとに開き直させるため。
+
+補完が発火するのは**閉じた `[...]` ペアの内側にカーソルがある時だけ**で、クエリはカーソル位置に
+関係なく**ブラケットの中身の全文**になる。これは Cosense 本家と同じセマンティクスで、確定時は
+`[title]` や `#title` をペアごと textEdit で置き換える。コードブロックの中と inlineCode の中では
+発火しない。
+
+候補の第一ソースは **vector（意味）検索**の `GET /api/pages/:project/search/vector/titles?q=` で、
+score 順に並び、`exists:false` は赤リンクを意味する。本家の Web エディタがキーストロークごとに
+これを叩いているのを HAR で実測して合わせた。その後段にローカルのタイトル索引（exact > prefix >
+substring > asearch のファジー階層）をマージするので、vector 検索が使えないプロジェクト
+（490 や 404 が返る）でもローカルだけで動く。毎キーストロークで引き直すため `isIncomplete: true`
+を返す。
 
 ### semantic token 型（legend の順序も contract）
 
 `title, link, projectLink, externalLink, hashtag, code, codeBlock, formula, icon, quote, bold, italic, strike, underline, image, table, bold2, bold3`
 
-decoration ノードは bold/italic/strike/underline のうち該当するもの 1 つを優先順 bold > italic > strike > underline で出す。bold は sizeLevel で段階分け: `[*]`=bold、`[**]`=bold2、`[***]` 以上=bold3（ターミナルは太さ 1 段階しかないため色で強調を段階化する）。Neovim 側は `@lsp.type.<name>.cosense` に対して既定ハイライトを定義する。
+decoration ノードは bold / italic / strike / underline のうち該当するものを 1 つだけ出す。優先順は
+bold > italic > strike > underline。
+
+bold はさらに sizeLevel で段階を分け、`[*]` が bold、`[**]` が bold2、`[***]` 以上が bold3 になる。
+ターミナルには太さの段階が 1 つしか無いので、web でフォントサイズが担っている強調の段階を、
+色で表すしかないためである。Neovim 側は `@lsp.type.<name>.cosense` に既定のハイライトを定義する。
 
 #### ユーザー定義のカスタム装飾記法（`notations`）
 
-`lua/chatora/config.lua` の `notations`（既定 `{}`）で `[<記号> 本文]` をユーザーが自分で定義できる。
-`{ ['|'] = { name = 'highlight', icon = '📌', hl = {...} } }` の形。キーは `[` の直後 1 文字、`name` は
-`^[%w_]+$`、公式記法の記号（`* / - _ $ [ #`）とは衝突不可 — 違反はサーバーではなく
-`config.lua` の `setup()` が `vim.notify` で警告して黙って捨てる（プラグインは落とさない）。`icon`
-（任意）は 1 文字（`vim.fn.strchars`）でなければ警告してその項目だけ捨てる（`name`/`hl` は活かす）—
-Neovim の extmark `conceal` が 1 文字しか置換に使えないため。`init_options.notations`
-（`{ marker, name }[]`、marker 昇順）で LSP サーバーに渡す。`hl`/`icon` は渡さない（描画は Neovim
-側の関心事）。
+`lua/chatora/config.lua` の `notations`（既定は `{}`）を使うと、`[<記号> 本文]` の記号をユーザーが
+自分で定義できる。形は `{ ['|'] = { name = 'highlight', icon = '📌', hl = {...} } }` で、キーは `[` の
+直後の 1 文字、`name` は `^[%w_]+$`、公式記法の記号（`* / - _ $ [ #`）とは衝突できない。
 
-サーバー側（`packages/server/src/notations.ts`）は `@cosense-toolbox/parser` の
-`bracketRule` 拡張で実装: `inner` が `<marker>` + 空白 1 文字以上で始まれば `decoration` ノード
-（bold/italic/strike/underline 全部 false、sizeLevel 0、children は残りを `ctx.tokenize` で再帰
-解釈）を返す。`main.ts` の `onInitialize` が `initializationOptions.notations` を検証（信頼しない
-入力として、同じ規則で不正な要素を捨てる）して `setNotations()` に渡し、以後すべての
-`parse`/`parseLine` 呼び出しはこの拡張込みの `parseOptions()` を渡す（渡し漏れがあると機能ごとに
-装飾/リンクの解釈が食い違う）。legend は `[...TOKEN_TYPES, ...カスタム name（marker 昇順）]`。
-decoration ノードのフラグが全部 false のとき、ソース上 `position.start.column + 1`（`[` の次の文字）
-を設定済み marker と突き合わせて `name` を解決するロジックは `notations.ts` の
-`notationNameForDecoration()` に集約し、`computeTokens`（token 型として出力。`TOKEN_TYPES` 自体は
-固定のまま末尾に動的追加）と `computeConcealRanges`（下記 `ConcealRange.notation`）の双方から使う。
-公式記法の記号（`* / - _`）は `markerToName` に存在しないため常に `undefined` を返す
-（`RESERVED_MARKERS` がユーザー定義との衝突を防いでいる）。
+**違反を弾くのはサーバーではなく `config.lua` の `setup()`** で、`vim.notify` で警告してその項目
+だけを捨てる。設定の誤りでプラグイン全体を落とさないためである。`icon`（任意）は 1 文字
+（`vim.fn.strchars`）でなければ同じように警告して捨てるが、`name` と `hl` は活かす。1 文字に
+限るのは、Neovim の extmark `conceal` が 1 文字しか置換に使えないからである。
+
+LSP サーバーへは `init_options.notations`（`{ marker, name }[]`、marker 昇順）として渡す。`hl` と
+`icon` は渡さない。どう描くかは Neovim 側の関心事であって、サーバーが知る必要はない。
+
+サーバー側の実装は `packages/server/src/notations.ts` で、`@cosense-toolbox/parser` の `bracketRule`
+拡張として書いてある。`inner` が `<marker>` + 空白 1 文字以上で始まれば `decoration` ノードを返す
+（bold/italic/strike/underline はすべて false、sizeLevel は 0、children は残りを `ctx.tokenize` で
+再帰的に解釈する）。`main.ts` の `onInitialize` が `initializationOptions.notations` を検証してから
+`setNotations()` に渡す。クライアントから来る値は信頼しない入力なので、Lua 側と同じ規則で不正な
+要素を捨てる。
+
+**以後の `parse` / `parseLine` はすべて、この拡張込みの `parseOptions()` を渡さなければならない。**
+渡し漏れると、機能ごとに装飾やリンクの解釈が食い違う。legend は
+`[...TOKEN_TYPES, ...カスタム name（marker 昇順）]` になる。
+
+decoration ノードのフラグが全部 false のとき、ソース上の `position.start.column + 1`（`[` の次の
+文字）を設定済みの marker と突き合わせて `name` を解決する。このロジックは `notations.ts` の
+`notationNameForDecoration()` に集約してあり、`computeTokens`（token 型として出力する。
+`TOKEN_TYPES` 自体は固定で、末尾に動的追加する）と `computeConcealRanges`（後述の
+`ConcealRange.notation`）の両方がここを呼ぶ。公式記法の記号（`* / - _`）は `markerToName` に無い
+ので常に `undefined` が返り、`RESERVED_MARKERS` がユーザー定義との衝突を防いでいる。
 
 ### カスタムリクエスト（`chatora/*`）
 
@@ -274,57 +348,123 @@ decoration ノードのフラグが全部 false のとき、ソース上 `positi
 
 ### URI スキーム
 
-`cosense://<project>/<title>`。URI はバッファ名を兼ねてタブ等に表示されるため unicode は生のまま、構造を壊す `%` `/` `?` `#` と制御文字のみパーセントエンコードする。Lua（uri.lua）とサーバー（uriScheme.ts）でバイト単位に同一の規則を共有。パースは単純な文字列処理（authority = project、path = title）で、フルエンコードされた旧形式 URI も受理する。
+`cosense://<project>/<title>` の形。この URI はバッファ名を兼ねていてタブなどに表示されるので、
+unicode は生のまま残し、構造を壊す `%` `/` `?` `#` と制御文字だけをパーセントエンコードする。
+
+同じ規則を Lua（`uri.lua`）とサーバー（`uriScheme.ts`）がバイト単位で共有している。パースは単純な
+文字列処理（authority が project、path が title）で、フルエンコードされた旧形式の URI も受理する。
+
+なお、これは HTTP パス上のタイトルエンコード（`encodeTitleForUrl`）とは**別物**である。
 
 ## Neovim プラグイン仕様（lua/ + plugin/）
 
-- nvim >= 0.11 前提。依存プラグインなし（telescope/snacks 連携は後回し。picker は `vim.ui.select`、入力は `vim.ui.input`、PAT 入力のみ `vim.fn.inputsecret`）。
-- `require('chatora').setup({ origin?, project?, server_cmd?, sidebar_width?, related_height? })`
-- LSP 起動: `vim.lsp.start({ name='chatora', cmd={'node', <repo>/packages/server/dist/main.js, '--stdio'} , ...})`。`server_cmd` で上書き可能（開発時は `{'bun', 'run', src/main.ts}`）。sidebar バッファにも attach してカスタムリクエストを送れるようにする。
-- カスタムリクエストは `client:request('chatora/xxx', params, cb)` の薄いラッパー `lsp.request(method, params): Promise 的 callback` を `lua/chatora/lsp.lua` に。
+nvim >= 0.11 を前提とし、**必須の依存プラグインは無い**。ページの選択は内蔵のピッカー、入力は
+`vim.ui.input`、PAT の入力だけは `vim.fn.inputsecret` を使う。telescope は
+`lua/telescope/_extensions/chatora.lua` に拡張を置いてあるが、あくまで任意である。画像の描画に
+使う image.nvim と snacks.nvim も同じく任意で、どちらも無ければ画像を描かないだけになる。
+
+設定は `require('chatora').setup({...})` に渡す。既定値は `lua/chatora/config.lua` の `defaults` が
+唯一の正で、この文書には複製しない（増えるので必ず腐る）。
+
+LSP は `vim.lsp.start({ name = 'chatora', cmd = { 'node', <repo>/packages/server/dist/main.js,
+'--stdio' } })` で起動する。`server_cmd` で上書きでき、開発中は `{'bun', 'run', src/main.ts}` を
+指すとビルドを挟まずに済む。サイドバーのバッファにも attach して、そこからカスタムリクエストを
+送れるようにしてある。
+
+カスタムリクエストは `client:request('chatora/xxx', params, cb)` の薄いラッパーとして
+`lua/chatora/lsp.lua` の `lsp.request(method, params, cb)` にまとめてある。
 
 ### コマンド / フロー
 
-- `:Chatora` — 認証確認（authStatus）→ 未認証なら PAT 入力（inputsecret）→ login → プロジェクト選択（vim.ui.select、setup で固定も可）→ サイドバー表示
-- `:Chatora search [query]` — 検索。結果を vim.ui.select で表示 → 選択でページを開く
-- `:Chatora logout`
+コマンドの一覧は [README](../README.md#コマンド) が正で、ここには重複させない。起動時の流れだけ
+書いておく。
+
+`:Chatora` はまず `chatora/authStatus` で認証を確かめる。未認証なら `inputsecret` で PAT を受け取り、
+`chatora/login` に渡して検証する。認証が済んだらプロジェクトを選び（`setup()` の `project` で固定
+することもできる）、サイドバーを開く。
 
 ### サイドバー（lua/chatora/sidebar.lua）
 
-- 左 vsplit、幅 `sidebar_width`（既定 32）、`chatora://sidebar` という名前の nofile バッファ。ページ一覧（updated 順）を 1 行 1 ページで表示。
-- キーマップ（バッファローカル）: `<CR>` 開く / `R` リロード / `s` 検索 / `n` 新規ページ（タイトル入力）/ `q` 閉じる
-- ウィンドウ属性: number off, cursorline on, winfixwidth。
+左の vsplit に幅 `sidebar_width`（既定 32）で開く、`chatora://sidebar` という名前の nofile バッファ。
+ページ一覧を updated 順に 1 行 1 ページで並べる。ウィンドウ属性は number off、cursorline on、
+winfixwidth。
+
+バッファローカルのキーマップは `<CR>` と `l` で開く、`R` でリロード、`s` で検索、`n` で新規ページ、
+`P` でプロジェクト切り替え、`A` でアカウント切り替え、`q` で閉じる、`<Tab>` / `<S-Tab>` と `1`〜`9`
+でタブの切り替え。
+
+サイドバーは**今見ているページのプロジェクト**を映す。プロジェクトごとに一覧を持っておき、
+別プロジェクトのバッファに移ったら、そのプロジェクトの一覧に張り替える。
 
 ### ページバッファ（lua/chatora/page.lua）
 
-- `BufReadCmd cosense://*` → `chatora/openPage` → 本文流し込み → `filetype=cosense`, `buftype=acwrite`, undo リセット。
-- `BufWriteCmd cosense://*` → `chatora/savePage` → 成功で `modified=false` + cmdline echo。`conflict` はマージ結果を流し込んで衝突行に印を付け、バッファは modified のまま残す（`]c` で移動）。`:wq` が直後に `modified` を見るのでここだけ同期待ちする。
-- 自動保存は `:write` を経由せず `chatora/savePage` を直接投げる（待たないのでカーソルが固まらない）。返事にはリクエスト時の `changedtick` を持たせ、その間に打鍵があればバッファ全体を代表する処理（`modified` クリア・正規化テキスト適用）は行わない。
-- `BufEnter`/`FocusGained` で `chatora/syncPage`（画面に出ているバッファだけポーリング、離れると停止）。取り込みはマージなのでローカルの未保存分は消えない。
-- 定義ジャンプ（`gd` 等の標準 LSP 機構）で `cosense://` URI に飛ぶと同じ BufReadCmd 経路で開ける。
+`BufReadCmd cosense://*` が `chatora/openPage` を投げ、返ってきた本文を流し込んでから
+`filetype=cosense`、`buftype=acwrite` を立てて undo をリセットする。定義ジャンプ（`gd` などの標準
+LSP 機構）で `cosense://` URI に飛んだときも、同じ経路で開く。
+
+保存は `BufWriteCmd cosense://*` から `chatora/savePage`。成功すれば `modified` を下ろして
+コマンドラインに知らせる。`conflict` が返った場合はマージ結果を流し込んで衝突行に印を付け、
+バッファは modified のまま残す（`]c` で移動できる）。**ここだけは同期で待つ。** 直後に `:wq` が
+`modified` を見るためである。
+
+自動保存は `:write` を経由せず `chatora/savePage` を直接投げる。待たないので、保存中にカーソルが
+固まらない。リクエストにはそのときの `changedtick` を持たせておき、返事が届くまでに打鍵が
+あった場合は、バッファ全体を代表する処理（`modified` のクリア、正規化テキストの適用）を行わない。
+
+`BufEnter` と `FocusGained` では `chatora/syncPage` を投げる。ポーリングするのは画面に出ている
+バッファだけで、離れれば止まる。取り込みは上書きではなくマージなので、ローカルの未保存分は
+消えない。
 
 ### 関連ページパネル（lua/chatora/related.lua)
 
-- エディタウィンドウの下に高さ `related_height`（既定 8）の split。既定は閉。`gR`（バッファローカル）または `:Chatora related` でトグル。
-- 内容: `links1hop` を先頭に、`links2hop` を区切り付きで列挙。`<CR>` でそのページを開く（現在のエディタウィンドウで）。
-- ページバッファを開いた/切り替えた際、パネルが開いていれば内容を自動更新。
+エディタウィンドウに対する split で、`related_position` が `'bottom'`（既定）なら下に高さ
+`related_height`（既定 8）、`'right'` なら右に幅 `related_width`（既定 40）で開く。`gR` か
+`:Chatora related` でトグルする。
+
+内容は `links1hop` を先に、`links2hop` を区切りを挟んで並べたもので、`<CR>` を押すと現在の
+エディタウィンドウでそのページを開く。ページを開いたり切り替えたりしたとき、パネルが開いて
+いれば内容は自動で更新される。
 
 ### ハイライト（lua/chatora/highlight.lua）
 
-`@lsp.type.<token>.cosense` に既定リンクを張る:
-`title→Title, link→Underlined(+fg), projectLink→Constant, externalLink→Underlined, hashtag→Special, code/codeBlock→String系, formula→Special, icon→Identifier, quote→Comment, bold→Bold, italic→Italic, strike→@markup.strikethrough, underline→Underlined, image→Directory, table→Structure`（`default = true` でユーザー上書き可能に）。
+`@lsp.type.<token>.cosense` に既定のハイライトを定義する。すべて `default = true` なので、ユーザー
+の colorscheme や設定が後から上書きできる。
 
-## フェーズ
+色は colorscheme の標準グループから借りるが、**同じ色を二度使わないことを保証する**。ターミナル
+のフォントには大きさの段階が無く、web でフォントサイズが担っている強調の段階を色で表すしか
+ないので、リンクの色と強調の色が同じでは意味が潰れてしまうためである。
 
-- **P1（read-only MVP）**: 認証 / サイドバー / ページ閲覧 + ハイライト / 関連ページ / 検索
-- **P2（編集）**: savePage（diff → preview/submit）/ リンク補完 / 定義ジャンプ / 新規ページ
-- **P3（後回し）**: 画像表示（snacks.nvim image 連携）、hover プレビュー、references（バックリンク）、rename（replace/links）、vector search UI、`chatora` ランチャーコマンド、Service Account 対応強化
+bold や italic といった属性は `Bold` や `@markup.strong` にリンクせず、直接指定する。colorscheme が
+それらのグループをどう定義していても装飾が出るようにするためで、色のほうは `:colorscheme` の
+たびに借り直す。
+
+## まだ無いもの
+
+- **hover プレビュー** — リンクの上でページの冒頭を出す
+- **references（バックリンク）** — 関連ページパネルが 1hop/2hop で代替しているが、LSP の
+  `textDocument/references` としては実装していない
+- **rename** — ページ名の変更と、それを指すリンクの一括置換
+- **Service Account** — ヘッダー（`x-service-account-access-key`）の存在は分かっているが、
+  chatora が扱うのは PAT だけ
 
 ## テスト戦略
 
-- core: fetch をモック注入して API クライアント・credentials（settings.json パスは `CHATORA_SETTINGS_PATH` 環境変数で差し替え、`COSENSE_SETTINGS_PATH` もエイリアスとして有効。Keychain は `security` コマンドを exec ラッパー経由にしてモック）・computeChanges を `bun test` で。
-- server: semantic tokens 変換・補完検出・URI 変換を純関数として切り出して `bun test`。
-- e2e: `nvim --headless` でプラグイン読込 + `:Chatora` コマンド存在確認のスモークテスト（`tests/smoke.lua`）。実 API を叩くテストは書かない（ユーザーが実 PAT で手動確認）。
+テストは 3 段ある。
+
+**core と server の単体テスト**（`bun test`）は純ロジックを直接叩く。`HttpClient` と
+`CommandExecutor` がサービスとして分かれているのは、ここで fetch と `security` コマンドを差し替え
+られるようにするためである。API クライアント、資格情報の解決、`computeChanges`、semantic tokens
+の変換、補完の検出、URI 変換がここに入る。
+
+**スモークテスト**（`tests/smoke.lua`）は headless の Neovim でプラグインを読み込み、描画まで含めて
+検証する。extmark やカーソル位置のような「実際に Neovim がどう振る舞ったか」は、ここでしか
+確かめられない。
+
+**E2E**（`tests/e2e/`）は偽の Cosense サーバーを立てて、headless の Neovim から通しで動かす。
+リクエストの中身（メソッド、URL、body）まで検証するので、書き込みのプロトコルが壊れたらここで
+落ちる。**実 API を叩くテストは書かない。**
+
+すべてを `bun run verify` が順に回す。
 
 ## セキュリティ / 作法
 
