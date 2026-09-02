@@ -1,11 +1,8 @@
 name: Release
 
-# A tag is the trigger, so the author decides when a release happens. What the tag gets is
-# the built server: `scripts/install-server.sh` downloads it instead of building, which is
-# what keeps an install from depending on the reader's toolchain.
 on:
   push:
-    tags: ['v*']
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -22,8 +19,6 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
-      # Never publish an asset from a tree that does not pass. The Neovim half is covered by
-      # the CI workflow on main; this is the half that ends up in the file.
       - run: bun run typecheck
       - run: bun test
 
@@ -33,7 +28,6 @@ jobs:
         working-directory: packages/server/dist
         run: sha256sum main.js > main.js.sha256
 
-      # The tag may be pushed before or after the release is written; either order works.
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
