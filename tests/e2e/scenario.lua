@@ -864,6 +864,14 @@ local ok, err = pcall(function()
   -- ===================================================================================
   step('final-checks')
 
+  -- The server names the build it was made from, so a report can say which one it is.
+  local client = vim.lsp.get_clients({ name = 'chatora' })[1]
+  local reported = client and client.server_info and client.server_info.version
+  if not reported or reported == '' then
+    fail('the server must report a version on initialize, got ' .. vim.inspect(reported))
+  end
+  log('server version: ' .. reported)
+
   local error_notifications = {}
   for _, n in ipairs(notify_log) do
     if n.level == vim.log.levels.ERROR then

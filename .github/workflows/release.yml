@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The build stamps itself with `git describe`; without the tags it would ship
+          # calling itself a bare sha.
+          fetch-tags: true
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
