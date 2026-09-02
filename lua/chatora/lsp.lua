@@ -59,6 +59,26 @@ function M.ensure_start(bufnr)
   return vim.lsp.get_client_by_id(id)
 end
 
+--- A JSON `null` reaches Lua as `vim.NIL`, which is a userdata and therefore **truthy** —
+--- `if result.url then` passes for a field the server explicitly said was empty, and the
+--- next line concatenates a userdata. Every optional field in the `chatora/*` protocol
+--- would need its own guard; dropping the nulls once, here, is what makes `nil` mean absent
+--- everywhere above this.
+local function without_nulls(value)
+  if value == vim.NIL then
+    return nil
+  end
+  if type(value) ~= 'table' then
+    return value
+  end
+  for key, inner in pairs(value) do
+    value[key] = without_nulls(inner)
+  end
+  return value
+end
+
+M.without_nulls = without_nulls
+
 --- Send a chatora/* custom request against the (lazily started) client.
 --- cb(err, result) is always invoked on the main loop.
 function M.request(method, params, cb)
@@ -71,7 +91,7 @@ function M.request(method, params, cb)
 
   local sent = client:request(method, params, function(err, result)
     vim.schedule(function()
-      cb(err, result)
+      cb(err, without_nulls(result))
     end)
   end, bufnr)
 

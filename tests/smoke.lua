@@ -1017,6 +1017,21 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- A JSON null arrives as vim.NIL, which is truthy: without dropping it, every optional
+  -- field in the protocol reads as present and the first concatenation blows up.
+  do
+    local lsp = require('chatora.lsp')
+    local cleaned = lsp.without_nulls({
+      ok = true,
+      url = vim.NIL,
+      meta = { title = 'ページ', photo = vim.NIL, links = { vim.NIL, 'a' } },
+    })
+    assert(cleaned.url == nil, 'a null field must read as absent')
+    assert(cleaned.meta.photo == nil, 'nested too')
+    assert(cleaned.meta.links[2] == 'a', 'and the rest of the table survives')
+    assert(cleaned.meta.title == 'ページ', 'as do the fields that were there')
+  end
+
   -- status: state transitions drive the icon; 'saving' shields against the
   -- modified-flag churn that writing the server's normalized text causes.
   do
