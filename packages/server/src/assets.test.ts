@@ -152,9 +152,14 @@ describe('fetchAsset', () => {
 
   // ImageMagick 7 installs `magick`, 6 installs `convert`, and a machine without either
   // cannot make the fixture — the code under test falls back the same way.
-  const magickCmd = ['magick', 'convert'].find(
-    (cmd) => Bun.spawnSync([cmd, '-version']).exitCode === 0,
-  )
+  const magickCmd = ['magick', 'convert'].find((cmd) => {
+    // Bun throws rather than returning a status when the executable is not on PATH.
+    try {
+      return Bun.spawnSync([cmd, '-version']).exitCode === 0
+    } catch {
+      return false
+    }
+  })
 
   test.skipIf(magickCmd === undefined)(
     'an animated GIF is handed over as its first frame, not as a path magick never wrote',
