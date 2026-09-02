@@ -1,8 +1,14 @@
+<div align="center">
+
 # Chatora
 
-[![Image from Gyazo](https://i.gyazo.com/ffd4dd701f2241264fb6b5587f523480.png)](https://gyazo.com/ffd4dd701f2241264fb6b5587f523480)
+<a href="https://gyazo.com/ffd4dd701f2241264fb6b5587f523480">
+  <img src="https://i.gyazo.com/ffd4dd701f2241264fb6b5587f523480.png" width="140" alt="Chatora">
+</a>
 
 Cosense（旧 Scrapbox）を Neovim から読み書きするためのプラグイン
+
+</div>
 
 ## デモ
 
