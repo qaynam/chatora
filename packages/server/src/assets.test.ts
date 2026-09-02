@@ -212,10 +212,6 @@ describe('fetchAsset', () => {
     },
   )
 
-  // Only successes are cached, so a picture that is gone was asked for again on every
-  // redraw: 69 requests for one deleted image in a real log, and rate limiting from the
-  // hosts that noticed. A failure is now remembered, and retried three times at widening
-  // intervals before the URL is left alone.
   describe('a failed asset is remembered', () => {
     const missing = () => new Response('', { status: 404 })
 

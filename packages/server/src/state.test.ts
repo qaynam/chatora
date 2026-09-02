@@ -181,9 +181,6 @@ describe('SessionState.getTitles (cached in memory and on disk)', () => {
     expect(calls).toHaveLength(1)
   })
 
-  // The cache is written when the answer arrives, so everything that asks in the meantime
-  // used to miss it and go out too — 14 identical requests inside 1.7s against a real
-  // project, all of them answered with 429.
   test('callers that arrive while the index is in flight join it instead of asking again', async () => {
     const { layer: httpLayer, calls } = testHttpClient(() => json([]))
     const { layer: credLayer } = testCredentialStore(Option.some(PAT))

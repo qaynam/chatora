@@ -142,11 +142,10 @@ export const makeSessionStateLayer = (
       const titlesCacheRef = yield* Ref.make<ReadonlyMap<string, TitlesCacheEntry>>(new Map())
       const usersCacheRef = yield* Ref.make<ReadonlyMap<string, UsersCacheEntry>>(new Map())
       const vectorCacheRef = yield* Ref.make<ReadonlyMap<string, VectorCacheEntry>>(new Map())
-      // The index is written to the cache only once the answer arrives, so everything that
-      // asks while the first request is still in flight misses it and goes out too. Measured
-      // against a large project: 14 identical requests inside 1.7 seconds, every one of them
-      // answered with 429 — and a failed fetch caches nothing, so the next redraw did it
-      // again. A later caller joins the request already running instead.
+      // The cache is written only when the answer arrives, so anything that asks while the
+      // first request is in flight misses it and goes out too: 14 identical requests inside
+      // 1.7 seconds against one project, every one answered with 429. A failed fetch caches
+      // nothing, so the next redraw repeated it.
       const titlesPendingRef = yield* SynchronizedRef.make<
         ReadonlyMap<string, Deferred.Deferred<readonly TitleEntry[], CosenseApiError>>
       >(new Map())

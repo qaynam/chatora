@@ -684,8 +684,7 @@ export const fetchAsset = (params: {
       return yield* withSize(yield* applyBorder(cacheDir, hash, drawable, border))
     }
 
-    // Nothing on disk. Before going out, ask whether this URL just failed: only successes
-    // are cached, so a picture that is gone would otherwise be re-fetched on every redraw.
+    // Nothing on disk, and nothing cached for a failure either — see FAILURE_BACKOFF_MS.
     const remembered = yield* cache.recallFailure(params.url)
     if (Option.isSome(remembered)) return remembered.value
 
