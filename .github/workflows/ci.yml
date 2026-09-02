@@ -10,7 +10,13 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # macOS is where the Keychain path can actually run; Linux is where most contributors
+    # and most CI live. Neither alone covers this.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -24,15 +30,22 @@ jobs:
           node-version: 20
 
       # The smoke test and the E2E both drive a headless Neovim; >= 0.11 is required.
-      - name: Install Neovim
+      - name: Install Neovim (Linux)
+        if: runner.os == 'Linux'
         run: |
           curl -fsSLO https://github.com/neovim/neovim/releases/download/stable/nvim-linux-x86_64.tar.gz
           tar xzf nvim-linux-x86_64.tar.gz
           echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
 
+      - name: Install Neovim (macOS)
+        if: runner.os == 'macOS'
+        run: brew install neovim
+
       # ImageMagick backs the SVG, GIF and border paths. Ubuntu ships version 6, whose
-      # binary is `convert`; both it and 7's `magick` are handled.
+      # binary is `convert`; the tests take either that or 7's `magick`, and skip without
+      # both — which is what the macOS runner does rather than pay for a brew install.
       - name: Install ImageMagick
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y imagemagick
 
       - run: bun install --frozen-lockfile

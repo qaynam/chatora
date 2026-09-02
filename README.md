@@ -54,10 +54,15 @@ Cosense（旧 Scrapbox）を Neovim から読み書きするためのプラグ�
 | Neovim  | >= 0.11                     |
 | Node.js | >= 20（LSP サーバーの実行） |
 | bun     | ビルド時に必要              |
+| OS      | macOS（下記）               |
 
 このほか、[ImageMagick](https://imagemagick.org/) と画像描画プラグインがあれば画像を表示でき
 （[画像の表示](docs/FEATURES.md#画像の表示)）、クリップボード取り出しツールがあれば画像を貼り付け
 られます（[画像の貼り付け](docs/FEATURES.md#画像の貼り付け)）。どちらも任意です。
+
+PAT の保存先が macOS Keychain なので、**アカウントの追加と切り替えは macOS でしか動きません**。
+Linux や Windows でも、環境変数 `COSENSE_PAT` に PAT を入れておけば読み書きそのものは動きます。
+他の OS の資格情報ストアには対応していません。
 
 ### ターミナル
 

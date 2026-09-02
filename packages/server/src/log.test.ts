@@ -10,16 +10,25 @@ const withEnv = async (env: Record<string, string | undefined>, run: () => Promi
     CHATORA_LOG: process.env.CHATORA_LOG,
     CHATORA_STATE_DIR: process.env.CHATORA_STATE_DIR,
   }
-  Object.assign(process.env, env)
+  apply(env)
   try {
     await run()
   } finally {
-    Object.assign(process.env, saved)
+    apply(saved)
+  }
+}
+
+// `process.env.X = undefined` sets the *string* "undefined" — the variable has to be deleted
+// to be unset, and a test that reads it as "not set" fails otherwise.
+function apply(env: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
   }
 }
 
 afterEach(() => {
-  process.env.CHATORA_LOG = undefined
+  delete process.env.CHATORA_LOG
 })
 
 describe('log', () => {

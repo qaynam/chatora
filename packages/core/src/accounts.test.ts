@@ -88,7 +88,9 @@ const run = <A, E>(
     ),
   )
 
-describe('AccountStore', () => {
+// The store reaches macOS Keychain for the PAT, and the implementation refuses outright on
+// anything else — so on another platform there is nothing here to exercise.
+describe.skipIf(process.platform !== 'darwin')('AccountStore', () => {
   let stateDir: string
   let originalStateDir: string | undefined
 
