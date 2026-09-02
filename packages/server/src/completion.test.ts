@@ -50,10 +50,10 @@ describe('vectorCandidates', () => {
   test('preserves score order and maps exists', () => {
     const out = vectorCandidates([
       { title: 'Sakura', exists: true },
-      { title: 'sakura施策' },
+      { title: 'sakura の記録' },
       { title: '未作成ページ', exists: false },
     ])
-    expect(out.map((c) => c.title)).toEqual(['Sakura', 'sakura施策', '未作成ページ'])
+    expect(out.map((c) => c.title)).toEqual(['Sakura', 'sakura の記録', '未作成ページ'])
     expect(out.map((c) => c.exists)).toEqual([true, true, false])
   })
 

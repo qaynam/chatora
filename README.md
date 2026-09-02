@@ -670,8 +670,8 @@ PAT ではこの設定を読めない（`/api/projects/<name>` が 401 を返す
 
 ```
   URL          https://scrapbox.io/my-project/設計メモ
-  作成         ◍ taro   3日前
-  更新         ◍ はなこ        12分前
+  作成         ◍ taro        3日前
+  更新         ◍ はなこ      12分前
   共同編集者   ◍ ◍ ken、mika
   ─────────────────────────────────────
   プロジェクト my-project

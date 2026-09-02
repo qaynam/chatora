@@ -116,7 +116,7 @@ const rendered = (text: string, line: number): string => {
 }
 
 describe('external links render as their label', () => {
-  const URL = 'https://note.com/sakura/n/n0123456789ab'
+  const URL = 'https://note.com/example/n/n0123456789ab'
 
   test('[label url]: the URL and its separating space are hidden', () => {
     const label = 'note: 長いラベルでも折り返さずにそのまま見せる'
@@ -125,8 +125,8 @@ describe('external links render as their label', () => {
   })
 
   test('[url label]: same, with the URL leading', () => {
-    const text = `タイトル\n[${URL} sakura note]`
-    expect(rendered(text, 1)).toBe('sakura note')
+    const text = `タイトル\n[${URL} note の記事]`
+    expect(rendered(text, 1)).toBe('note の記事')
   })
 
   test('[url]: kept verbatim — hiding it would leave nothing to click', () => {
