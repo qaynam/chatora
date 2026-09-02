@@ -4,7 +4,17 @@
 
 Cosense（旧 Scrapbox）を Neovim から読み書きするためのプラグイン
 
-名前の由來：
+## デモ
+
+[![Image from Gyazo](https://i.gyazo.com/37dd99cd83a884213a5d1422d93667d2.gif)](https://gyazo.com/37dd99cd83a884213a5d1422d93667d2)
+
+**記法比較**
+
+![Image from Gyazo](https://gyazo.com/64a2afa81502a5152d53530239ae5950.png)
+![Image from Gyazo](https://gyazo.com/68b9ab61aebd4976a1ac66be235cc7ea.png)
+![Image from Gyazo](https://gyazo.com/5424457517ae6a2f9cca2d5c7592c03b.png)
+
+## 名前の由來
 
 - 日本語の茶トラ猫から来ている
 - [![Image from Gyazo](https://i.gyazo.com/53c8c22753ff50e183b6c0c9c69dc3a5.gif)](https://gyazo.com/53c8c22753ff50e183b6c0c9c69dc3a5)
@@ -42,6 +52,18 @@ Cosense（旧 Scrapbox）を Neovim から読み書きするためのプラグ�
 このほか、[ImageMagick](https://imagemagick.org/) と画像描画プラグインがあれば画像を表示でき
 （[画像の表示](docs/FEATURES.md#画像の表示)）、クリップボード取り出しツールがあれば画像を貼り付け
 られます（[画像の貼り付け](docs/FEATURES.md#画像の貼り付け)）。どちらも任意です。
+
+### ターミナル
+
+テキストの読み書きはどのターミナルでも動きます。ターミナルによって変わるのは、画像を描けるか
+どうかだけです。
+
+| ターミナル               | 画像                                                                                            |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| Ghostty                  | 確認済み（作者が常用しているのはここ）                                                          |
+| kitty / WezTerm          | 同じ kitty graphics protocol なので動くはずですが、未確認です                                   |
+| VS Code の内蔵ターミナル | 設定すれば描けます。[VS Code で画像を出す](docs/FEATURES.md#vs-code-で画像を出す)を見てください |
+| そのほか                 | kitty graphics protocol か sixel のどちらかを話せば描けます                                     |
 
 ## インストール
 

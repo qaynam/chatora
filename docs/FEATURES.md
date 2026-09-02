@@ -310,6 +310,39 @@ ImageMagick（`brew install imagemagick`）、そして描画プラグインが�
 画像の取得は chatora の LSP サーバーが PAT 付きで行いローカルにキャッシュするため、
 プライベートプロジェクトのアイコンも表示できる。
 
+### VS Code で画像を出す
+
+VS Code の内蔵ターミナルが話すのは **sixel と iTerm inline images** で、kitty graphics protocol は
+話さない（描画は xterm.js の addon-image が担当していて、対応は macOS と Linux のみ）。そのため
+snacks.nvim では描けず、image.nvim の sixel バックエンドに切り替える必要がある。
+
+1. VS Code の `settings.json` で画像を有効にする。既定は無効で、設定したあとはターミナルを開き
+   直さないと効かない。
+
+   ```json
+   { "terminal.integrated.enableImages": true }
+   ```
+
+2. image.nvim のバックエンドをターミナルごとに分ける。backend は setup のときに一つ決まるので、
+   ここで振り分けておかないと、Ghostty で sixel を送って何も出ない（あるいはその逆になる）。
+
+   ```lua
+   {
+     '3rd/image.nvim',
+     opts = {
+       backend = vim.env.TERM_PROGRAM == 'vscode' and 'sixel' or 'kitty',
+       processor = 'magick_cli',
+     },
+   }
+   ```
+
+3. sixel の生成は ImageMagick がやるので、SIXEL コーダー入りのものが要る。
+   `magick -list format | grep -i SIXEL` に `SIXEL* SIXEL rw-` が出れば入っている
+   （Homebrew の imagemagick には入っている）。
+
+chatora 側の `image_backend` は既定の `'auto'` のままでよい。image.nvim があればそちらが優先され、
+プロトコルの選択は上の 2 に任せられる。
+
 `[[…]]`（大きい記法）は画像にもアイコンにも効く。`[[name.icon]]` が単独で行にあるときは
 `image_height_large` の大きさで描き、文中にあるときは 1 行のまま（インラインの行に背の高い
 グリフを置く場所が無いため）。
