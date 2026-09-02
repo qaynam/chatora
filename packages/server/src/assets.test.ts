@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Credential } from '@chatora/core'
 import { CredentialStore, HttpClient } from '@chatora/core'
-import { Effect, Layer, Option } from 'effect'
+import { Effect, Layer, Option, TestClock, TestContext } from 'effect'
 import { type AssetCache, AssetCacheLive, fetchAsset } from './assets'
 import { makeSessionStateLayer, type SessionState } from './state'
 
@@ -64,6 +64,21 @@ const headerOf = (call: Call | undefined, name: string): string | undefined => {
   const headers = call?.init.headers as Record<string, string> | undefined
   return headers?.[name]
 }
+
+/** Like runOnce, but with a clock the test drives — the failure cooldowns are minutes long. */
+const runOnClock = <A, E>(
+  program: Effect.Effect<A, E, SessionState | HttpClient | AssetCache>,
+  httpLayer: Layer.Layer<HttpClient>,
+  credentialLayer: Layer.Layer<CredentialStore>,
+): Promise<A> =>
+  Effect.runPromise(
+    program.pipe(
+      Effect.provide(httpLayer),
+      Effect.provide(AssetCacheLive),
+      Effect.provide(makeSessionStateLayer(ORIGIN).pipe(Layer.provide(credentialLayer))),
+      Effect.provide(TestContext.TestContext),
+    ),
+  )
 
 const runOnce = <A, E>(
   program: Effect.Effect<A, E, SessionState | HttpClient | AssetCache>,
@@ -196,6 +211,64 @@ describe('fetchAsset', () => {
       expect(result.height).toBe(8)
     },
   )
+
+  // Only successes are cached, so a picture that is gone was asked for again on every
+  // redraw: 69 requests for one deleted image in a real log, and rate limiting from the
+  // hosts that noticed. A failure is now remembered, and retried three times at widening
+  // intervals before the URL is left alone.
+  describe('a failed asset is remembered', () => {
+    const missing = () => new Response('', { status: 404 })
+
+    test('a second request inside the cooldown never reaches the network', async () => {
+      const { layer: httpLayer, calls } = testHttpClient(missing)
+      const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+      const url = 'https://cdn.example.com/gone.png'
+      const program = Effect.gen(function* () {
+        yield* fetchAsset({ project: 'p', url })
+        return yield* fetchAsset({ project: 'p', url })
+      })
+      const result = await runOnClock(program, httpLayer, credLayer)
+      expect(result.ok).toBe(false)
+      expect(calls).toHaveLength(1)
+    })
+
+    test('it is retried three times at widening intervals, then left alone', async () => {
+      const { layer: httpLayer, calls } = testHttpClient(missing)
+      const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+      const url = 'https://cdn.example.com/still-gone.png'
+      const program = Effect.gen(function* () {
+        yield* fetchAsset({ project: 'p', url })
+        yield* TestClock.adjust('31 seconds')
+        yield* fetchAsset({ project: 'p', url })
+        yield* TestClock.adjust('3 minutes')
+        yield* fetchAsset({ project: 'p', url })
+        yield* TestClock.adjust('11 minutes')
+        yield* fetchAsset({ project: 'p', url })
+        yield* TestClock.adjust('24 hours')
+        yield* fetchAsset({ project: 'p', url })
+      })
+      await runOnClock(program, httpLayer, credLayer)
+      // The first attempt plus three retries; the fifth call, a day later, sends nothing.
+      expect(calls).toHaveLength(4)
+    })
+
+    test('a Retry-After longer than our own wait is honoured', async () => {
+      const { layer: httpLayer, calls } = testHttpClient(
+        () => new Response('', { status: 429, headers: { 'retry-after': '300' } }),
+      )
+      const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+      const url = 'https://cdn.example.com/rate-limited.png'
+      const program = Effect.gen(function* () {
+        yield* fetchAsset({ project: 'p', url })
+        yield* TestClock.adjust('31 seconds') // past our own step, inside the server's
+        yield* fetchAsset({ project: 'p', url })
+        yield* TestClock.adjust('5 minutes')
+        yield* fetchAsset({ project: 'p', url })
+      })
+      await runOnClock(program, httpLayer, credLayer)
+      expect(calls).toHaveLength(2)
+    })
+  })
 
   test('an SVG that cannot be rasterized reports why instead of a path nothing can draw', async () => {
     // Terminal graphics composite raster formats only, so handing back the .svg

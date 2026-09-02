@@ -11,7 +11,7 @@ import type {
   VectorResultPage,
 } from '@chatora/core'
 import { CredentialStore, makeCosenseApi } from '@chatora/core'
-import { Clock, Context, Effect, Layer, Option, Ref, SynchronizedRef } from 'effect'
+import { Clock, Context, Deferred, Effect, Layer, Option, Ref, SynchronizedRef } from 'effect'
 import { loadTitles, saveTitles } from './titleStore'
 
 export interface BasePageState {
@@ -142,6 +142,14 @@ export const makeSessionStateLayer = (
       const titlesCacheRef = yield* Ref.make<ReadonlyMap<string, TitlesCacheEntry>>(new Map())
       const usersCacheRef = yield* Ref.make<ReadonlyMap<string, UsersCacheEntry>>(new Map())
       const vectorCacheRef = yield* Ref.make<ReadonlyMap<string, VectorCacheEntry>>(new Map())
+      // The index is written to the cache only once the answer arrives, so everything that
+      // asks while the first request is still in flight misses it and goes out too. Measured
+      // against a large project: 14 identical requests inside 1.7 seconds, every one of them
+      // answered with 429 — and a failed fetch caches nothing, so the next redraw did it
+      // again. A later caller joins the request already running instead.
+      const titlesPendingRef = yield* SynchronizedRef.make<
+        ReadonlyMap<string, Deferred.Deferred<readonly TitleEntry[], CosenseApiError>>
+      >(new Map())
       const pagesRef = yield* Ref.make<ReadonlyMap<string, BasePageState>>(new Map())
 
       // SynchronizedRef serializes concurrent callers onto one CredentialStore.resolve call
@@ -282,6 +290,17 @@ export const makeSessionStateLayer = (
           yield* saveTitles(project, entry)
         })
 
+      const fetchTitles = (project: string, now: number) =>
+        Effect.gen(function* () {
+          const apiOpt = yield* getApi()
+          if (Option.isNone(apiOpt)) return []
+          const titles = yield* apiOpt.value.searchTitles(project)
+          const entry = { fetchedAt: now, titles }
+          yield* Ref.update(titlesCacheRef, (map) => new Map(map).set(project, entry))
+          yield* saveTitles(project, entry)
+          return titles
+        })
+
       const getTitles: SessionStateShape['getTitles'] = (project) =>
         Effect.gen(function* () {
           const now = yield* Clock.currentTimeMillis
@@ -300,13 +319,44 @@ export const makeSessionStateLayer = (
             }
           }
 
-          const apiOpt = yield* getApi()
-          if (Option.isNone(apiOpt)) return []
-          const titles = yield* apiOpt.value.searchTitles(project)
-          const entry = { fetchedAt: now, titles }
-          yield* Ref.update(titlesCacheRef, (map) => new Map(map).set(project, entry))
-          yield* saveTitles(project, entry)
-          return titles
+          type TitlesDeferred = Deferred.Deferred<readonly TitleEntry[], CosenseApiError>
+          type Joined = readonly [
+            { deferred: TitlesDeferred; isNew: boolean },
+            ReadonlyMap<string, TitlesDeferred>,
+          ]
+          const { deferred, isNew } = yield* SynchronizedRef.modifyEffect(
+            titlesPendingRef,
+            (pending): Effect.Effect<Joined> => {
+              const existing = pending.get(project)
+              if (existing !== undefined) {
+                return Effect.succeed([{ deferred: existing, isNew: false }, pending])
+              }
+              return Deferred.make<readonly TitleEntry[], CosenseApiError>().pipe(
+                Effect.map((fresh) => [
+                  { deferred: fresh, isNew: true },
+                  new Map(pending).set(project, fresh),
+                ]),
+              )
+            },
+          )
+
+          if (isNew) {
+            yield* fetchTitles(project, now).pipe(
+              Effect.exit,
+              Effect.flatMap((exit) => Deferred.done(deferred, exit)),
+              Effect.zipRight(
+                SynchronizedRef.update(titlesPendingRef, (pending) => {
+                  if (!pending.has(project)) return pending
+                  const next = new Map(pending)
+                  next.delete(project)
+                  return next
+                }),
+              ),
+              Effect.forkDaemon,
+            )
+          }
+
+          return yield* Deferred.await(deferred)
         })
 
       const getPage: SessionStateShape['getPage'] = (uri) =>

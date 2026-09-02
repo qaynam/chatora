@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { Credential, HttpClientShape } from '@chatora/core'
 import { HttpClient } from '@chatora/core'
-import { Context, Data, Deferred, Effect, Layer, Option, SynchronizedRef } from 'effect'
+import { Clock, Context, Data, Deferred, Effect, Layer, Option, Ref, SynchronizedRef } from 'effect'
 import { resolveGyazo } from './gyazo'
 import { imageSizeOf } from './imageSize'
 import { log } from './log'
@@ -33,7 +33,18 @@ export type FetchAssetResult = FetchAssetSuccess | ErrEnvelope
 class AssetFetchError extends Data.TaggedError('AssetFetchError')<{
   readonly status: number
   readonly message: string
+  /** From `Retry-After`, when the server named a wait of its own (429 and 503 do). */
+  readonly retryAfterMs?: number
 }> {}
+
+/** `Retry-After` is either a number of seconds or an HTTP date; both are worth honouring. */
+const retryAfterMs = (header: string | null): number | undefined => {
+  if (header === null) return undefined
+  const seconds = Number(header)
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
+  const at = Date.parse(header)
+  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
+}
 
 // ---------------------------------------------------------------------------
 // cache directory + on-disk lookup
@@ -194,14 +205,17 @@ const fetchAndCache = (
   cacheDir: string,
   hash: string,
   url: string,
+  onFailure: (status: number, retryAfterMs?: number) => Effect.Effect<void>,
 ): Effect.Effect<FetchAssetResult> =>
   Effect.gen(function* () {
     const response = yield* fetchFollowingRedirects(fetch, headersFor, url)
     if (!response.ok) {
+      const wait = retryAfterMs(response.headers.get('retry-after'))
       return yield* Effect.fail(
         new AssetFetchError({
           status: response.status,
           message: `HTTP ${response.status} ${response.statusText}`.trim(),
+          ...(wait === undefined ? {} : { retryAfterMs: wait }),
         }),
       )
     }
@@ -217,7 +231,9 @@ const fetchAndCache = (
     // A failed asset is deliberately silent in the UI, since a missing picture is
     // cosmetic — which is exactly why it is worth recording somewhere.
     Effect.tapError((error) =>
-      log('warn', 'asset fetch failed', { url, status: error.status, detail: error.message }),
+      log('warn', 'asset fetch failed', { url, status: error.status, detail: error.message }).pipe(
+        Effect.zipRight(onFailure(error.status, error.retryAfterMs)),
+      ),
     ),
     Effect.catchTag('AssetFetchError', (error) => Effect.succeed(fromAssetFetchError(error))),
   )
@@ -482,6 +498,33 @@ export interface AssetCacheShape {
     key: string,
     effect: Effect.Effect<FetchAssetResult>,
   ) => Effect.Effect<FetchAssetResult>
+
+  /**
+   * The remembered failure for `key` while it is still cooling off, or none when the network
+   * may be tried again.
+   */
+  readonly recallFailure: (key: string) => Effect.Effect<Option.Option<FetchAssetResult>>
+
+  /** Remember that `key` failed, and hold off the next attempt for longer than the last. */
+  readonly noteFailure: (key: string, status: number, wait?: number) => Effect.Effect<void>
+
+  /** Forget `key`'s failures — it answered. */
+  readonly noteSuccess: (key: string) => Effect.Effect<void>
+}
+
+/**
+ * How long a failed asset waits before it is fetched again, per attempt. Only successes are
+ * cached, so without this a picture that 404s is re-requested on every redraw — measured at
+ * 69 requests for one deleted image, and 24 rate-limited ones for a GitHub preview that had
+ * already said no. After the last of these the URL is left alone for the session.
+ */
+const FAILURE_BACKOFF_MS = [30_000, 120_000, 600_000] as const
+
+interface FailureRecord {
+  readonly attempts: number
+  /** Epoch ms before which nothing is sent; `Infinity` once the attempts are spent. */
+  readonly until: number
+  readonly status: number
 }
 
 export class AssetCache extends Context.Tag('@chatora/server/AssetCache')<
@@ -500,6 +543,40 @@ export const AssetCacheLive: Layer.Layer<AssetCache> = Layer.effect(
     const pendingRef = yield* SynchronizedRef.make<
       ReadonlyMap<string, Deferred.Deferred<FetchAssetResult>>
     >(new Map())
+    const failuresRef = yield* Ref.make<ReadonlyMap<string, FailureRecord>>(new Map())
+
+    const recallFailure: AssetCacheShape['recallFailure'] = (key) =>
+      Effect.gen(function* () {
+        const record = (yield* Ref.get(failuresRef)).get(key)
+        if (record === undefined) return Option.none()
+        const now = yield* Clock.currentTimeMillis
+        if (now >= record.until) return Option.none()
+        return Option.some(
+          UNAUTHORIZED_STATUSES.has(record.status)
+            ? err('unauthorized', 'authentication failed')
+            : err('error', `HTTP ${record.status}`),
+        )
+      })
+
+    const noteFailure: AssetCacheShape['noteFailure'] = (key, status, wait) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis
+        const attempts = ((yield* Ref.get(failuresRef)).get(key)?.attempts ?? 0) + 1
+        const backoff = FAILURE_BACKOFF_MS[attempts - 1]
+        // A server that named its own wait gets it, but never less than our own step: the
+        // point is to stop asking, not to obey a `Retry-After: 1`.
+        const until =
+          backoff === undefined ? Number.POSITIVE_INFINITY : now + Math.max(backoff, wait ?? 0)
+        yield* Ref.update(failuresRef, (map) => new Map(map).set(key, { attempts, until, status }))
+      })
+
+    const noteSuccess: AssetCacheShape['noteSuccess'] = (key) =>
+      Ref.update(failuresRef, (map) => {
+        if (!map.has(key)) return map
+        const next = new Map(map)
+        next.delete(key)
+        return next
+      })
 
     const dedupe: AssetCacheShape['dedupe'] = (key, effect) =>
       Effect.gen(function* () {
@@ -544,7 +621,7 @@ export const AssetCacheLive: Layer.Layer<AssetCache> = Layer.effect(
         return yield* Deferred.await(deferred)
       })
 
-    return AssetCache.of({ dedupe })
+    return AssetCache.of({ dedupe, recallFailure, noteFailure, noteSuccess })
   }),
 )
 
@@ -607,6 +684,11 @@ export const fetchAsset = (params: {
       return yield* withSize(yield* applyBorder(cacheDir, hash, drawable, border))
     }
 
+    // Nothing on disk. Before going out, ask whether this URL just failed: only successes
+    // are cached, so a picture that is gone would otherwise be re-fetched on every redraw.
+    const remembered = yield* cache.recallFailure(params.url)
+    if (Option.isSome(remembered)) return remembered.value
+
     const credential = yield* session.getCredential()
     const headersFor = headersForUrl(session.origin, credential)
 
@@ -621,8 +703,11 @@ export const fetchAsset = (params: {
     })
     const fetched = yield* cache.dedupe(
       params.url,
-      fetchAndCache(http.fetch, headersFor, cacheDir, hash, source),
+      fetchAndCache(http.fetch, headersFor, cacheDir, hash, source, (status, wait) =>
+        cache.noteFailure(params.url, status, wait),
+      ),
     )
+    if (fetched.ok) yield* cache.noteSuccess(params.url)
     const drawable = yield* applyGifFrame(
       cacheDir,
       hash,
