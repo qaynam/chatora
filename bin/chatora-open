@@ -1,0 +1,59 @@
+#!/bin/sh
+# Hands one URL to the Neovim that is already running chatora, or to the browser.
+#
+# Every link the reader clicks arrives here once the handler is installed, so anything that
+# is not a Cosense page — and every failure — has to reach the browser. A link that opens
+# nothing is worse than one that opens the wrong window.
+set -eu
+
+url=${1:-}
+[ -n "$url" ] || exit 0
+
+data_dir=${CHATORA_URL_HANDLER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/chatora/url-handler}
+[ -f "$data_dir/env" ] && . "$data_dir/env"
+NVIM=${NVIM:-nvim}
+TMUX_BIN=${TMUX_BIN:-tmux}
+
+fallback=$(cat "$data_dir/fallback" 2>/dev/null || echo 'com.apple.Safari')
+origins=$(cat "$data_dir/origins" 2>/dev/null || echo 'scrapbox.io')
+
+# Never `open` without a bundle id: the system default is this handler, so the URL would
+# come straight back here.
+browser() {
+  open -b "$fallback" "$url" 2>/dev/null ||
+    open -b com.apple.Safari "$url" 2>/dev/null ||
+    true
+  exit 0
+}
+
+host=$(printf '%s' "$url" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]+).*#\1#')
+match=no
+for origin in $origins; do
+  [ "$host" = "$origin" ] && match=yes
+done
+[ "$match" = yes ] || browser
+
+for sock in "${TMPDIR:-/tmp}"/nvim."$(id -un)"/*/nvim.*.0; do
+  [ -S "$sock" ] || continue
+  [ "$("$NVIM" --server "$sock" --remote-expr 'exists(":Chatora")' 2>/dev/null)" = "2" ] || continue
+
+  "$NVIM" --server "$sock" --remote-send "<C-\\><C-N>:Chatora open $url<CR>" 2>/dev/null || browser
+
+  # Neovim knows which pane holds it and which terminal drew it; the process tree does not.
+  pane=$("$NVIM" --server "$sock" --remote-expr 'getenv("TMUX_PANE")' 2>/dev/null || true)
+  case $pane in
+    %*)
+      "$TMUX_BIN" select-window -t "$pane" 2>/dev/null || true
+      "$TMUX_BIN" switch-client -t "$pane" 2>/dev/null || true
+      ;;
+  esac
+  term=$("$NVIM" --server "$sock" --remote-expr 'getenv("TERM_PROGRAM")' 2>/dev/null || true)
+  case $term in
+    '' | v:null) ;;
+    *) open -a "$term" 2>/dev/null || true ;;
+  esac
+  exit 0
+done
+
+# Nothing is running chatora, and which terminal to start one in would be a guess.
+browser

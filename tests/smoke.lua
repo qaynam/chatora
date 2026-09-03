@@ -1184,6 +1184,73 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- Reopening a page paints what it said last time, synchronously. Neovim restores the
+  -- cursor the moment BufReadCmd returns, so a buffer that comes back empty answers a
+  -- jumplist entry past line 1 with E19 before the fetch has landed.
+  do
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
+    -- Opening a page opens the related panel; this test is about the buffer, and the extra
+    -- window outlives it otherwise.
+    local orig_auto = config.options.related_auto_open
+    config.options.related_auto_open = false
+    local lines = {}
+    for i = 1, 40 do
+      lines[i] = ('%02d 行目'):format(i)
+    end
+    lsp.ensure_start = function() end
+    lsp.request = function() end
+    lsp.request_ok = function(method, _, cb)
+      if method ~= 'chatora/openPage' then
+        return
+      end
+      -- Deferred, like the real one: the point is what the buffer holds before it answers.
+      vim.defer_fn(function()
+        cb({
+          ok = true,
+          uri = 'cosense://proj/ジャンプ',
+          text = table.concat(lines, '\n'),
+          exists = true,
+          meta = { linked = 0, views = 0, linesCount = 40, charsCount = 200, pageRank = 0, snapshotCount = 0, updated = 0, created = 0, pin = 0 },
+        })
+      end, 10)
+    end
+
+    -- Its own window: an earlier test leaves the sidebar pinning the current one.
+    local before = vim.api.nvim_get_current_win()
+    vim.cmd('new')
+    local win = vim.api.nvim_get_current_win()
+    vim.cmd('edit cosense://proj/ジャンプ')
+    vim.wait(500, function() return vim.api.nvim_buf_line_count(0) > 5 end)
+    assert(vim.api.nvim_buf_line_count(0) == 40, 'the page loads')
+
+    local page = vim.api.nvim_get_current_buf()
+    vim.cmd('enew')
+    vim.api.nvim_buf_delete(page, { force = true })
+    vim.cmd('edit cosense://proj/ジャンプ')
+    assert(
+      vim.api.nvim_buf_line_count(0) == 40,
+      'a reopened page must have its lines before the fetch returns, got '
+        .. vim.api.nvim_buf_line_count(0)
+    )
+    assert(not vim.bo.modified, 'and must not look edited')
+    assert(pcall(vim.api.nvim_win_set_cursor, 0, { 20, 0 }), 'so the cursor can go back where it was')
+
+    vim.wait(500)
+    assert(vim.api.nvim_win_get_cursor(0)[1] == 20, 'and the fetch must not move it')
+
+    lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
+    config.options.related_auto_open = orig_auto
+    vim.api.nvim_buf_delete(vim.api.nvim_get_current_buf(), { force = true })
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_close(win, true)
+    end
+    if vim.api.nvim_win_is_valid(before) then
+      vim.api.nvim_set_current_win(before)
+    end
+  end
+
   -- buftext: only the run that differs is written, so the extmarks around it survive.
   do
     local buftext = require('chatora.buftext')

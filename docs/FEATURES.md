@@ -608,3 +608,38 @@ chatora https://scrapbox.io/proj/Page_Title   # そのページを開く
 公開プロジェクトなら読み取り専用で読める。
 
 残りの引数はそのまま nvim に渡る（`chatora -p proj notes.md`）。
+
+### Slack や Chrome のリンクを chatora で開く（macOS）
+
+Cosense のリンクをクリックしたとき、ブラウザではなく**今動いている chatora**でそのページを
+開ける。
+
+```sh
+bin/chatora-url-handler install
+```
+
+これがやること:
+
+1. 今の既定ブラウザを控える（Cosense 以外のリンクはそこへ流すため）
+2. URL を受け取る小さなアプリを `~/Applications/Chatora Open.app` に作る
+3. `http` / `https` のハンドラとして LaunchServices に登録する
+
+最後に**システム設定 → デスクトップとDock → デフォルトのWebブラウザ**で `Chatora Open` を選ぶ。
+ここだけ手動なのは、macOS が既定ブラウザを変える API を閉じているため。
+
+以後クリックしたリンクは、
+
+- **Cosense のページ** → 動いている chatora に `:Chatora open` で流し、tmux のペインと
+  ターミナルを前面に出す
+- **それ以外** → 控えておいたブラウザへ
+- **chatora が動いていない / 何か失敗した** → 同じくブラウザへ
+
+**必ずブラウザに落ちる**のが設計の要で、既定ブラウザを預かる以上、リンクが「どこも開かない」に
+なってはいけない。
+
+対象にする origin は `~/.local/share/chatora/url-handler/origins` に 1 行 1 件で書く
+（既定は `scrapbox.io`）。今どうなっているかは `chatora-url-handler status`、元に戻すのは
+`chatora-url-handler uninstall`。
+
+配布物をダウンロードしないので、**署名も公証も要らない**（`osacompile` が ad-hoc 署名まで
+済ませ、ダウンロードしていないアプリには Gatekeeper が見る quarantine 属性が付かない）。

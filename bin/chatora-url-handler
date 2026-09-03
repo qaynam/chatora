@@ -1,0 +1,143 @@
+#!/bin/sh
+# Makes clicking a Cosense link open the page in chatora instead of a browser.
+#
+#   chatora-url-handler <install|status|uninstall>
+#
+# macOS routes links by application, so the handler is one: AppleScript that hands the URL to
+# `chatora-open`. See docs/FEATURES.md for why it needs no signing.
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+data_dir=${CHATORA_URL_HANDLER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/chatora/url-handler}
+app_dir=${CHATORA_URL_HANDLER_APPS:-$HOME/Applications}
+app="$app_dir/Chatora Open.app"
+bundle_id=dev.qaynam.chatora.open
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+
+die() {
+  echo "chatora-url-handler: $1" >&2
+  exit 1
+}
+
+[ "$(uname -s)" = Darwin ] || die 'this only exists on macOS; elsewhere the browser is the way in'
+
+# `defaults read` prints each entry's keys in alphabetical order, so RoleAll arrives *before*
+# the scheme it belongs to: the entries are folded onto one line rather than read in order.
+current_browser() {
+  defaults read com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers 2>/dev/null |
+    tr -d '\n ' | tr '}' '\n' | grep 'LSHandlerURLScheme=https;' |
+    sed -E 's/.*LSHandlerRoleAll="?([^";]+).*/\1/' | head -1
+}
+
+install_handler() {
+  mkdir -p "$data_dir" "$app_dir"
+
+  # Never record an empty or self-referential fallback: the handler would then hand the URL
+  # to the system default, which by then is the handler itself.
+  previous=$(current_browser)
+  case $previous in
+    '' | "$bundle_id") previous=$(cat "$data_dir/fallback" 2>/dev/null || true) ;;
+  esac
+  [ -n "$previous" ] || previous=com.apple.Safari
+  printf '%s\n' "$previous" >"$data_dir/fallback"
+  [ -f "$data_dir/origins" ] || printf 'scrapbox.io\n' >"$data_dir/origins"
+
+  # AppleScript's `do shell script` runs with a minimal PATH, so these are resolved once,
+  # here, rather than looked up when a link arrives.
+  {
+    printf 'NVIM=%s\n' "$(command -v nvim || echo nvim)"
+    printf 'TMUX_BIN=%s\n' "$(command -v tmux || echo tmux)"
+  } >"$data_dir/env"
+
+  # A copy, not a link into the plugin directory: the handler has to keep working when the
+  # reader moves or reinstalls chatora. Re-run install to pick up a newer one.
+  cp "$here/chatora-open" "$data_dir/chatora-open"
+  chmod +x "$data_dir/chatora-open"
+
+  script=$(mktemp)
+  cat >"$script" <<APPLESCRIPT
+on open location this_URL
+	try
+		do shell script quoted form of "$data_dir/chatora-open" & " " & quoted form of this_URL
+	end try
+end open location
+APPLESCRIPT
+  rm -rf "$app"
+  osacompile -o "$app" "$script" || die 'osacompile failed'
+  rm -f "$script"
+
+  plist="$app/Contents/Info.plist"
+  plutil -replace CFBundleIdentifier -string "$bundle_id" "$plist"
+  plutil -replace CFBundleName -string 'Chatora Open' "$plist"
+  plutil -replace CFBundleURLTypes -json \
+    '[{"CFBundleURLName":"Web","CFBundleURLSchemes":["http","https"]}]' "$plist"
+  # Claiming the schemes registers the app and makes `open -a` reach it, but System Settings
+  # only offers applications that open HTML documents. Measured: without this it is missing
+  # from the browser list.
+  plutil -replace CFBundleDocumentTypes -json \
+    '[{"CFBundleTypeName":"HTML","CFBundleTypeRole":"Viewer","LSHandlerRank":"Default","LSItemContentTypes":["public.html","public.xhtml"]}]' "$plist"
+  plutil -replace LSUIElement -bool true "$plist"
+
+  # The tests build the app to read its plist; registering it would leave it behind.
+  if [ -z "${CHATORA_URL_HANDLER_SKIP_REGISTER:-}" ]; then
+    "$lsregister" -f "$app" || die 'could not register the handler with LaunchServices'
+  fi
+
+  cat <<MESSAGE
+インストールしました。
+
+  アプリ        $app
+  ブラウザ      $previous  （Cosense 以外のリンクはここへ）
+  対象の origin $(tr '\n' ' ' <"$data_dir/origins")
+
+最後の 1 手だけ手動です（macOS が API を閉じているため）:
+
+  システム設定 → デスクトップとDock → デフォルトのWebブラウザ → Chatora Open
+
+戻すときは chatora-url-handler uninstall です。
+MESSAGE
+}
+
+uninstall_handler() {
+  previous=$(cat "$data_dir/fallback" 2>/dev/null || echo 'ブラウザ')
+  [ -d "$app" ] && "$lsregister" -u "$app" 2>/dev/null || true
+  rm -rf "$app"
+  rm -rf "$data_dir"
+  cat <<MESSAGE
+削除しました。
+
+  システム設定 → デスクトップとDock → デフォルトのWebブラウザ を戻してください
+  （元は $previous でした）
+MESSAGE
+}
+
+status_handler() {
+  if [ -d "$app" ]; then
+    echo "アプリ        $app"
+  else
+    echo 'アプリ        未インストール'
+  fi
+  echo "ブラウザ      $(cat "$data_dir/fallback" 2>/dev/null || echo '—')"
+  echo "対象の origin $(tr '\n' ' ' <"$data_dir/origins" 2>/dev/null || echo '—')"
+  if [ "$(current_browser)" = "$bundle_id" ]; then
+    echo '既定ブラウザ  Chatora Open（有効）'
+  else
+    echo "既定ブラウザ  $(current_browser)  ← システム設定で Chatora Open を選ぶと有効になります"
+  fi
+}
+
+case ${1:-} in
+  install) install_handler ;;
+  uninstall) uninstall_handler ;;
+  status) status_handler ;;
+  *)
+    cat <<USAGE
+使い方: chatora-url-handler <install|status|uninstall>
+
+  install    Cosense のリンクを chatora で開くようにする
+  status     今どうなっているか
+  uninstall  元に戻す
+USAGE
+    exit 2
+    ;;
+esac
