@@ -25,6 +25,7 @@ local placements_by_bufnr = {} -- bufnr -> { [target key] = list of { close, anc
 local project_by_bufnr = {}
 local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async replies (chatora/images and chatora/fetchAsset alike)
 local path_by_key = {} -- fetch key -> local file path, resolved once via fetchAsset and reused
+local members_by_key = {} -- fetch key of a strip -> 0-based indices of the pictures it holds
 local width_by_bufnr = {} -- text width the placements were scaled for; a resize re-places all
 -- Anchors: one extmark per placement, at the row it was drawn on. A placement rides on the
 -- backend's own extmark, which nothing here can read back; this one moves and dies the same
@@ -71,16 +72,51 @@ local function standalone_height(large)
   return config.options.image_height_large or config.options.image_height * 2
 end
 
---- Row cap for an image on a line that holds nothing but pictures, or nil to leave such
---- images in the text line at one row tall. A backend draws either inline virtual *text*
---- (one row, side by side) or virtual *lines* below (any height, stacked) — there is no
---- third mode, so such a line is either small and side by side, or readable and stacked.
-local function gallery_rows()
+-- A backend draws either inline virtual *text* (one row, side by side) or virtual *lines*
+-- below (any height, stacked); there is no third mode. So a line of several pictures is
+-- drawn the way the web client draws it, as one strip of equal tiles, and the server makes
+-- that strip (`chatora/composeAssets`). The tile is cut at a fixed pixel size and scaled by
+-- the backend, so one cached strip serves every terminal.
+local GALLERY_ASPECT = 0.75
+local GALLERY_TILE_HEIGHT_PX = 720
+
+--- How a line that holds nothing but pictures is drawn: nil to leave the pictures in the
+--- text line at one row tall, else the row cap and each tile's width-to-height ratio.
+local function gallery_layout()
   local opt = config.options.image_gallery
-  if opt == false then
+  if opt == false or opt == nil then
     return nil
   end
-  return type(opt) == 'number' and opt or config.options.image_height
+  local rows = type(opt) == 'number' and opt or (type(opt) == 'table' and opt.rows) or nil
+  return {
+    rows = rows or config.options.image_height,
+    aspect = (type(opt) == 'table' and opt.aspect) or GALLERY_ASPECT,
+  }
+end
+
+local function gallery_tile(layout)
+  return {
+    width = math.floor(GALLERY_TILE_HEIGHT_PX * layout.aspect + 0.5),
+    height = GALLERY_TILE_HEIGHT_PX,
+  }
+end
+
+--- Height of a terminal cell over its width, from whichever backend has already measured
+--- the terminal, or the usual 2 when none has. Only the count of tiles per row rides on it:
+--- a guess that is off makes a row a little smaller, not wrong.
+local function cell_aspect()
+  local probes = {
+    { 'snacks.image.terminal', 'size' },
+    { 'image.utils.term', 'get_size' },
+  }
+  for _, probe in ipairs(probes) do
+    local mod = package.loaded[probe[1]]
+    local ok, size = type(mod) == 'table' and pcall(mod[probe[2]]) or false, nil
+    if ok and type(size) == 'table' and (size.cell_width or 0) > 0 and (size.cell_height or 0) > 0 then
+      return size.cell_height / size.cell_width
+    end
+  end
+  return 2
 end
 
 --- Cells available for text in the window showing bufnr, or a conservative
@@ -325,10 +361,12 @@ local function conceal_notation(bufnr, geom)
   if config.options.conceal == false then
     return
   end
-  pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, geom.row - 1, geom.byte_col, {
-    end_col = geom.byte_end,
-    conceal = '',
-  })
+  for _, member in ipairs(geom.members or { geom }) do
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, member.row - 1, member.byte_col, {
+      end_col = member.byte_end,
+      conceal = '',
+    })
+  end
 end
 
 --- Screen column of the notation starting at byte column `byte_col`. Backends
@@ -347,6 +385,8 @@ end
 local function build_targets(bufnr, project, origin, border, images)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local targets = {}
+  local layout = gallery_layout()
+  local galleries, gallery_rows = {}, {} -- row -> its pictures in order, and the rows in order
   for _, img in ipairs(images) do
     local line = lines[img.line + 1]
     if line then
@@ -376,22 +416,27 @@ local function build_targets(bufnr, project, origin, border, images)
             border = rows > 1 and border or nil,
             standalone = img.standalone,
           }
-        elseif img.standalone or (img.gallery and gallery_rows() ~= nil) then
-          -- Several pictures share the line, so they stack; aligning them to the line's
-          -- indent keeps that stack a column rather than a staircase.
-          geom.align_indent = not img.standalone
+        elseif img.standalone then
           targets[#targets + 1] = {
             url = img.src,
             geom = geom,
             -- Capped at the room left of the right edge, so a wide image
             -- scales down instead of being clipped.
             opts = {
-              max_height = img.standalone and standalone_height(img.large) or gallery_rows(),
+              max_height = standalone_height(img.large),
               max_width = math.max(1, text_width(bufnr) - geom.screen_col),
             },
             border = border,
-            standalone = img.standalone,
+            standalone = true,
           }
+        elseif img.gallery and layout then
+          local members = galleries[geom.row]
+          if not members then
+            members = {}
+            galleries[geom.row] = members
+            gallery_rows[#gallery_rows + 1] = geom.row
+          end
+          members[#members + 1] = { url = img.src, geom = geom }
         else
           targets[#targets + 1] = {
             url = img.src,
@@ -403,7 +448,50 @@ local function build_targets(bufnr, project, origin, border, images)
       end
     end
   end
+
+  for _, row in ipairs(gallery_rows) do
+    local members = galleries[row]
+    local width = math.max(1, text_width(bufnr) - members[1].geom.indent_screen_col)
+    -- Tiles per strip, wrapping to the next one like the web client does, with a cell
+    -- between tiles.
+    local tile_cols = math.ceil(layout.rows * cell_aspect() * layout.aspect)
+    local per_strip = math.max(1, math.floor((width + 1) / (tile_cols + 1)))
+    for first = 1, #members, per_strip do
+      local urls, geoms = {}, {}
+      for i = first, math.min(first + per_strip - 1, #members) do
+        urls[#urls + 1] = members[i].url
+        geoms[#geoms + 1] = members[i].geom
+      end
+      targets[#targets + 1] = {
+        url = table.concat(urls, '\n'),
+        compose = urls,
+        tile = gallery_tile(layout),
+        geom = vim.tbl_extend('force', geoms[1], { align_indent = true, members = geoms }),
+        opts = { max_height = layout.rows, max_width = width },
+        border = border,
+        standalone = false,
+      }
+    end
+  end
   return targets
+end
+
+--- Bordered and plain variants of the same url are different files.
+local function fetch_key(target)
+  return target.url .. (target.border and '\0border' or '')
+end
+
+--- A strip's geometry with only the members its picture holds: the notation of a picture
+--- that could not be fetched stays visible, as it would on its own.
+local function included_geom(target, members)
+  if not target.compose or not members then
+    return target.geom
+  end
+  local geoms = {}
+  for _, index in ipairs(members) do
+    geoms[#geoms + 1] = target.geom.members[index + 1]
+  end
+  return vim.tbl_extend('force', target.geom, { members = geoms })
 end
 
 --- The pool a target's placement belongs to. Standalone targets keep their column: their
@@ -461,7 +549,7 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
       table.insert(kept[key], reused)
       -- The conceal rides on the buffer's own extmarks and dies with its line, so it is
       -- re-applied even for a picture that never moved.
-      conceal_notation(bufnr, target.geom)
+      conceal_notation(bufnr, included_geom(target, members_by_key[fetch_key(target)]))
     else
       missing[#missing + 1] = target
     end
@@ -532,11 +620,37 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
   --- cosmetic feature, matching the previous curl-based behavior.
   local function place_url(target)
     local key = pool_key(target)
-    -- Bordered and plain variants of the same url are different files.
-    local fetch_key = target.url .. (target.border and '\0border' or '')
-    local cached_path = path_by_key[fetch_key]
+    local fkey = fetch_key(target)
+    local cached_path = path_by_key[fkey]
     if cached_path then
-      place(cached_path, target.geom, target.opts, key)
+      place(cached_path, included_geom(target, members_by_key[fkey]), target.opts, key)
+      return
+    end
+    if target.compose then
+      lsp.request('chatora/composeAssets', {
+        project = project,
+        urls = target.compose,
+        tile = target.tile,
+        border = target.border,
+      }, function(err, result)
+        if err or not result or result.ok == false then
+          -- Without ImageMagick there is no strip, but there are still pictures.
+          report_once(result and result.message)
+          for i, member in ipairs(target.geom.members) do
+            place_url({
+              url = target.compose[i],
+              geom = vim.tbl_extend('force', member, { align_indent = true }),
+              opts = target.opts,
+              border = target.border,
+              standalone = false,
+            })
+          end
+          return
+        end
+        path_by_key[fkey] = result.path
+        members_by_key[fkey] = result.members
+        place(result.path, included_geom(target, result.members), target.opts, key)
+      end)
       return
     end
     lsp.request(
@@ -547,7 +661,7 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
           report_once(result and result.message)
           return
         end
-        path_by_key[fetch_key] = result.path
+        path_by_key[fkey] = result.path
         place(result.path, target.geom, target.opts, key)
       end
     )

@@ -280,7 +280,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | `image_backend`      | `'auto'`           | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック。`'image_nvim'` / `'snacks'` で固定、テーブル（か、それを返す関数）で自前。[下記](docs/FEATURES.md#描画バックエンドを差し替える) |
 | `image_height`       | `20`               | 単独行の画像の高さ（行数）。文中のインライン画像は常に 1 行                                                                                                                                 |
 | `image_height_large` | `image_height * 2` | `[[…]]`（大きい記法）の高さ。画像とアイコンの両方に効く                                                                                                                                     |
-| `image_gallery`      | `true`             | 画像だけの行を大きく描く。[下記](docs/FEATURES.md#画像だけの行)                                                                                                                             |
+| `image_gallery`      | `true`             | 画像だけの行を、同じ大きさのタイルを横に並べて描く。[下記](docs/FEATURES.md#画像だけの行)                                                                                                                             |
 | `image_border`       | `true`             | 画像に合成する枠。`{ width = 1, color = '#8888', padding = 12 }`                                                                                                                            |
 
 ## 機能

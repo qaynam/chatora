@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { Credential } from '@chatora/core'
 import { CredentialStore, HttpClient } from '@chatora/core'
 import { Effect, Layer, Option, TestClock, TestContext } from 'effect'
-import { type AssetCache, AssetCacheLive, fetchAsset } from './assets'
+import { type AssetCache, AssetCacheLive, composeAssets, fetchAsset } from './assets'
 import { makeSessionStateLayer, type SessionState } from './state'
 
 const ORIGIN = 'https://scrapbox.io'
@@ -211,6 +211,98 @@ describe('fetchAsset', () => {
       expect(result.height).toBe(8)
     },
   )
+
+  describe('composeAssets', () => {
+    // Real pictures this time, since ImageMagick has to read them.
+    const picture = (color: string, size: string): Uint8Array =>
+      new Uint8Array(
+        Bun.spawnSync([magickCmd as string, '-size', size, `xc:${color}`, 'png:-']).stdout,
+      )
+    const served = (bytes: Uint8Array): Response =>
+      new Response(bytes, { status: 200, headers: { 'content-type': 'image/png' } })
+    const tile = { width: 30, height: 40 }
+
+    test.skipIf(magickCmd === undefined)(
+      'several pictures become one strip of equal tiles, in the order they were given',
+      async () => {
+        const bodies: Record<string, Uint8Array> = {
+          'https://cdn.example.com/tall.png': picture('red', '30x60'),
+          'https://cdn.example.com/wide.png': picture('green', '80x20'),
+          'https://cdn.example.com/square.png': picture('blue', '20x20'),
+        }
+        const { layer: httpLayer } = testHttpClient((url) =>
+          served(bodies[url] ?? new Uint8Array()),
+        )
+        const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+        const result = await runOnce(
+          composeAssets({ project: 'p', urls: Object.keys(bodies), tile }),
+          httpLayer,
+          credLayer,
+        )
+
+        expect(result.ok).toBe(true)
+        if (!result.ok) return
+        expect(result.members).toEqual([0, 1, 2])
+        // Three tiles and the two gaps between them; every source shape is cut to the tile.
+        expect(result.width).toBe(30 * 3 + 8 * 2)
+        expect(result.height).toBe(40)
+      },
+    )
+
+    test.skipIf(magickCmd === undefined)(
+      'a picture that cannot be fetched is left out, and the strip says which ones it holds',
+      async () => {
+        const good = picture('red', '30x60')
+        const { layer: httpLayer } = testHttpClient((url) =>
+          url.endsWith('gone.png') ? new Response('', { status: 404 }) : served(good),
+        )
+        const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+        const result = await runOnce(
+          composeAssets({
+            project: 'p',
+            urls: [
+              'https://cdn.example.com/a.png',
+              'https://cdn.example.com/gone.png',
+              'https://cdn.example.com/b.png',
+            ],
+            tile,
+          }),
+          httpLayer,
+          credLayer,
+        )
+
+        expect(result.ok).toBe(true)
+        if (!result.ok) return
+        expect(result.members).toEqual([0, 2])
+        expect(result.width).toBe(30 * 2 + 8)
+      },
+    )
+
+    test.skipIf(magickCmd === undefined)(
+      'a border frames each tile and takes the place of the gap',
+      async () => {
+        const good = picture('red', '30x60')
+        const { layer: httpLayer } = testHttpClient(() => served(good))
+        const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+        const result = await runOnce(
+          composeAssets({
+            project: 'p',
+            urls: ['https://cdn.example.com/a.png', 'https://cdn.example.com/b.png'],
+            tile,
+            border: { width: 1, color: 'red', padding: 2 },
+          }),
+          httpLayer,
+          credLayer,
+        )
+
+        expect(result.ok).toBe(true)
+        if (!result.ok) return
+        // Each tile grows by the padding ring and the line on every side.
+        expect(result.width).toBe((30 + 6) * 2)
+        expect(result.height).toBe(40 + 6)
+      },
+    )
+  })
 
   describe('a failed asset is remembered', () => {
     const missing = () => new Response('', { status: 404 })

@@ -300,6 +300,23 @@ const firstAvailable = <T extends { readonly cmd: string }>(
  */
 const resolveMagick = firstAvailable([{ cmd: 'magick' }, { cmd: 'convert' }], '-version')
 
+// -compose copy on the second -border: without it, IM floods the border color through the
+// transparent padding ring instead of only framing it.
+const borderArgs = (border: BorderParams): string[] => [
+  '-alpha',
+  'set',
+  '-bordercolor',
+  'none',
+  '-border',
+  String(border.padding),
+  '-compose',
+  'copy',
+  '-bordercolor',
+  border.color,
+  '-border',
+  String(border.width),
+]
+
 /**
  * Composites a frame into the image itself — a transparent padding ring, then the border
  * line — since a terminal can only frame an image by baking it into the pixels. The cache
@@ -323,24 +340,7 @@ const withBorder = (
     const magick = yield* Effect.promise(resolveMagick)
     if (magick === null) return sourcePath
 
-    // -compose copy on the second -border: without it, IM floods the border
-    // color through the transparent padding ring instead of only framing it.
-    const args = [
-      sourcePath,
-      '-alpha',
-      'set',
-      '-bordercolor',
-      'none',
-      '-border',
-      String(border.padding),
-      '-compose',
-      'copy',
-      '-bordercolor',
-      border.color,
-      '-border',
-      String(border.width),
-      borderedPath,
-    ]
+    const args = [sourcePath, ...borderArgs(border), borderedPath]
     return yield* Effect.tryPromise(() => execFileAsync(magick.cmd, args)).pipe(
       Effect.as(borderedPath),
       Effect.orElseSucceed(() => sourcePath),
@@ -713,4 +713,120 @@ export const fetchAsset = (params: {
       yield* applySvgRaster(cacheDir, hash, fetched),
     )
     return yield* withSize(yield* applyBorder(cacheDir, hash, drawable, border))
+  })
+
+// ---------------------------------------------------------------------------
+// chatora/composeAssets
+// ---------------------------------------------------------------------------
+
+export interface GalleryTile {
+  readonly width: number
+  readonly height: number
+}
+
+export interface ComposeAssetsSuccess {
+  readonly ok: true
+  readonly path: string
+  /**
+   * Indices into `urls` of the pictures in the strip, left to right; one that could not be
+   * fetched is left out.
+   */
+  readonly members: readonly number[]
+  readonly width?: number
+  readonly height?: number
+}
+export type ComposeAssetsResult = ComposeAssetsSuccess | ErrEnvelope
+
+/** Transparent columns between two tiles that carry no border of their own. */
+const GALLERY_GAP_PX = 8
+const MAX_STRIP_MEMBERS = 16
+
+const clampTile = (value: unknown, fallback: number): number => {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback
+  return Math.min(2048, Math.max(16, n))
+}
+
+const MAGICK_HELP = '画像を並べるには ImageMagick が要ります。`brew install imagemagick` で入ります'
+
+/**
+ * One picture made of several: each of `urls` scaled to fill `tile` and cropped to it, then
+ * laid side by side. A line of pictures is drawn as a single placement this way, because a
+ * render backend has nowhere to put a second picture beside a first that is taller than a
+ * text row. Same-size tiles cropped to fit is also how the web client draws such a line.
+ *
+ * The strip is cached under the paths of the members it holds, so a member that turns up
+ * later (a fetch that failed and then succeeded) makes a different strip, not a stale one.
+ */
+export const composeAssets = (params: {
+  readonly project: string
+  readonly urls: readonly string[]
+  readonly tile: GalleryTile
+  readonly border?: BorderParams
+}): Effect.Effect<ComposeAssetsResult, never, SessionState | HttpClient | AssetCache> =>
+  Effect.gen(function* () {
+    const tile = {
+      width: clampTile(params.tile?.width, 540),
+      height: clampTile(params.tile?.height, 720),
+    }
+    const border = params.border === undefined ? null : sanitizeBorder(params.border)
+    const fetched = yield* Effect.forEach(
+      params.urls.slice(0, MAX_STRIP_MEMBERS),
+      (url) => fetchAsset({ project: params.project, url }),
+      { concurrency: 4 },
+    )
+    const members = fetched.flatMap((result, index) =>
+      result.ok ? [{ index, path: result.path }] : [],
+    )
+    if (members.length === 0) return err('error', '並べる画像を 1 枚も取得できませんでした')
+
+    const cacheDir = resolveCacheDir()
+    const borderKey = border === null ? '' : `${border.width}\0${border.color}\0${border.padding}`
+    const stripName = `c${cacheKey(
+      [...members.map((m) => m.path), `${tile.width}x${tile.height}`, borderKey].join('\0'),
+    )}`
+    const stripPath = join(cacheDir, `${stripName}.png`)
+    const finish = (path: string): Effect.Effect<ComposeAssetsResult> =>
+      Effect.map(withSize({ ok: true, path }), (sized) =>
+        sized.ok ? { ...sized, members: members.map((m) => m.index) } : sized,
+      )
+
+    const existing = yield* findCached(cacheDir, stripName)
+    if (Option.isSome(existing)) return yield* finish(existing.value)
+
+    const magick = yield* Effect.promise(resolveMagick)
+    if (magick === null) return err('error', MAGICK_HELP)
+
+    const size = `${tile.width}x${tile.height}`
+    const tileArgs = (path: string, last: boolean): string[] => [
+      '(',
+      path,
+      '-auto-orient',
+      '-resize',
+      `${size}^`,
+      '-gravity',
+      'center',
+      '-extent',
+      size,
+      ...(border === null ? [] : borderArgs(border)),
+      // A bordered tile already carries its padding ring; a bare one gets a gap on the right.
+      ...(last || border !== null
+        ? []
+        : ['-background', 'none', '-gravity', 'east', '-splice', `${GALLERY_GAP_PX}x0`]),
+      ')',
+    ]
+    const args = [
+      ...members.flatMap((m, i) => tileArgs(m.path, i === members.length - 1)),
+      '-background',
+      'none',
+      '+append',
+      `PNG32:${stripPath}`,
+    ]
+    return yield* Effect.tryPromise(() => execFileAsync(magick.cmd, args)).pipe(
+      Effect.flatMap(() => finish(stripPath)),
+      Effect.catchAll((error) =>
+        log('warn', 'asset compose failed', { detail: String(error) }).pipe(
+          Effect.as(err('error', '画像を並べられませんでした')),
+        ),
+      ),
+    )
   })
