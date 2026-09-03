@@ -10,7 +10,7 @@ import { Data } from 'effect'
  * for domain-specific conflicts (`'NotFastForward'`, `'DuplicateTitle'`); a body that
  * failed schema decoding after a 2xx status uses the sentinel `'DecodeError'`.
  *
- * `message` never contains the credential value (docs/ARCHITECTURE.md "セキュリティ / 作法").
+ * `message` never contains the credential value.
  */
 export class CosenseApiError extends Data.TaggedError('CosenseApiError')<{
   readonly status: number

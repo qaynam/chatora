@@ -1,6 +1,6 @@
 // Response shapes are parsed leniently by CosenseApi (effect Schema with every field
 // optional-with-default, see schemas.ts): unknown fields are ignored, missing fields fall
-// back to a zero value — see docs/ARCHITECTURE.md "Read エンドポイント".
+// back to a zero value.
 
 /** A saved page filter from Cosense's list UI, e.g. `{ type: 'icon', value: 'qaynam' }`. */
 export interface PageFilter {

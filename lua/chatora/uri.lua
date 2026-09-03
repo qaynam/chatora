@@ -24,8 +24,6 @@ function M.format(project, title)
   return 'cosense://' .. project .. '/' .. M.encode_title(title)
 end
 
---- Parse a cosense:// URI into project, title (decoded).
---- Returns nil, nil if the string is not a valid cosense:// URI.
 --- Project and title of a `cosense://` URI, or nil for anything else.
 ---
 --- A URI with no title names no page, and saying so here is what stops an empty title

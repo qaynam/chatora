@@ -2,9 +2,8 @@
 // (or, for fields the plain type itself marks `?`, `optionalWith({ exact: true })`), so
 // decoding a response the server actually sends never fails: a missing field falls back
 // to a zero value and an unrecognized extra field is dropped (effect Schema's default
-// Struct behavior). This mirrors — and extends one level deeper than — the `?? ...`
-// defaulting docs/ARCHITECTURE.md describes for the old hand-rolled parser, since these
-// item shapes were previously cast, not validated, at all.
+// Struct behavior). Cosense adds fields without notice, and there is no documentation to
+// check a shape against, so a field this code has never seen must not be a decode error.
 //
 // Each schema's decoded type is checked against its types.ts counterpart where it's
 // actually used — `CosenseApiShape`'s method signatures in api.ts — rather than through a
@@ -152,9 +151,9 @@ export const ListPagesResponseSchema = Schema.Struct({
 })
 
 // The v2 page endpoint returns HTTP 200 + `persistent: false` for a title with no real
-// page yet (docs/ARCHITECTURE.md); `title` is left un-defaulted here (not `optionalString`)
-// so CosenseApi.getPage can fall back to the requested title exactly when the field is
-// absent, matching the old code's `data.title ?? title` (not defaulting past an explicit "").
+// page yet; `title` is left un-defaulted here (not `optionalString`) so CosenseApi.getPage
+// can fall back to the requested title exactly when the field is absent, without defaulting
+// past an explicit "".
 export const PageV2ResponseSchema = Schema.Struct({
   id: optionalString,
   title: Schema.optionalWith(Schema.String, { exact: true }),
