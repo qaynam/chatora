@@ -79,9 +79,19 @@ APPLESCRIPT
   # Claim the web schemes, and stay out of the Dock: this app draws nothing.
   plutil -replace CFBundleURLTypes -json \
     '[{"CFBundleURLName":"Web","CFBundleURLSchemes":["http","https"]}]' "$plist"
+  # Claiming the schemes is not enough to be offered as a browser: the picker in System
+  # Settings lists applications that open HTML documents, which every real browser declares
+  # and an app that only handles URLs does not. Measured — without this it is registered,
+  # reachable by `open -a`, and absent from the list.
+  plutil -replace CFBundleDocumentTypes -json \
+    '[{"CFBundleTypeName":"HTML","CFBundleTypeRole":"Viewer","LSHandlerRank":"Default","LSItemContentTypes":["public.html","public.xhtml"]}]' "$plist"
   plutil -replace LSUIElement -bool true "$plist"
 
-  "$lsregister" -f "$app" || die 'could not register the handler with LaunchServices'
+  # The seam the tests use: registering from a test run would leave the built app in the
+  # developer's own LaunchServices database.
+  if [ -z "${CHATORA_URL_HANDLER_SKIP_REGISTER:-}" ]; then
+    "$lsregister" -f "$app" || die 'could not register the handler with LaunchServices'
+  fi
 
   cat <<MESSAGE
 インストールしました。
