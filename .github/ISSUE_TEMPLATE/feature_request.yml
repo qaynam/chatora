@@ -16,5 +16,5 @@ body:
   - type: input
     id: cosense
     attributes:
-      label: Cosense 本家での挙動
+      label: Cosense Webでの挙動
       description: web 版に同じ機能があるなら、それがどう動くか。
