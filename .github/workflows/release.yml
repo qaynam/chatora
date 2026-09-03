@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   server:
@@ -21,18 +22,27 @@ jobs:
         with:
           bun-version: latest
 
-      # `bun test` includes a test that runs the Lua side in a headless Neovim
-      # (tests/uri-parity.test.ts); without one the run errors before the build.
-      - name: Install Neovim
+      # The tests live in CI (ci.yml), which runs on every push to main and every PR, on
+      # Linux and macOS with the Neovim and ImageMagick they need. A release only builds,
+      # and refuses a commit CI has not passed on rather than shipping it. A tag pushed
+      # right after a merge may find that run still going, so this waits for it.
+      - name: Require a green CI on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSLO https://github.com/neovim/neovim/releases/download/stable/nvim-linux-x86_64.tar.gz
-          tar xzf nvim-linux-x86_64.tar.gz
-          echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+          for _ in $(seq 1 40); do
+            state=$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --limit 1 \
+              --json status,conclusion --jq 'first // {} | "\(.status)/\(.conclusion)"')
+            case "$state" in
+              completed/success) exit 0 ;;
+              completed/*) echo "::error::CI failed on $GITHUB_SHA ($state)"; exit 1 ;;
+              null/null) echo "::error::CI never ran on $GITHUB_SHA"; exit 1 ;;
+            esac
+            sleep 30
+          done
+          echo "::error::CI is still running on $GITHUB_SHA"; exit 1
 
       - run: bun install --frozen-lockfile
-
-      - run: bun run typecheck
-      - run: bun test
 
       - run: bun run build
 
