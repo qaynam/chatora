@@ -22,7 +22,14 @@ const install = () => {
     },
   })
   const app = join(root, 'apps', 'Chatora Open.app')
-  const plist = Bun.spawnSync(['plutil', '-convert', 'json', '-o', '-', join(app, 'Contents', 'Info.plist')])
+  const plist = Bun.spawnSync([
+    'plutil',
+    '-convert',
+    'json',
+    '-o',
+    '-',
+    join(app, 'Contents', 'Info.plist'),
+  ])
   return {
     root,
     status: run.exitCode,
