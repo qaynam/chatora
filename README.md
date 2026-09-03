@@ -104,6 +104,21 @@ Linux や Windows でも、環境変数 `COSENSE_PAT` に PAT を入れておけ
 2. サイドバーからページを選ぶと、`cosense://<project>/<title>` というバッファが開きます
 3. あとは普通に編集して `:w` で保存します。`:wq` なら、保存して閉じるところまで一度で済みます
 
+### Slack や Chrome のリンクを chatora で開く（macOS）
+
+Cosense のリンクをクリックしたとき、ブラウザではなく**今動いている chatora** でそのページを
+開けます。
+
+```sh
+bin/chatora-url-handler install
+```
+
+URL を受け取る小さなアプリを作って登録します。あとは**システム設定 → デスクトップとDock →
+デフォルトのWebブラウザ**で `Chatora Open` を選んでください。Cosense 以外のリンクは、それまで
+使っていたブラウザにそのまま流れます。詳しくは
+[Slack や Chrome のリンクを chatora で開く](docs/FEATURES.md#slack-や-chrome-のリンクを-chatora-で開くmacos)
+を見てください。
+
 ## コマンド
 
 | コマンド                  | 動作                                                                               |

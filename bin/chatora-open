@@ -1,18 +1,15 @@
 #!/bin/sh
 # Hands one URL to the Neovim that is already running chatora, or to the browser.
 #
-# Installed as the system's URL handler by `chatora-url-handler install`, which means every
-# link the reader clicks arrives here — so anything that is not a Cosense page, and any
-# failure at all, falls through to the browser they used before. A link that opens nothing is
-# worse than a link that opens the wrong window.
+# Every link the reader clicks arrives here once the handler is installed, so anything that
+# is not a Cosense page — and every failure — has to reach the browser. A link that opens
+# nothing is worse than one that opens the wrong window.
 set -eu
 
 url=${1:-}
 [ -n "$url" ] || exit 0
 
 data_dir=${CHATORA_URL_HANDLER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/chatora/url-handler}
-# AppleScript's `do shell script` runs with a minimal PATH, so the tools are resolved at
-# install time and recorded here rather than looked up now.
 [ -f "$data_dir/env" ] && . "$data_dir/env"
 NVIM=${NVIM:-nvim}
 TMUX_BIN=${TMUX_BIN:-tmux}
@@ -36,15 +33,13 @@ for origin in $origins; do
 done
 [ "$match" = yes ] || browser
 
-# Several Neovims may be running; the first one that has chatora loaded gets the page.
 for sock in "${TMPDIR:-/tmp}"/nvim."$(id -un)"/*/nvim.*.0; do
   [ -S "$sock" ] || continue
   [ "$("$NVIM" --server "$sock" --remote-expr 'exists(":Chatora")' 2>/dev/null)" = "2" ] || continue
 
   "$NVIM" --server "$sock" --remote-send "<C-\\><C-N>:Chatora open $url<CR>" 2>/dev/null || browser
 
-  # Deliver the reader as well as the page. Neovim knows which pane holds it and which
-  # terminal drew it, which beats guessing from the process tree.
+  # Neovim knows which pane holds it and which terminal drew it; the process tree does not.
   pane=$("$NVIM" --server "$sock" --remote-expr 'getenv("TMUX_PANE")' 2>/dev/null || true)
   case $pane in
     %*)
@@ -60,6 +55,5 @@ for sock in "${TMPDIR:-/tmp}"/nvim."$(id -un)"/*/nvim.*.0; do
   exit 0
 done
 
-# Nothing is running chatora. Which terminal to open one in is a guess, and guessing wrong
-# leaves the reader with nothing.
+# Nothing is running chatora, and which terminal to start one in would be a guess.
 browser
