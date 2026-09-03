@@ -1579,21 +1579,25 @@ local ok, err = pcall(function()
     local bar = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteBar', link = false })
     assert(bar.bg == hl.bg, 'the bar stands on the same box, got ' .. vim.inspect(bar))
 
-    -- The cell between `>` and the text is painted by the overlay, so the box has no hole.
+    -- In a list the bar takes the last indent character's cell and `> ` disappears, so the
+    -- text starts one cell after the indent, like a plain item's and like every wrapped row.
     local buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { ' > 引用' })
-    quote.render(buf, { { line = 0, startChar = 1, endChar = 3 } })
-    local marks = vim.api.nvim_buf_get_extmarks(buf, quote.ns, 0, -1, { details = true })
-    local overlay = nil
-    for _, mark in ipairs(marks) do
-      if mark[4].virt_text then
-        overlay = mark[4].virt_text
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { ' > 引用', '> 上の段' })
+    quote.render(buf, { { line = 0, startChar = 1, endChar = 3 }, { line = 1, startChar = 0, endChar = 2 } })
+    local bars, hidden, boxes = {}, {}, {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, quote.ns, 0, -1, { details = true })) do
+      local row, col, details = mark[2], mark[3], mark[4]
+      if details.virt_text then
+        bars[row] = col
+      elseif details.conceal == '' then
+        hidden[row] = { col, details.end_col }
+      elseif details.hl_group == 'ChatoraQuoteText' then
+        boxes[row] = { col, details.end_row, details.hl_eol }
       end
     end
-    assert(
-      overlay and #overlay == 2 and overlay[2][1] == ' ' and overlay[2][2] == 'ChatoraQuoteText',
-      'the overlay carries the padding cell, got ' .. vim.inspect(overlay)
-    )
+    assert(bars[0] == 0 and vim.deep_equal(hidden[0], { 1, 3 }), 'list quote: bar on the indent, `> ` hidden')
+    assert(bars[1] == 0 and vim.deep_equal(hidden[1], { 1, 2 }), 'top-level quote: bar on `>`, space hidden')
+    assert(vim.deep_equal(boxes[0], { 0, 1, true }) and vim.deep_equal(boxes[1], { 0, 2, true }), 'the box runs from the bar to the row end, got ' .. vim.inspect(boxes))
     vim.api.nvim_buf_delete(buf, { force = true })
 
     config.options.quote = { dim = true }

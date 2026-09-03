@@ -5,6 +5,7 @@
 local M = {}
 
 local config = require('chatora.config')
+local indent = require('chatora.indent')
 
 M.ns = vim.api.nvim_create_namespace('chatora_quote')
 
@@ -14,9 +15,11 @@ local BODY_PRIORITY = 100
 
 local DEFAULT_BAR = '▌'
 
--- Cells 'breakindentopt' shifts a wrapped row by. The bar is drawn *over* the row's first
--- cell, so without a shift it would eat the first character of every continuation row.
-local WRAP_SHIFT = 2
+-- Cells 'breakindentopt' shifts a wrapped row by, on top of the line's indent. One is what
+-- every first row has between its indent and its text: a plain item's bullet, a quote's
+-- bar. So a wrapped row starts under the text, and the bar repeated into that one cell
+-- covers nothing.
+local WRAP_SHIFT = 1
 
 local function options()
   local opts = config.options.quote
@@ -77,6 +80,11 @@ function M.ensure_hl()
 end
 
 --- Draw the bar and the box for `quotes` (from chatora/decorations, UTF-16 columns).
+---
+--- The bar takes the one cell a plain line has between indent and text: in a list that is
+--- the last indent character, the cell after the bullet, and the whole `> ` is concealed;
+--- at the top level it is the `>` itself and only the space is concealed. Either way the
+--- text starts one cell after the indent, where every wrapped row starts too.
 function M.render(bufnr, quotes)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -94,25 +102,33 @@ function M.render(bufnr, quotes)
       local ok1, marker = pcall(vim.str_byteindex, ltext, 'utf-16', q.startChar, false)
       local ok2, body = pcall(vim.str_byteindex, ltext, 'utf-16', q.endChar, false)
       if ok1 and ok2 then
+        local levels = indent.scan(ltext)
+        local last = levels[#levels]
+        local bar_at = last and last.at or marker
+        local hide_from = last and marker or marker + 1
+        if hide_from < body then
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, q.line, hide_from, {
+            end_col = body,
+            conceal = '',
+          })
+        end
         -- Overlay rather than conceal: the bar is structure, not markup being edited, so
         -- it should stay put when the cursor lands on the line. repeat_linebreak carries
         -- it down the continuation rows of a wrapped quote, into the break indent.
-        local overlay = { { opts.bar, 'ChatoraQuoteBar' } }
-        -- The space after `>` is outside the body, so it is painted here: on the first row it
-        -- joins the bar to the box, and repeated down the break indent it fills the shift.
-        if opts.paint_text and ltext:sub(marker + 2, body) == ' ' then
-          overlay[2] = { ' ', 'ChatoraQuoteText' }
-        end
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, q.line, marker, {
-          virt_text = overlay,
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, q.line, bar_at, {
+          virt_text = { { opts.bar, 'ChatoraQuoteBar' } },
           virt_text_pos = 'overlay',
           virt_text_repeat_linebreak = opts.wrap,
           hl_mode = 'combine',
         })
+        -- To the row's end rather than the text's, on every wrapped row: the web client's
+        -- box spans the line. Ending at the next line's start is what makes hl_eol reach it.
         if opts.paint_text and #ltext > body then
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, q.line, body, {
-            end_col = #ltext,
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, q.line, bar_at, {
+            end_row = q.line + 1,
+            end_col = 0,
             hl_group = 'ChatoraQuoteText',
+            hl_eol = true,
             hl_mode = 'combine',
             priority = BODY_PRIORITY,
           })
