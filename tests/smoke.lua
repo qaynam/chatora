@@ -1184,6 +1184,19 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- 'linebreak' moves a run of Japanese to the next row whole, so a page window has it off
+  -- whatever the reader's global setting says.
+  do
+    local render = require('chatora.render')
+    vim.cmd('new')
+    local buf = vim.api.nvim_get_current_buf()
+    vim.wo.linebreak = true
+    render.attach(buf)
+    assert(vim.wo.linebreak == false, 'a page window must not use linebreak')
+    vim.cmd('close')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- Reopening a page paints what it said last time, synchronously. Neovim restores the
   -- cursor the moment BufReadCmd returns, so a buffer that comes back empty answers a
   -- jumplist entry past line 1 with E19 before the fetch has landed.
@@ -1563,6 +1576,25 @@ local ok, err = pcall(function()
     quote.ensure_hl()
     local hl = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteText', link = false })
     assert(hl.bg ~= nil and hl.fg == nil, 'the quote box is a background only, got ' .. vim.inspect(hl))
+    local bar = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteBar', link = false })
+    assert(bar.bg == hl.bg, 'the bar stands on the same box, got ' .. vim.inspect(bar))
+
+    -- The cell between `>` and the text is painted by the overlay, so the box has no hole.
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { ' > 引用' })
+    quote.render(buf, { { line = 0, startChar = 1, endChar = 3 } })
+    local marks = vim.api.nvim_buf_get_extmarks(buf, quote.ns, 0, -1, { details = true })
+    local overlay = nil
+    for _, mark in ipairs(marks) do
+      if mark[4].virt_text then
+        overlay = mark[4].virt_text
+      end
+    end
+    assert(
+      overlay and #overlay == 2 and overlay[2][1] == ' ' and overlay[2][2] == 'ChatoraQuoteText',
+      'the overlay carries the padding cell, got ' .. vim.inspect(overlay)
+    )
+    vim.api.nvim_buf_delete(buf, { force = true })
 
     config.options.quote = { dim = true }
     vim.cmd('highlight clear ChatoraQuoteText')

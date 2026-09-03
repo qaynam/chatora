@@ -54,18 +54,26 @@ function M.setup_win(bufnr)
   end
 end
 
---- `hl`/`text_hl` reach nvim_set_hl unchanged; without them the bar links to Comment and
---- the text gets a box one shade off the editor's background. Must be re-run after
---- :colorscheme, which clears every highlight group.
+local function comment_fg()
+  local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = 'Comment', link = false })
+  return ok and hl and hl.fg or nil
+end
+
+--- `hl`/`text_hl` reach nvim_set_hl unchanged. Without them the text gets a box one shade
+--- off the editor's background, and the bar wears Comment's color on that same box, so the
+--- box runs unbroken from the bar into the text. Must be re-run after :colorscheme, which
+--- clears every highlight group.
 function M.ensure_hl()
   local opts = options()
-  vim.api.nvim_set_hl(0, 'ChatoraQuoteBar', opts and opts.hl or { link = 'Comment', default = true })
   local text = opts and opts.text_hl
-  if not text then
-    text = (opts and opts.dim) and { link = 'Comment', default = true }
-      or { bg = require('chatora.highlight').quote_bg(), default = true }
-  end
+    or (opts and opts.dim and { link = 'Comment', default = true })
+    or (opts and opts.paint_text and { bg = require('chatora.highlight').quote_bg(), default = true })
+    or { link = 'Comment', default = true }
   vim.api.nvim_set_hl(0, 'ChatoraQuoteText', text)
+  local bar = opts and opts.hl
+    or (text.bg and { fg = comment_fg(), bg = text.bg, default = true })
+    or { link = 'Comment', default = true }
+  vim.api.nvim_set_hl(0, 'ChatoraQuoteBar', bar)
 end
 
 --- Draw the bar and the box for `quotes` (from chatora/decorations, UTF-16 columns).
@@ -89,8 +97,14 @@ function M.render(bufnr, quotes)
         -- Overlay rather than conceal: the bar is structure, not markup being edited, so
         -- it should stay put when the cursor lands on the line. repeat_linebreak carries
         -- it down the continuation rows of a wrapped quote, into the break indent.
+        local overlay = { { opts.bar, 'ChatoraQuoteBar' } }
+        -- The space after `>` is outside the body, so it is painted here: on the first row it
+        -- joins the bar to the box, and repeated down the break indent it fills the shift.
+        if opts.paint_text and ltext:sub(marker + 2, body) == ' ' then
+          overlay[2] = { ' ', 'ChatoraQuoteText' }
+        end
         pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, q.line, marker, {
-          virt_text = { { opts.bar, 'ChatoraQuoteBar' } },
+          virt_text = overlay,
           virt_text_pos = 'overlay',
           virt_text_repeat_linebreak = opts.wrap,
           hl_mode = 'combine',

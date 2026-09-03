@@ -41,6 +41,13 @@ end
 
 local function set_win_opts(bufnr)
   quiet_indent_guides(bufnr)
+  -- 'linebreak' breaks at 'breakat' characters, and a run of Japanese has none: the whole
+  -- run moves to the next row and leaves the row above nearly empty, while `.` and `@` in
+  -- an inline code span do count and split it. Measured on a wrapped quote: the bar alone
+  -- on its row, the text starting on the next one.
+  for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+    vim.wo[win].linebreak = false
+  end
   local conceal = config.options.conceal
   if conceal ~= false then
     -- A string is a 'concealcursor' value. The default reveals the cursor line, which is
