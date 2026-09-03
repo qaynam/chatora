@@ -64,20 +64,21 @@ pads = {
 
 ### 引用
 
-`> 引用` の `>` を縦棒に置き換え、本文を淡く落とします。
+`> 引用` の `>` を縦棒に置き換え、本文に web と同じ薄い背景を敷きます。文字の色は変えません。
 
 ```lua
 quote = {
   bar = '▌',                                   -- 太さはグリフで決まる: ▏ ▎ ▍ ▌ ┃ │
   hl = { fg = '#4493f8' },                     -- 縦棒（ChatoraQuoteBar）
-  text_hl = { fg = '#9198a1', italic = true }, -- 引用本文（ChatoraQuoteText）
-  dim = false,                                 -- 本文はそのままにして縦棒だけ出す
+  text_hl = { bg = '#2a2a2a' },                -- 引用本文（ChatoraQuoteText）
+  dim = true,                                  -- 背景ではなく、本文を Comment の色に落とす
   wrap = false,                                -- 折り返し行への追従をやめる
 }
 ```
 
-`hl` と `text_hl` は `nvim_set_hl` にそのまま渡ります。省略すると、どちらも `Comment` にリンク
-します。縦棒は、カーソルがその行に来ても消えません。
+`hl` と `text_hl` は `nvim_set_hl` にそのまま渡ります。省略すると、縦棒は `Comment` にリンクし、
+背景は colorscheme の地の色から一段ずらした色になります。`text_hl = false` で縦棒だけになります。
+縦棒は、カーソルがその行に来ても消えません。
 
 `wrap = true`（既定）のときは、折り返された引用の 2 行目以降にも縦棒が続くように、ページの
 ウィンドウに `breakindent` を設定します。この字下げが要らなければ、`wrap = false` にしてください。

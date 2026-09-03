@@ -1,6 +1,7 @@
--- GitHub-style blockquotes: the `>` marker is overlaid with a vertical bar and the
--- quoted text is dimmed. The bar's thickness is a property of the glyph (▏ ▎ ▍ ▌ ┃),
--- so `quote.bar` is the one knob for it; color comes from the two highlight groups.
+-- Blockquotes the way the web client draws them: the `>` marker is overlaid with a vertical
+-- bar and the quoted text sits on a box. The bar's thickness is a property of the glyph
+-- (▏ ▎ ▍ ▌ ┃), so `quote.bar` is the one knob for it; color comes from the two highlight
+-- groups.
 local M = {}
 
 local config = require('chatora.config')
@@ -8,7 +9,7 @@ local config = require('chatora.config')
 M.ns = vim.api.nvim_create_namespace('chatora_quote')
 
 -- Under the semantic token priority (125) so a link or inline code inside a quote keeps
--- its own color; hl_mode='combine' still lets the dimming show through elsewhere.
+-- its own color; hl_mode='combine' still lets the box show under them.
 local BODY_PRIORITY = 100
 
 local DEFAULT_BAR = '▌'
@@ -27,10 +28,13 @@ local function options()
   end
   return {
     bar = type(opts.bar) == 'string' and opts.bar ~= '' and opts.bar or DEFAULT_BAR,
-    dim = opts.dim ~= false,
+    -- `dim = true` is the older look, the text in Comment's color instead of on a box;
+    -- `text_hl = false` leaves the text alone and draws the bar by itself.
+    dim = opts.dim == true,
+    paint_text = opts.text_hl ~= false,
     wrap = opts.wrap ~= false,
     hl = opts.hl,
-    text_hl = opts.text_hl,
+    text_hl = type(opts.text_hl) == 'table' and opts.text_hl or nil,
   }
 end
 
@@ -50,19 +54,21 @@ function M.setup_win(bufnr)
   end
 end
 
---- `hl`/`text_hl` reach nvim_set_hl unchanged; without them the groups link to Comment.
---- Must be re-run after :colorscheme, which clears every highlight group.
+--- `hl`/`text_hl` reach nvim_set_hl unchanged; without them the bar links to Comment and
+--- the text gets a box one shade off the editor's background. Must be re-run after
+--- :colorscheme, which clears every highlight group.
 function M.ensure_hl()
   local opts = options()
   vim.api.nvim_set_hl(0, 'ChatoraQuoteBar', opts and opts.hl or { link = 'Comment', default = true })
-  vim.api.nvim_set_hl(
-    0,
-    'ChatoraQuoteText',
-    opts and opts.text_hl or { link = 'Comment', default = true }
-  )
+  local text = opts and opts.text_hl
+  if not text then
+    text = (opts and opts.dim) and { link = 'Comment', default = true }
+      or { bg = require('chatora.highlight').quote_bg(), default = true }
+  end
+  vim.api.nvim_set_hl(0, 'ChatoraQuoteText', text)
 end
 
---- Draw the bar and dimming for `quotes` (from chatora/decorations, UTF-16 columns).
+--- Draw the bar and the box for `quotes` (from chatora/decorations, UTF-16 columns).
 function M.render(bufnr, quotes)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -89,7 +95,7 @@ function M.render(bufnr, quotes)
           virt_text_repeat_linebreak = opts.wrap,
           hl_mode = 'combine',
         })
-        if opts.dim and #ltext > body then
+        if opts.paint_text and #ltext > body then
           pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, q.line, body, {
             end_col = #ltext,
             hl_group = 'ChatoraQuoteText',

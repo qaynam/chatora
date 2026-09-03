@@ -1550,6 +1550,31 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- A quote is a box under its text, not dimmed text: the default group carries a
+  -- background and leaves the foreground alone, and `dim = true` brings the old look back.
+  do
+    local config = require('chatora.config')
+    local quote = require('chatora.quote')
+    local orig = config.options.quote
+
+    -- `default = true` only fills an undefined group, so each variant starts from a cleared one.
+    config.options.quote = true
+    vim.cmd('highlight clear ChatoraQuoteText')
+    quote.ensure_hl()
+    local hl = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteText', link = false })
+    assert(hl.bg ~= nil and hl.fg == nil, 'the quote box is a background only, got ' .. vim.inspect(hl))
+
+    config.options.quote = { dim = true }
+    vim.cmd('highlight clear ChatoraQuoteText')
+    quote.ensure_hl()
+    hl = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteText' })
+    assert(hl.link == 'Comment', 'dim = true links the text to Comment, got ' .. vim.inspect(hl))
+
+    config.options.quote = orig
+    vim.cmd('highlight clear ChatoraQuoteText')
+    quote.ensure_hl()
+  end
+
   -- The sidebar follows the page the reader moves to, and a project it has listed before
   -- comes back without asking the server again.
   do
