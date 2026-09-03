@@ -75,12 +75,30 @@ local function drop_autosave(bufnr)
 end
 
 --- Replace buffer content without polluting undo history.
+-- The text each page was last seen with, so reopening one can paint it before the fetch
+-- returns. A buffer that comes back empty is not just a flash: Neovim restores the cursor
+-- the moment BufReadCmd returns, and a jumplist entry pointing past line 1 fails with E19.
+local last_text = {}
+local last_text_order = {}
+local LAST_TEXT_LIMIT = 100
+
+local function remember_text(uri_str, text)
+  if last_text[uri_str] == nil then
+    last_text_order[#last_text_order + 1] = uri_str
+    if #last_text_order > LAST_TEXT_LIMIT then
+      last_text[table.remove(last_text_order, 1)] = nil
+    end
+  end
+  last_text[uri_str] = text
+end
+
 local function set_content(bufnr, text)
   local lines = vim.split(text or '', '\n', { plain = true })
   local ul = vim.bo[bufnr].undolevels
   vim.bo[bufnr].undolevels = -1
   require('chatora.buftext').set(bufnr, lines)
   vim.bo[bufnr].undolevels = ul
+  remember_text(vim.api.nvim_buf_get_name(bufnr), text or '')
 end
 
 local function refresh_sidebar_marks()
@@ -248,6 +266,14 @@ local function handle_read(ev)
   -- lines indented deeper than its `code:` marker, so a new line at column 0 silently
   -- *ends the block*. Carrying the previous indent is what the web editor does.
   vim.bo[bufnr].autoindent = true
+
+  -- Paint what this page said last time, so the buffer has its lines before Neovim puts the
+  -- cursor back. The fetch below replaces the run that differs, extmarks and all.
+  local known = last_text[ev.match]
+  if known then
+    set_content(bufnr, known)
+    vim.bo[bufnr].modified = false
+  end
 
   status.set(bufnr, 'loading')
   lsp.request_ok('chatora/openPage', { project = project, title = title }, function(result)
