@@ -53,8 +53,6 @@ Cosense（旧 Scrapbox）を Neovim から読み書きするためのプラグ�
 | ------- | --------------------------- |
 | Neovim  | >= 0.11                     |
 | Node.js | >= 20（LSP サーバーの実行） |
-| bun     | ソースからビルドするときだけ |
-| OS      | macOS（下記）               |
 
 このほか、[ImageMagick](https://imagemagick.org/) と画像描画プラグインがあれば画像を表示でき
 （[画像の表示](docs/FEATURES.md#画像の表示)）、クリップボード取り出しツールがあれば画像を貼り付け
@@ -341,7 +339,6 @@ PHP には癖があります。tree-sitter の `php` は `<?php` の**外側を 
 読むほう）で読むので、`:TSInstall php php_only` と両方を入れておけば、どちらの書き方でも色が
 付きます。
 
-
 その他の問題は自由にissueを投げてください。🙌
 
 ### 保存が競合で止まる
@@ -365,7 +362,7 @@ nvim --headless --clean -u NORC -c "luafile tests/smoke.lua"
 bun tests/e2e/run.ts     # 偽 Cosense サーバー + headless nvim
 ```
 
-## 参考にしたリポジトリ・リソース
+## クレジット
 
 - [helpfeel/cosense-cli](https://github.com/helpfeel/cosense-cli)
 - [cosense-toolbox/parser](https://www.npmjs.com/package/@cosense-toolbox/parser)
