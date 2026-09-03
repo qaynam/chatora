@@ -302,7 +302,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | [ファイルへのリンク](docs/FEATURES.md#ファイルへのリンク)                     | アップロードしたファイルへのリンクにアイコンを出す             |
 | [記法の色](docs/FEATURES.md#記法の色)                                         | colorscheme から借りつつ、同じ色を二度使わない                 |
 | [画像の表示](docs/FEATURES.md#画像の表示)                                     | 対応ターミナルと描画プラグインがあればバッファ内に描く         |
-| [画像だけの行](docs/FEATURES.md#画像だけの行)                                 | 横に並べるか、大きく縦に積むかの二択                           |
+| [画像だけの行](docs/FEATURES.md#画像だけの行)                                 | 同じ大きさのタイルを横に並べ、入らなければ折り返す             |
 | [描画バックエンドを差し替える](docs/FEATURES.md#描画バックエンドを差し替える) | image.nvim / snacks.nvim / 自前のバックエンド                  |
 | [画像の貼り付け](docs/FEATURES.md#画像の貼り付け)                             | クリップボードの画像をアップロードして記法を書く               |
 | [ページ情報](docs/FEATURES.md#ページ情報)                                     | 作成者・更新・被リンク・閲覧数などを 1 枚に                    |

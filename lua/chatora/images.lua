@@ -3,9 +3,9 @@
 -- backend's business, not chatora's. A no-op when none of them is usable.
 --
 -- What to draw comes from `chatora/images`; where the bytes come from is
--- `chatora/fetchAsset`, which attaches session credentials for same-origin
--- URLs so private-project icons resolve. Placements are therefore always a
--- local file path, never a remote URL.
+-- `chatora/fetchAsset` (or `chatora/composeAssets` for a line of several pictures), which
+-- attaches session credentials for same-origin URLs so private-project icons resolve.
+-- Placements are therefore always a local file path, never a remote URL.
 local M = {}
 
 local config = require('chatora.config')
@@ -452,8 +452,7 @@ local function build_targets(bufnr, project, origin, border, images)
   for _, row in ipairs(gallery_rows) do
     local members = galleries[row]
     local width = math.max(1, text_width(bufnr) - members[1].geom.indent_screen_col)
-    -- Tiles per strip, wrapping to the next one like the web client does, with a cell
-    -- between tiles.
+    -- A cell between tiles; what does not fit wraps into the next strip.
     local tile_cols = math.ceil(layout.rows * cell_aspect() * layout.aspect)
     local per_strip = math.max(1, math.floor((width + 1) / (tile_cols + 1)))
     for first = 1, #members, per_strip do
@@ -620,10 +619,10 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
   --- cosmetic feature, matching the previous curl-based behavior.
   local function place_url(target)
     local key = pool_key(target)
-    local fkey = fetch_key(target)
-    local cached_path = path_by_key[fkey]
+    local asset_key = fetch_key(target)
+    local cached_path = path_by_key[asset_key]
     if cached_path then
-      place(cached_path, included_geom(target, members_by_key[fkey]), target.opts, key)
+      place(cached_path, included_geom(target, members_by_key[asset_key]), target.opts, key)
       return
     end
     if target.compose then
@@ -647,8 +646,8 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
           end
           return
         end
-        path_by_key[fkey] = result.path
-        members_by_key[fkey] = result.members
+        path_by_key[asset_key] = result.path
+        members_by_key[asset_key] = result.members
         place(result.path, included_geom(target, result.members), target.opts, key)
       end)
       return
@@ -661,7 +660,7 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
           report_once(result and result.message)
           return
         end
-        path_by_key[fkey] = result.path
+        path_by_key[asset_key] = result.path
         place(result.path, target.geom, target.opts, key)
       end
     )

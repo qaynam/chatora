@@ -728,8 +728,8 @@ export interface ComposeAssetsSuccess {
   readonly ok: true
   readonly path: string
   /**
-   * Indices into `urls` of the pictures in the strip, left to right; one that could not be
-   * fetched is left out.
+   * Indices into `urls` of the pictures in the strip, left to right. One that could not be
+   * fetched, or that lies past `MAX_STRIP_MEMBERS`, is left out.
    */
   readonly members: readonly number[]
   readonly width?: number
@@ -739,8 +739,11 @@ export type ComposeAssetsResult = ComposeAssetsSuccess | ErrEnvelope
 
 /** Transparent columns between two tiles that carry no border of their own. */
 const GALLERY_GAP_PX = 8
+// The client already wraps by window width; this only keeps a line that pastes dozens of
+// pictures from becoming one strip too wide for a terminal to hold in memory.
 const MAX_STRIP_MEMBERS = 16
 
+// User config again, so it is clamped before it reaches an argv.
 const clampTile = (value: unknown, fallback: number): number => {
   const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback
   return Math.min(2048, Math.max(16, n))
@@ -785,13 +788,13 @@ export const composeAssets = (params: {
       [...members.map((m) => m.path), `${tile.width}x${tile.height}`, borderKey].join('\0'),
     )}`
     const stripPath = join(cacheDir, `${stripName}.png`)
-    const finish = (path: string): Effect.Effect<ComposeAssetsResult> =>
+    const resultFor = (path: string): Effect.Effect<ComposeAssetsResult> =>
       Effect.map(withSize({ ok: true, path }), (sized) =>
         sized.ok ? { ...sized, members: members.map((m) => m.index) } : sized,
       )
 
     const existing = yield* findCached(cacheDir, stripName)
-    if (Option.isSome(existing)) return yield* finish(existing.value)
+    if (Option.isSome(existing)) return yield* resultFor(existing.value)
 
     const magick = yield* Effect.promise(resolveMagick)
     if (magick === null) return err('error', MAGICK_HELP)
@@ -822,7 +825,7 @@ export const composeAssets = (params: {
       `PNG32:${stripPath}`,
     ]
     return yield* Effect.tryPromise(() => execFileAsync(magick.cmd, args)).pipe(
-      Effect.flatMap(() => finish(stripPath)),
+      Effect.flatMap(() => resultFor(stripPath)),
       Effect.catchAll((error) =>
         log('warn', 'asset compose failed', { detail: String(error) }).pipe(
           Effect.as(err('error', '画像を並べられませんでした')),
