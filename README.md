@@ -297,7 +297,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | [保存状態の表示](docs/FEATURES.md#保存状態の表示)                             | トーストではなく小さなアイコンで伝える                         |
 | [サイドバーとプロジェクト](docs/FEATURES.md#サイドバーとプロジェクト)         | サイドバーは今見ているページのプロジェクトを映す               |
 | [サイドバーのタブ](docs/FEATURES.md#サイドバーのタブ)                         | サイドバーに出すリストを選ぶ                                   |
-| [連携](docs/FEATURES.md#連携)                                                 | telescope のピッカー、`chatora` コマンドでシェルから起動       |
+| [連携](docs/FEATURES.md#連携)                                                 | telescope、シェルから起動、Cosense のリンクを chatora で開く   |
 
 ## トラブルシューティング
 
