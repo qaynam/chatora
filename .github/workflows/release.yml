@@ -21,6 +21,14 @@ jobs:
         with:
           bun-version: latest
 
+      # `bun test` includes a test that runs the Lua side in a headless Neovim
+      # (tests/uri-parity.test.ts); without one the run errors before the build.
+      - name: Install Neovim
+        run: |
+          curl -fsSLO https://github.com/neovim/neovim/releases/download/stable/nvim-linux-x86_64.tar.gz
+          tar xzf nvim-linux-x86_64.tar.gz
+          echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+
       - run: bun install --frozen-lockfile
 
       - run: bun run typecheck
