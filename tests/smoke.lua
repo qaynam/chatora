@@ -1184,6 +1184,19 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- 'linebreak' moves a run of Japanese to the next row whole, so a page window has it off
+  -- whatever the reader's global setting says.
+  do
+    local render = require('chatora.render')
+    vim.cmd('new')
+    local buf = vim.api.nvim_get_current_buf()
+    vim.wo.linebreak = true
+    render.attach(buf)
+    assert(vim.wo.linebreak == false, 'a page window must not use linebreak')
+    vim.cmd('close')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- Reopening a page paints what it said last time, synchronously. Neovim restores the
   -- cursor the moment BufReadCmd returns, so a buffer that comes back empty answers a
   -- jumplist entry past line 1 with E19 before the fetch has landed.
@@ -1435,6 +1448,167 @@ local ok, err = pcall(function()
     images.backend, lsp.request = orig_backend, orig_request
     vim.cmd('close')
     vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
+  -- A line of several pictures is one strip: the server composes it, it stands for every
+  -- notation in the line, and without a composer the pictures still come, one under another.
+  do
+    local images = require('chatora.images')
+    local config = require('chatora.config')
+    local lsp = require('chatora.lsp')
+    local orig_backend, orig_request = images.backend, lsp.request
+    local orig_gallery = config.options.image_gallery
+
+    local placed = {}
+    images.backend = function()
+      return {
+        place = function(_, path, geom, opts)
+          placed[#placed + 1] = {
+            path = path,
+            members = geom.members and #geom.members or nil,
+            rows = opts.max_height,
+          }
+          return { close = function() end }
+        end,
+      }
+    end
+
+    vim.cmd('new')
+    local buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_name(buf, 'cosense://proj/並ぶ画像')
+    local function show(urls)
+      local parts = {}
+      for i, url in ipairs(urls) do
+        parts[i] = '[' .. url .. ']'
+      end
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '並ぶ画像', ' ' .. table.concat(parts, ' ') })
+    end
+
+    local composed = {}
+    local compose_ok = true
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/images' then
+        local line = vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1]
+        local found = {}
+        for url in line:gmatch('%[(https://[^%]]+)%]') do
+          local at = line:find('[' .. url .. ']', 1, true)
+          found[#found + 1] = {
+            line = 1,
+            startChar = at - 1,
+            endChar = at + #url + 1,
+            src = url,
+            kind = 'image',
+            standalone = false,
+            gallery = true,
+            large = false,
+          }
+        end
+        cb(nil, { ok = true, images = found })
+      elseif method == 'chatora/composeAssets' then
+        composed[#composed + 1] = params
+        if compose_ok then
+          cb(nil, { ok = true, path = '/tmp/strip.png', members = { 0, 1, 2 } })
+        else
+          cb(nil, { ok = false, code = 'error', message = 'no composer' })
+        end
+      elseif method == 'chatora/fetchAsset' then
+        cb(nil, { ok = true, path = '/dev/null' })
+      end
+    end
+
+    local three = { 'https://example.com/1.png', 'https://example.com/2.png', 'https://example.com/3.png' }
+    show(three)
+    -- A tile 8 cells wide: three fit in any window.
+    config.options.image_gallery = { rows = 4, aspect = 1 }
+    images.attach(buf, 'proj')
+    images.refresh(buf)
+    assert(#composed == 1, 'one strip for the line, got ' .. #composed)
+    assert(vim.deep_equal(composed[1].urls, three), 'the strip holds the pictures in order')
+    assert(
+      vim.deep_equal(composed[1].tile, { width = 720, height = 720 }),
+      'the tile follows the aspect, got ' .. vim.inspect(composed[1].tile)
+    )
+    assert(
+      #placed == 1 and placed[1].members == 3 and placed[1].rows == 4,
+      'one placement standing for three, four rows tall: ' .. vim.inspect(placed)
+    )
+    local concealed = 0
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, images.ns, 0, -1, { details = true })) do
+      if mark[4].conceal == '' then
+        concealed = concealed + 1
+      end
+    end
+    assert(concealed == 3, 'every notation hides behind the strip, got ' .. concealed)
+
+    -- A tile as wide as the window: one per strip, so the line wraps into three strips.
+    config.options.image_gallery = { rows = 40, aspect = 1 }
+    images.invalidate(buf)
+    placed, composed = {}, {}
+    images.refresh(buf)
+    assert(#composed == 3 and #placed == 3, 'one strip per picture when only one fits, got ' .. #composed)
+
+    -- No composer: each picture is placed on its own.
+    compose_ok = false
+    config.options.image_gallery = { rows = 4, aspect = 1 }
+    show({ 'https://example.com/4.png', 'https://example.com/5.png', 'https://example.com/6.png' })
+    images.invalidate(buf)
+    placed, composed = {}, {}
+    images.refresh(buf)
+    assert(#composed == 1, 'the strip was asked for once, got ' .. #composed)
+    assert(#placed == 3, 'without a strip the pictures are placed one by one, got ' .. #placed)
+
+    config.options.image_gallery = orig_gallery
+    images.backend, lsp.request = orig_backend, orig_request
+    vim.cmd('close')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
+  -- A quote is a box under its text, not dimmed text: the default group carries a
+  -- background and leaves the foreground alone, and `dim = true` brings the old look back.
+  do
+    local config = require('chatora.config')
+    local quote = require('chatora.quote')
+    local orig = config.options.quote
+
+    -- `default = true` only fills an undefined group, so each variant starts from a cleared one.
+    config.options.quote = true
+    vim.cmd('highlight clear ChatoraQuoteText')
+    quote.ensure_hl()
+    local hl = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteText', link = false })
+    assert(hl.bg ~= nil and hl.fg == nil, 'the quote box is a background only, got ' .. vim.inspect(hl))
+    local bar = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteBar', link = false })
+    assert(bar.bg == hl.bg, 'the bar stands on the same box, got ' .. vim.inspect(bar))
+
+    -- In a list the bar takes the last indent character's cell and `> ` disappears, so the
+    -- text starts one cell after the indent, like a plain item's and like every wrapped row.
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { ' > 引用', '> 上の段' })
+    quote.render(buf, { { line = 0, startChar = 1, endChar = 3 }, { line = 1, startChar = 0, endChar = 2 } })
+    local bars, hidden, boxes = {}, {}, {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, quote.ns, 0, -1, { details = true })) do
+      local row, col, details = mark[2], mark[3], mark[4]
+      if details.virt_text then
+        bars[row] = col
+      elseif details.conceal == '' then
+        hidden[row] = { col, details.end_col }
+      elseif details.hl_group == 'ChatoraQuoteText' then
+        boxes[row] = { col, details.end_row, details.hl_eol }
+      end
+    end
+    assert(bars[0] == 0 and vim.deep_equal(hidden[0], { 1, 3 }), 'list quote: bar on the indent, `> ` hidden')
+    assert(bars[1] == 0 and vim.deep_equal(hidden[1], { 1, 2 }), 'top-level quote: bar on `>`, space hidden')
+    assert(vim.deep_equal(boxes[0], { 0, 1, true }) and vim.deep_equal(boxes[1], { 0, 2, true }), 'the box runs from the bar to the row end, got ' .. vim.inspect(boxes))
+    vim.api.nvim_buf_delete(buf, { force = true })
+
+    config.options.quote = { dim = true }
+    vim.cmd('highlight clear ChatoraQuoteText')
+    quote.ensure_hl()
+    hl = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteText' })
+    assert(hl.link == 'Comment', 'dim = true links the text to Comment, got ' .. vim.inspect(hl))
+
+    config.options.quote = orig
+    vim.cmd('highlight clear ChatoraQuoteText')
+    quote.ensure_hl()
   end
 
   -- The sidebar follows the page the reader moves to, and a project it has listed before

@@ -62,14 +62,26 @@ local function mix(from, to, ratio)
   return math.floor(mixed)
 end
 
-local badge_bg
+--- Quoted text sits on a box like inline code does, but a quote runs for lines, so its box
+--- is fainter than a badge or a page of quotes turns into blocks.
+local QUOTE_RATIO = 0.08
 
-badge_bg = function()
+local function shade(ratio)
   local base = bg_of('Normal')
   if not base then
     return bg_of('CursorLine')
   end
-  return mix(base, vim.o.background == 'light' and 0 or 0xffffff, SHADE_RATIO)
+  return mix(base, vim.o.background == 'light' and 0 or 0xffffff, ratio)
+end
+
+local badge_bg
+
+badge_bg = function()
+  return shade(SHADE_RATIO)
+end
+
+function M.quote_bg()
+  return shade(QUOTE_RATIO)
 end
 
 -- Used only when a colorscheme has no hue left that some other token has not taken.

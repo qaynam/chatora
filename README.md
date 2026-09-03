@@ -264,7 +264,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | `conceal`           | `true`                             | 記法マークアップを隠す。`true` はカーソル行だけ元の記法に戻す。文字列を渡すとそれが `'concealcursor'` になる（`'nc'` なら読んでいる間は戻さない＝カーソル行のインライン画像も消えない） |
 | `pads`              | `true`                             | 箇条書きの中点。[下記](docs/FEATURES.md#箇条書き)                                                                                                                                       |
 | `telomere`          | `{ bar = true, scrollbar = true }` | 行ごとの更新バーと右端の一覧。[下記](docs/FEATURES.md#テロメア)                                                                                                                         |
-| `quote`             | `true`                             | `>` 行の縦棒。[下記](docs/FEATURES.md#引用)                                                                                                                                             |
+| `quote`             | `true`                             | `>` 行の縦棒と背景。[下記](docs/FEATURES.md#引用)                                                                                                                                             |
 | `tables`            | `true`                             | `table:` ブロックの罫線。`{ border = false, header = false }`                                                                                                                           |
 | `codeblock_numbers` | `true`                             | コードブロックの行番号                                                                                                                                                                  |
 | `file_icon`         | `'󰈔'`                              | プロジェクトにアップロードしたファイルへのリンクに付くアイコン。`false` で無し                                                                                                          |
@@ -280,7 +280,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | `image_backend`      | `'auto'`           | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック。`'image_nvim'` / `'snacks'` で固定、テーブル（か、それを返す関数）で自前。[下記](docs/FEATURES.md#描画バックエンドを差し替える) |
 | `image_height`       | `20`               | 単独行の画像の高さ（行数）。文中のインライン画像は常に 1 行                                                                                                                                 |
 | `image_height_large` | `image_height * 2` | `[[…]]`（大きい記法）の高さ。画像とアイコンの両方に効く                                                                                                                                     |
-| `image_gallery`      | `true`             | 画像だけの行を大きく描く。[下記](docs/FEATURES.md#画像だけの行)                                                                                                                             |
+| `image_gallery`      | `true`             | 画像だけの行を、同じ大きさのタイルを横に並べて描く。[下記](docs/FEATURES.md#画像だけの行)                                                                                                                             |
 | `image_border`       | `true`             | 画像に合成する枠。`{ width = 1, color = '#8888', padding = 12 }`                                                                                                                            |
 
 ## 機能
@@ -302,7 +302,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | [ファイルへのリンク](docs/FEATURES.md#ファイルへのリンク)                     | アップロードしたファイルへのリンクにアイコンを出す             |
 | [記法の色](docs/FEATURES.md#記法の色)                                         | colorscheme から借りつつ、同じ色を二度使わない                 |
 | [画像の表示](docs/FEATURES.md#画像の表示)                                     | 対応ターミナルと描画プラグインがあればバッファ内に描く         |
-| [画像だけの行](docs/FEATURES.md#画像だけの行)                                 | 横に並べるか、大きく縦に積むかの二択                           |
+| [画像だけの行](docs/FEATURES.md#画像だけの行)                                 | 同じ大きさのタイルを横に並べ、入らなければ折り返す             |
 | [描画バックエンドを差し替える](docs/FEATURES.md#描画バックエンドを差し替える) | image.nvim / snacks.nvim / 自前のバックエンド                  |
 | [画像の貼り付け](docs/FEATURES.md#画像の貼り付け)                             | クリップボードの画像をアップロードして記法を書く               |
 | [ページ情報](docs/FEATURES.md#ページ情報)                                     | 作成者・更新・被リンク・閲覧数などを 1 枚に                    |

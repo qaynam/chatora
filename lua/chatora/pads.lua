@@ -1,7 +1,12 @@
 -- Cosense-style bullet pads: every indented, non-blank line gets a bullet before its text
--- and a cell of widening per level above it (1 whitespace char = 1 indent level, per
--- Cosense notation). Doubles as the indent guide for page buffers — general indent plugins
--- (snacks.indent etc.) skip buftype=acwrite buffers.
+-- (1 whitespace char = 1 indent level, per Cosense notation), and a full-width space in
+-- the indent is shown one cell wide like the other two. Doubles as the indent guide for
+-- page buffers — general indent plugins (snacks.indent etc.) skip buftype=acwrite buffers.
+--
+-- The pads add exactly one cell to a line, the bullet's, whatever its depth. That constant
+-- is what lets 'breakindent' line a wrapped row up under the text: it counts the indent
+-- characters and a fixed shift, never inline virtual text, so widening the levels
+-- (`spacing = true`) puts every wrapped row of a deep item a few cells left of its text.
 local M = {}
 
 local config = require('chatora.config')
@@ -23,12 +28,13 @@ end
 -- inline text, which on an empty list item would otherwise leave the cursor a cell left of
 -- where typing lands. That displaced indent character is also the gap the bullet needs, so
 -- `gap` is only ever extra slack.
-local DEFAULTS = { bullet = '•', guide = false, spacing = true, gap = 0 }
+local DEFAULTS = { bullet = '•', guide = false, spacing = false, gap = 0 }
 
--- Cells one level occupies once padded. A full-width space and a tab (at the default
--- tabstop) already take two, so this is the width every level can be brought up to —
--- shrinking one is not possible, since the characters are real buffer text.
+-- Cells one level occupies with `spacing = true`. A full-width space and a tab (at the
+-- default tabstop) already take two, so this is the width every level is brought up to.
 local LEVEL_CELLS = 2
+
+local FULL_WIDTH_SPACE = '　'
 
 --- A line that carries its own `1.` marker; Cosense drops the bullet for it.
 local function numbered(line)
@@ -83,17 +89,26 @@ local function level_pads(line, tabstop)
   return pads
 end
 
---- Display cells the inline pads add before `line`'s text. Anything positioned by text
---- column (inline images) must shift right by this much to stay aligned.
+--- Display cells the pads add before `line`'s text, negative when they take some away
+--- (a full-width space drawn one cell wide). Anything positioned by text column (inline
+--- images) must shift right by this much to stay aligned.
 function M.extra_cells(line, tabstop)
   line = line or ''
   if config.options.pads == false or indent.level(line) == 0 then
     return 0
   end
-  local bullet, _, _, gap = pad_opts()
+  local bullet, _, spacing, gap = pad_opts()
   local width = 0
-  for _, pad in ipairs(level_pads(line, tabstop or vim.o.tabstop)) do
-    width = width + pad
+  if spacing then
+    for _, pad in ipairs(level_pads(line, tabstop or vim.o.tabstop)) do
+      width = width + pad
+    end
+  else
+    for _, entry in ipairs(indent.scan(line)) do
+      if entry.char == FULL_WIDTH_SPACE then
+        width = width - 1
+      end
+    end
   end
   if not numbered(line) then
     width = width + vim.fn.strdisplaywidth(bullet) + gap
@@ -164,6 +179,14 @@ function M.render(bufnr)
             vim.api.nvim_buf_set_extmark(bufnr, M.ns, lnum - 1, i, {
               virt_text = chunks,
               virt_text_pos = 'inline',
+            })
+          end
+          -- Without widening, a level is one cell; a full-width space is two, so it is
+          -- shown as one. Cannot be combined with widening, which pads it as two.
+          if not spacing and entry.char == FULL_WIDTH_SPACE then
+            vim.api.nvim_buf_set_extmark(bufnr, M.ns, lnum - 1, i, {
+              end_col = i + #FULL_WIDTH_SPACE,
+              conceal = ' ',
             })
           end
           -- Guides mark the levels above this one, so they land on the indent characters

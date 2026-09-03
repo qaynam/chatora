@@ -19,7 +19,14 @@ import {
   TextDocuments,
 } from 'vscode-languageserver/node'
 import { TextDocument } from 'vscode-languageserver-textdocument'
-import { type AssetCache, AssetCacheLive, type BorderParams, fetchAsset } from './assets'
+import {
+  type AssetCache,
+  AssetCacheLive,
+  type BorderParams,
+  composeAssets,
+  fetchAsset,
+  type GalleryTile,
+} from './assets'
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
 import { definitionLocation, findDefinitionTarget, findUrlTarget } from './definition'
@@ -339,6 +346,11 @@ connection.onRequest(
   'chatora/fetchAsset',
   (params: { project: string; url: string; border?: BorderParams }) =>
     runtime.runPromise(fetchAsset(params)),
+)
+connection.onRequest(
+  'chatora/composeAssets',
+  (params: { project: string; urls: string[]; tile: GalleryTile; border?: BorderParams }) =>
+    runtime.runPromise(composeAssets(params)),
 )
 connection.onRequest(
   'chatora/uploadImage',

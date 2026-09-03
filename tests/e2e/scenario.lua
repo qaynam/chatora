@@ -365,7 +365,7 @@ local ok, err = pcall(function()
   -- ===================================================================================
   step('quote-bar')
 
-  -- The `>` marker is overlaid with the bar glyph and the text after it is dimmed.
+  -- The `>` marker is overlaid with the bar glyph and the row sits on a box.
   local QUOTE_ROW = 4
   local quote_ns = require('chatora.quote').ns
   local bar, dim = nil, nil
@@ -393,11 +393,12 @@ local ok, err = pcall(function()
   if bar[3] ~= 0 or bar[4].virt_text[1][1] ~= '▌' or bar[4].virt_text_pos ~= 'overlay' then
     fail('quote bar is not an overlay at the marker: ' .. vim.inspect(bar))
   end
-  -- The dimming must start past the marker, or it would wash out the bar's own color.
-  if dim[3] ~= #'> ' then
-    fail('quote dimming does not start at the quoted text: ' .. vim.inspect(dim))
+  -- The box starts on the bar's own cell and runs to the row's end, the way the web
+  -- client's does; the bar keeps its color by carrying the same background itself.
+  if dim[3] ~= 0 or dim[4].end_row ~= QUOTE_ROW + 1 or not dim[4].hl_eol then
+    fail('quote box does not run from the bar to the row end: ' .. vim.inspect(dim))
   end
-  log('quote bar OK (▌ overlay on the marker, ChatoraQuoteText over the text)')
+  log('quote bar OK (▌ overlay on the marker, ChatoraQuoteText from the bar to the row end)')
 
   -- ===================================================================================
   -- STEP: related
