@@ -47,7 +47,7 @@ const noCredential = (): ErrEnvelope => err('unauthorized', 'not logged in')
 const UNAUTHORIZED_STATUSES: ReadonlySet<number> = new Set([401, 403])
 
 /**
- * Maps a CosenseApiError to the `chatora/*` wire error contract (docs/ARCHITECTURE.md):
+ * Maps a CosenseApiError to the `chatora/*` wire error contract (main.ts):
  * 401/403 -> unauthorized, the page-edit optimistic-lock conflict -> notFastForward,
  * everything else forwards CosenseApiError's own message as-is — it's already
  * credential-safe (built server-side in @chatora/core's api.ts from status/statusText only).
@@ -100,7 +100,7 @@ const toUserRef = (user: Me) => ({
   pageFilters: user.pageFilters,
 })
 
-// Account.id doubles as the multi-account Keychain lookup key (docs/ARCHITECTURE.md), so
+// Account.id doubles as the multi-account Keychain lookup key (credentials.ts), so
 // login and addAccount — which both turn a freshly-verified PAT into a stored account —
 // build it the same way.
 const buildAccount = (origin: string, user: Me): Account => ({
@@ -1039,10 +1039,9 @@ export const savePage = (
       if (Option.isNone(apiOpt)) return noCredential()
       const api = apiOpt.value
 
-      const userId = yield* session.verifiedUserId()
       const push = (baseLines: readonly PageDetailLine[], lines: readonly string[]) =>
         Effect.gen(function* () {
-          const changes = computeChanges(baseLines, lines, () => createNewLineId(userId))
+          const changes = computeChanges(baseLines, lines, createNewLineId)
           if (changes.length === 0) return Option.none<SubmitResponse>()
           const preview = yield* api.previewEdit(
             base.project,

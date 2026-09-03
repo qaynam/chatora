@@ -2,7 +2,7 @@
 //
 // This is deliberately NOT a faithful re-implementation of Cosense — it exists only to
 // serve the handful of endpoints @chatora/core's CosenseApi (packages/core/src/api.ts)
-// actually calls, with shapes matching docs/ARCHITECTURE.md and packages/core/src/types.ts,
+// actually calls, with shapes matching packages/core/src/types.ts,
 // so the real Neovim plugin -> @chatora/server (node, LSP/stdio) -> HTTP chain can be
 // exercised end-to-end without any real credentials or network access.
 //
@@ -368,7 +368,7 @@ export const startFakeCosense = (): FakeCosenseHandle => {
           )
         }
         // Real Cosense: a title with no page yet still 200s, with persistent:false and a
-        // fake/unsafe id (see docs/ARCHITECTURE.md "存在しないページは404にならない").
+        // fake/unsafe id (see `PageDetail` in packages/core/src/types.ts).
         return respond(
           {
             persistent: false,

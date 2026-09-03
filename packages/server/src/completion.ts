@@ -108,7 +108,10 @@ export const detectCompletionInDocument = (
   return detectCompletion(lineText, position.character)
 }
 
-/** NFKC + lowercase + space/`_` equivalence, per docs/ARCHITECTURE.md's completion rules. */
+/**
+ * Title matching, so `[Side Kanban]` and `[side_kanban]` count as one page the way Cosense
+ * links them: case-insensitive, space and `_` alike, and NFKC so width variants match too.
+ */
 export const normalizeForMatch = (s: string): string =>
   s.normalize('NFKC').toLowerCase().replace(/[_ ]/g, ' ')
 

@@ -9,7 +9,7 @@ export interface CommandExecutorShape {
   /**
    * Runs `file` with `args` as a literal argv array — never a shell string — so an
    * untrusted value (a PAT) passed as one array element cannot be reinterpreted by a
-   * shell (docs/ARCHITECTURE.md "セキュリティ / 作法").
+   * shell.
    */
   readonly execFile: (
     file: string,

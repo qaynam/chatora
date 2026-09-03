@@ -36,9 +36,9 @@ import type {
 } from './types'
 
 // Human-readable-URL title encoder, ported from cosense-cli src/lib/encodeTitle.ts
-// (encodeTitleForUrl). Deliberately NOT encodeURIComponent, despite the architecture doc
-// naming that function: cosense keeps unicode raw in the URL and maps space -> '_', only
-// percent-encoding the characters that would otherwise break route matching (%, /, ?, #).
+// (encodeTitleForUrl). Deliberately not encodeURIComponent: Cosense keeps unicode raw in
+// the URL and maps space -> '_', only percent-encoding the characters that would otherwise
+// break route matching (%, /, ?, #). Unrelated to the cosense:// URI scheme (uriScheme.ts).
 const encodeTitleForUrl = (title: string): string =>
   title
     .replace(/%/g, '%25')
@@ -375,7 +375,7 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
   const searchVector: CosenseApiShape['searchVector'] = (project, query) =>
     request(`/api/pages/${project}/search/vector/titles?q=${encodeURIComponent(query)}`).pipe(
       Effect.flatMap((res) => decode(SearchVectorResponseSchema, res)),
-      // HTTP 490 = vector search disabled for this project (architecture doc).
+      // HTTP 490 means vector search is disabled for this project, which is not a failure.
       Effect.catchAll((err) =>
         err.status === VECTOR_SEARCH_DISABLED_STATUS
           ? Effect.succeed<VectorResult>({ pages: [] })

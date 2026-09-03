@@ -12,7 +12,7 @@ TypeScript で書いた LSP サーバーの 2 つでできています。
 | `packages/server/` | LSP サーバー。semantic tokens・補完・定義ジャンプ・`chatora/*` の独自リクエスト |
 | `tests/smoke.lua` | headless nvim で Lua 側を通しで検証する |
 | `tests/e2e/` | 偽 Cosense サーバー + headless nvim |
-| `docs/ARCHITECTURE.md` | 設計と内部プロトコル。**迷ったらここが正** |
+| `CONTRIBUTING.md` | 設計の要点・テストの 3 段・セキュリティ。**設計で迷ったらここ** |
 | `docs/FEATURES.md` | 機能ごとの詳しい挙動（ユーザー向け） |
 
 ## 検証
@@ -51,3 +51,9 @@ bun run verify   # typecheck + bun test + build + biome + smoke + E2E
   で `cosense://` のパターンに固定してあります
 - `bun.lock` は公開レジストリを指します。`bunfig.toml` の `[install] registry` で固定済みです
 - 画像の描画バックエンド（image.nvim / snacks.nvim）は**任意**です。依存として固定していません
+- `chatora/*` の応答で JSON の `null` は `vim.NIL` になり、これは **truthy** です。`lsp.request` の
+  境界で `nil` に落としてあるので、その上では `if result.x then` がそのまま使えます
+- `parse` / `parseLine` には必ず `parseOptions()` を渡します。渡し漏れると、カスタム記法の解釈が
+  機能ごとに食い違います
+- `cosense://` の URI 規則は `lua/chatora/uri.lua` と `packages/server/src/uriScheme.ts` の両方に
+  あります。片方を変えたら両方を変えます。`tests/uri-parity.test.ts` が一致を確かめます

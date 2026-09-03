@@ -45,8 +45,6 @@ Cosense（旧 Scrapbox）を Neovim から読み書きするためのプラグ�
 - **PAT 認証・複数アカウント**
   - PAT は macOS Keychain に保存し、`:Chatora account` で切り替えられます
 
-設計と内部プロトコルについては、[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) にまとめてあります。
-
 ## 必要なもの
 
 |         |                             |
@@ -363,7 +361,7 @@ PHP には癖があります。tree-sitter の `php` は `<?php` の**外側を 
 
 ## 開発
 
-設計と内部の取り決めは [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) にあります。
+設計の要点とテストの回し方は [CONTRIBUTING.md](CONTRIBUTING.md) にあります。
 
 `:Chatora reload` を使うと、nvim を再起動せずにプラグインを入れ替えられます。LSP を止め、chatora の
 ウィンドウとバッファを畳み、`package.loaded` から chatora のモジュールを落としたうえで、同じ

@@ -133,9 +133,9 @@ const writeAtomic = (
 // credential-scoped fetch with manual redirects
 // ---------------------------------------------------------------------------
 
-// cosense-cli's own file-download path never forwards credential headers across a redirect
-// (docs/ARCHITECTURE.md "セキュリティ / 作法"); the icon endpoint specifically 302s to GCS,
-// which is the case this whole manual-redirect walk exists for.
+// Credential headers must never follow a redirect off the origin (cosense-cli's own
+// file-download path does not forward them either); the icon endpoint specifically 302s
+// to GCS, which is the case this whole manual-redirect walk exists for.
 const MAX_REDIRECTS = 3
 const isRedirectStatus = (status: number): boolean => status >= 300 && status < 400
 

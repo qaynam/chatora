@@ -85,7 +85,7 @@ export interface SessionStateShape {
   /** Verifies /api/users/me at most once per session; both success and failure stay cached until invalidated. */
   readonly ensureVerified: () => Effect.Effect<Option.Option<Me>, never, HttpClient>
   readonly setVerifiedUser: (user: Me) => Effect.Effect<void>
-  /** The verified user's id, or '' if this session hasn't verified yet (savePage's line-id generation). */
+  /** The verified user's id, or '' if this session hasn't verified yet. */
   readonly verifiedUserId: () => Effect.Effect<string>
   readonly storeCredential: (pat: string) => Effect.Effect<void, KeychainError>
   readonly removeCredential: () => Effect.Effect<void, KeychainError>
