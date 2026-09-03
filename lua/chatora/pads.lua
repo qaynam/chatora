@@ -30,9 +30,8 @@ end
 -- `gap` is only ever extra slack.
 local DEFAULTS = { bullet = '•', guide = false, spacing = false, gap = 0 }
 
--- Cells one level occupies once padded. A full-width space and a tab (at the default
--- tabstop) already take two, so this is the width every level can be brought up to —
--- shrinking one is not possible, since the characters are real buffer text.
+-- Cells one level occupies with `spacing = true`. A full-width space and a tab (at the
+-- default tabstop) already take two, so this is the width every level is brought up to.
 local LEVEL_CELLS = 2
 
 local FULL_WIDTH_SPACE = '　'
