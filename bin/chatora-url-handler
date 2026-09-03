@@ -28,19 +28,25 @@ die() {
 
 # Whatever handles https today is where every non-Cosense link will keep going, so it is read
 # before the handler takes the role and kept for `uninstall` to name.
+# The entries are dictionaries whose keys come out in alphabetical order, so RoleAll is
+# printed *before* the scheme it belongs to. Each dictionary is folded onto one line rather
+# than read in order.
 current_browser() {
   defaults read com.apple.LaunchServices/com.apple.launchservices.secure LSHandlers 2>/dev/null |
-    awk '/LSHandlerURLScheme = https/ { found = 1 } found && /LSHandlerRoleAll/ { print $3; exit }' |
-    tr -d '";'
+    tr -d '\n ' | tr '}' '\n' | grep 'LSHandlerURLScheme=https;' |
+    sed -E 's/.*LSHandlerRoleAll="?([^";]+).*/\1/' | head -1
 }
 
 install_handler() {
   mkdir -p "$data_dir" "$app_dir"
 
+  # Never record an empty or self-referential fallback: the handler would then hand the URL
+  # to the system default, which by then is the handler itself.
   previous=$(current_browser)
   case $previous in
-    '' | "$bundle_id") previous=$(cat "$data_dir/fallback" 2>/dev/null || echo com.apple.Safari) ;;
+    '' | "$bundle_id") previous=$(cat "$data_dir/fallback" 2>/dev/null || true) ;;
   esac
+  [ -n "$previous" ] || previous=com.apple.Safari
   printf '%s\n' "$previous" >"$data_dir/fallback"
   [ -f "$data_dir/origins" ] || printf 'scrapbox.io\n' >"$data_dir/origins"
 

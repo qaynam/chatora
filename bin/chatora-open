@@ -20,8 +20,12 @@ TMUX_BIN=${TMUX_BIN:-tmux}
 fallback=$(cat "$data_dir/fallback" 2>/dev/null || echo 'com.apple.Safari')
 origins=$(cat "$data_dir/origins" 2>/dev/null || echo 'scrapbox.io')
 
+# Never `open` without a bundle id: the system default is this handler, so the URL would
+# come straight back here.
 browser() {
-  open -b "$fallback" "$url" 2>/dev/null || open "$url"
+  open -b "$fallback" "$url" 2>/dev/null ||
+    open -b com.apple.Safari "$url" 2>/dev/null ||
+    true
   exit 0
 }
 
