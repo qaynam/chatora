@@ -8,7 +8,7 @@ import type { Credential, HttpClientShape } from '@chatora/core'
 import { HttpClient } from '@chatora/core'
 import { Clock, Context, Data, Deferred, Effect, Layer, Option, Ref, SynchronizedRef } from 'effect'
 import { resolveGyazo } from './gyazo'
-import { imageSizeOf } from './imageSize'
+import { type ImageSize, imageSizeOf } from './imageSize'
 import { log } from './log'
 import type { ErrCode, ErrEnvelope } from './pages'
 import { SessionState } from './state'
@@ -633,15 +633,10 @@ export const AssetCacheLive: Layer.Layer<AssetCache> = Layer.effect(
 // bytes; reading a prefix keeps a multi-megabyte GIF off the heap.
 const HEADER_BYTES = 1024
 
-/**
- * Attach the intrinsic size of the file the client is about to draw. Measured on the
- * *final* path, so a bordered or rasterized variant reports the size it actually has.
- * A failure to measure is not a failure to fetch: the result passes through unchanged.
- */
-const withSize = (result: FetchAssetResult): Effect.Effect<FetchAssetResult> => {
-  if (!result.ok) return Effect.succeed(result)
-  return Effect.tryPromise(async () => {
-    const handle = await open(result.path, 'r')
+/** The intrinsic pixel size of the file at `path`, or undefined when it cannot be read. */
+const measure = (path: string): Effect.Effect<ImageSize | undefined> =>
+  Effect.tryPromise(async () => {
+    const handle = await open(path, 'r')
     try {
       const buffer = new Uint8Array(HEADER_BYTES)
       const { bytesRead } = await handle.read(buffer, 0, HEADER_BYTES, 0)
@@ -649,10 +644,60 @@ const withSize = (result: FetchAssetResult): Effect.Effect<FetchAssetResult> => 
     } finally {
       await handle.close()
     }
-  }).pipe(
-    Effect.map((size) => (size ? { ...result, ...size } : result)),
-    Effect.orElseSucceed(() => result),
-  )
+  }).pipe(Effect.orElseSucceed((): ImageSize | undefined => undefined))
+
+/**
+ * Longest edge a picture is handed over with. A terminal keeps every image it shows
+ * decoded and evicts old ones past a budget (Ghostty: 320 MB); a phone photo decodes to
+ * 50 MB and a tall screenshot to 130 MB, so a page of them pushes its own pictures off the
+ * screen. Nothing is drawn taller than a few dozen rows, which this covers at retina
+ * density.
+ */
+const MAX_IMAGE_EDGE = 2048
+
+/**
+ * `path`, or a copy no larger than MAX_IMAGE_EDGE on either side, cached under an
+ * `s`-prefixed name (same reasoning as the `b`, `r` and `g` prefixes). A picture that
+ * cannot be measured or shrunk passes through as it is.
+ */
+const shrink = (cacheDir: string, hash: string, path: string): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const size = yield* measure(path)
+    if (size === undefined || (size.width <= MAX_IMAGE_EDGE && size.height <= MAX_IMAGE_EDGE))
+      return path
+    const shrunkName = `s${hash}`
+    const shrunkPath = join(cacheDir, `${shrunkName}.png`)
+    const existing = yield* findCached(cacheDir, shrunkName)
+    if (Option.isSome(existing)) return existing.value
+
+    const magick = yield* Effect.promise(resolveMagick)
+    if (magick === null) return path
+    const fit = `${MAX_IMAGE_EDGE}x${MAX_IMAGE_EDGE}>`
+    return yield* Effect.tryPromise(() =>
+      execFileAsync(magick.cmd, [`${path}[0]`, '-auto-orient', '-resize', fit, shrunkPath]),
+    ).pipe(
+      Effect.as(shrunkPath),
+      Effect.orElseSucceed(() => path),
+    )
+  })
+
+const applyShrink = (
+  cacheDir: string,
+  hash: string,
+  result: FetchAssetResult,
+): Effect.Effect<FetchAssetResult> => {
+  if (!result.ok) return Effect.succeed(result)
+  return Effect.map(shrink(cacheDir, hash, result.path), (path) => ({ ok: true as const, path }))
+}
+
+/**
+ * Attach the intrinsic size of the file the client is about to draw. Measured on the
+ * *final* path, so a bordered or rasterized variant reports the size it actually has.
+ * A failure to measure is not a failure to fetch: the result passes through unchanged.
+ */
+const withSize = (result: FetchAssetResult): Effect.Effect<FetchAssetResult> => {
+  if (!result.ok) return Effect.succeed(result)
+  return Effect.map(measure(result.path), (size) => (size ? { ...result, ...size } : result))
 }
 
 export const fetchAsset = (params: {
@@ -676,10 +721,14 @@ export const fetchAsset = (params: {
     // plain lookup short-circuits the network either way.
     const cached = yield* findCached(cacheDir, hash)
     if (Option.isSome(cached)) {
-      const drawable = yield* applyGifFrame(
+      const drawable = yield* applyShrink(
         cacheDir,
         hash,
-        yield* applySvgRaster(cacheDir, hash, { ok: true, path: cached.value }),
+        yield* applyGifFrame(
+          cacheDir,
+          hash,
+          yield* applySvgRaster(cacheDir, hash, { ok: true, path: cached.value }),
+        ),
       )
       return yield* withSize(yield* applyBorder(cacheDir, hash, drawable, border))
     }
@@ -707,10 +756,10 @@ export const fetchAsset = (params: {
       ),
     )
     if (fetched.ok) yield* cache.noteSuccess(params.url)
-    const drawable = yield* applyGifFrame(
+    const drawable = yield* applyShrink(
       cacheDir,
       hash,
-      yield* applySvgRaster(cacheDir, hash, fetched),
+      yield* applyGifFrame(cacheDir, hash, yield* applySvgRaster(cacheDir, hash, fetched)),
     )
     return yield* withSize(yield* applyBorder(cacheDir, hash, drawable, border))
   })

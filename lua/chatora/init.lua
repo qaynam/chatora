@@ -273,6 +273,22 @@ function M.logout()
   auth.logout()
 end
 
+--- `:Chatora images` says what each picture of the page is doing; `redraw` draws them again.
+function M.images(args)
+  local bufnr = vim.api.nvim_get_current_buf()
+  if not vim.api.nvim_buf_get_name(bufnr):match('^cosense://') then
+    vim.notify('[chatora] ページのバッファで実行してください', vim.log.levels.WARN)
+    return
+  end
+  local images = require('chatora.images')
+  if args == 'redraw' then
+    images.redraw(bufnr)
+    vim.notify('[chatora] 画像を描き直しました', vim.log.levels.INFO)
+    return
+  end
+  vim.notify(table.concat(images.status(bufnr), '\n'), vim.log.levels.INFO)
+end
+
 --- Dispatcher for the :Chatora user command.
 function M.dispatch(subcmd, args)
   -- `:Chatora <url>` — a pasted page URL is not a subcommand, so it reaches `open`
@@ -295,6 +311,8 @@ function M.dispatch(subcmd, args)
     M.switch_account()
   elseif subcmd == 'logout' then
     M.logout()
+  elseif subcmd == 'images' then
+    M.images(args)
   elseif subcmd == 'help' then
     M.help()
   elseif subcmd == 'log' then

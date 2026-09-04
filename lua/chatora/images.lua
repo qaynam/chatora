@@ -26,6 +26,7 @@ local project_by_bufnr = {}
 local epoch_by_bufnr = {} -- bumped on every refresh(); guards stale async replies (chatora/images and chatora/fetchAsset alike)
 local path_by_key = {} -- fetch key -> local file path, resolved once via fetchAsset and reused
 local members_by_key = {} -- fetch key of a strip -> 0-based indices of the pictures it holds
+local failure_by_key = {} -- fetch key -> why its last fetch failed, for `:Chatora images`
 local width_by_bufnr = {} -- text width the placements were scaled for; a resize re-places all
 -- Anchors: one extmark per placement, at the row it was drawn on. A placement rides on the
 -- backend's own extmark, which nothing here can read back; this one moves and dies the same
@@ -229,6 +230,12 @@ local function snacks_backend()
       return {
         close = function()
           pcall(p.close, p)
+          -- Closing the last placement makes snacks delete the image from the terminal, but
+          -- it leaves the image marked as sent, so a placement made later (the next
+          -- BufWinEnter, say) would show a blank. Unmarking it is what makes it send again.
+          if p.img and not next(p.img.placements or {}) then
+            p.img.sent = false
+          end
         end,
         -- snacks converts asynchronously: not ready yet is not the same as never coming.
         ok = function()
@@ -239,7 +246,12 @@ local function snacks_backend()
             return false
           end
           local ok_ready, ready = pcall(p.ready, p)
-          return (ok_ready and ready) or nil
+          if not (ok_ready and ready) then
+            return nil
+          end
+          -- Past its own memory budget snacks marks the oldest image unsent while its
+          -- placements stay: those have nothing on screen until they are placed again.
+          return p.img == nil or p.img.sent == true
         end,
       }
     end,
@@ -635,6 +647,7 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
         if err or not result or result.ok == false then
           -- Without ImageMagick there is no strip, but there are still pictures.
           report_once(result and result.message)
+          failure_by_key[asset_key] = (result and result.message) or tostring(err)
           for i, member in ipairs(target.geom.members) do
             place_url({
               url = target.compose[i],
@@ -648,6 +661,7 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
         end
         path_by_key[asset_key] = result.path
         members_by_key[asset_key] = result.members
+        failure_by_key[asset_key] = nil
         place(result.path, included_geom(target, result.members), target.opts, key)
       end)
       return
@@ -658,9 +672,11 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
       function(err, result)
         if err or not result or result.ok == false then
           report_once(result and result.message)
+          failure_by_key[asset_key] = (result and result.message) or tostring(err)
           return
         end
         path_by_key[asset_key] = result.path
+        failure_by_key[asset_key] = nil
         place(result.path, target.geom, target.opts, key)
       end
     )
@@ -769,6 +785,61 @@ local function schedule_refresh(bufnr)
   end)
 end
 
+--- Draw again whatever the backend says is missing from the screen. Nothing else would:
+--- a refresh runs when the text changes, and a picture the terminal has dropped (its
+--- memory budget, a placement closed and made again) changes no text.
+function M.reconcile(bufnr)
+  local pools = placements_by_bufnr[bufnr]
+  if not pools or not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  for _, pool in pairs(pools) do
+    for _, handle in ipairs(pool) do
+      local at = vim.api.nvim_buf_get_extmark_by_id(bufnr, anchor_ns, handle.anchor, {})
+      if at[1] and failed(bufnr, handle, at[1]) then
+        schedule_refresh(bufnr)
+        return
+      end
+    end
+  end
+end
+
+--- What each picture of bufnr is doing, one line each, for `:Chatora images`.
+function M.status(bufnr)
+  local lines = { string.format('画像: backend = %s', tostring(config.options.image_backend)) }
+  local rows = {}
+  for key, pool in pairs(placements_by_bufnr[bufnr] or {}) do
+    for _, handle in ipairs(pool) do
+      local at = vim.api.nvim_buf_get_extmark_by_id(bufnr, anchor_ns, handle.anchor, {})
+      local row = (at[1] or -1) + 1
+      local verdict = handle.ok and handle.ok()
+      local state = verdict == true and '描画済み' or verdict == false and '出ていない' or '不明'
+      local label = (key:gsub('\n', ' + '))
+      rows[#rows + 1] = { row = row, text = string.format('  %4d 行  %-6s  %s', row, state, label:sub(1, 70)) }
+    end
+  end
+  table.sort(rows, function(a, b)
+    return a.row < b.row
+  end)
+  for _, entry in ipairs(rows) do
+    lines[#lines + 1] = entry.text
+  end
+  for key, why in pairs(failure_by_key) do
+    lines[#lines + 1] = string.format('  取得失敗  %s  (%s)', key:sub(1, 60), why)
+  end
+  if #lines == 1 then
+    lines[2] = '  （置いた画像はありません）'
+  end
+  return lines
+end
+
+--- Take every picture of bufnr down and draw it again, sending its data to the terminal anew.
+function M.redraw(bufnr)
+  clear_placements(bufnr)
+  width_by_bufnr[bufnr] = nil
+  M.refresh(bufnr)
+end
+
 local function cleanup_timer(bufnr)
   local timer = timers_by_bufnr[bufnr]
   if timer then
@@ -818,6 +889,22 @@ function M.attach(bufnr, project)
       if vim.api.nvim_buf_is_valid(bufnr) then
         schedule_refresh(bufnr)
       end
+    end,
+  })
+
+  vim.api.nvim_create_autocmd({ 'WinScrolled', 'FocusGained' }, {
+    group = group,
+    callback = function()
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        M.reconcile(bufnr)
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd('CursorHold', {
+    group = group,
+    buffer = bufnr,
+    callback = function()
+      M.reconcile(bufnr)
     end,
   })
 

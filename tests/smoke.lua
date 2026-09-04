@@ -1652,6 +1652,64 @@ local ok, err = pcall(function()
     vim.fn.delete(dir, 'rf')
   end
 
+  -- snacks deletes an image from the terminal with its last placement and leaves it marked
+  -- sent, and past its own budget unmarks the oldest while their placements stay. Both
+  -- have to read as "nothing on screen", and the first has to send again when placed.
+  do
+    local images = require('chatora.images')
+    local config = require('chatora.config')
+    local orig_backend_opt, orig_snacks = config.options.image_backend, package.loaded.snacks
+    local img = {
+      sent = true,
+      placements = {},
+      failed = function()
+        return false
+      end,
+      ready = function()
+        return true
+      end,
+    }
+    local made = 0
+    package.loaded.snacks = {
+      image = {
+        supports_terminal = function()
+          return true
+        end,
+        placement = {
+          new = function()
+            made = made + 1
+            local id = made
+            local p = { img = img, closed = false }
+            img.placements[id] = p
+            function p:ready()
+              return true
+            end
+            function p:close()
+              self.closed = true
+              img.placements[id] = nil
+            end
+            return p
+          end,
+        },
+      },
+    }
+    config.options.image_backend = 'snacks'
+    local backend = images.backend()
+    assert(backend, 'the fake snacks is taken as the backend')
+    local buf = vim.api.nvim_create_buf(false, true)
+    local geom = { row = 1, byte_col = 0, byte_end = 5, screen_col = 0 }
+    local handle = backend.place(buf, '/tmp/x.png', geom, { height = 1 })
+    assert(handle and handle.ok() == true, 'a sent, ready image is on screen')
+    img.sent = false
+    assert(handle.ok() == false, 'an image snacks unmarked has nothing on screen')
+    img.sent = true
+    handle.close()
+    assert(img.sent == false, 'closing the last placement unmarks the image, so the next one sends again')
+    package.loaded.snacks = orig_snacks
+    config.options.image_backend = orig_backend_opt
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- The sidebar follows the page the reader moves to, and a project it has listed before
   -- comes back without asking the server again.
   do

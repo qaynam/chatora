@@ -131,6 +131,7 @@ URL を受け取る小さなアプリを作って登録します。あとは**�
 | `:Chatora project [name]` | プロジェクトの切り替え。名前を渡すとそのプロジェクトを持つアカウントごと切り替える |
 | `:Chatora logout`         | 現在のアカウントを削除                                                             |
 | `:Chatora log`            | 診断ログを開く（`log` オプションが必要）                                           |
+| `:Chatora images [redraw]` | ページの画像の状態を表示する。`redraw` で描き直す                                |
 | `:Chatora reload`         | プラグインを再読み込み（開発用）                                                   |
 | `:Chatora help`           | チートシート                                                                       |
 

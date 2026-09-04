@@ -22,6 +22,7 @@ local SECTIONS = {
       { ':Chatora account', 'アカウントを切り替え / 追加（複数 PAT 対応）' },
       { ':Chatora logout', 'ログアウト（Keychain から PAT を削除）' },
       { ':Chatora log', '診断ログを開く（log オプションが有効にする必要がある）' },
+      { ':Chatora images [redraw]', 'ページの画像の状態を表示 / 描き直す' },
       { ':Chatora reload', 'nvim を閉じずにプラグインを再読み込み' },
       { ':Chatora help', 'ヘルプを開く' },
     },

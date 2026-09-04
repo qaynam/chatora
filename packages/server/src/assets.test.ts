@@ -212,6 +212,41 @@ describe('fetchAsset', () => {
     },
   )
 
+  describe('a picture larger than a terminal can show', () => {
+    const picture = (size: string): Uint8Array =>
+      new Uint8Array(Bun.spawnSync([magickCmd as string, '-size', size, 'xc:red', 'png:-']).stdout)
+    const served = (bytes: Uint8Array): Response =>
+      new Response(bytes, { status: 200, headers: { 'content-type': 'image/png' } })
+
+    test.skipIf(magickCmd === undefined)('is shrunk to the longest edge it can use', async () => {
+      const { layer: httpLayer } = testHttpClient(() => served(picture('3000x2200')))
+      const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+      const result = await runOnce(
+        fetchAsset({ project: 'p', url: 'https://cdn.example.com/huge.png' }),
+        httpLayer,
+        credLayer,
+      )
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.width).toBe(2048)
+      expect(result.height).toBe(1502)
+    })
+
+    test.skipIf(magickCmd === undefined)('leaves one that already fits untouched', async () => {
+      const { layer: httpLayer } = testHttpClient(() => served(picture('300x220')))
+      const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+      const result = await runOnce(
+        fetchAsset({ project: 'p', url: 'https://cdn.example.com/small.png' }),
+        httpLayer,
+        credLayer,
+      )
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect([result.width, result.height]).toEqual([300, 220])
+      expect(result.path.includes('/s')).toBe(false)
+    })
+  })
+
   describe('composeAssets', () => {
     // Real pictures this time, since ImageMagick has to read them.
     const picture = (color: string, size: string): Uint8Array =>
