@@ -119,6 +119,21 @@ describe('chatora-open', () => {
     expect(log).toContain('open -a Ghostty')
   })
 
+  test('inside tmux the terminal is found by its bundle id, not by TERM_PROGRAM', () => {
+    nvimSocket('a')
+    stub(
+      'nvim',
+      `case "$*" in
+         *__CFBundleIdentifier*) echo com.mitchellh.ghostty ;;
+         *TERM_PROGRAM*) echo tmux ;;
+         *Chatora*) echo 2 ;;
+       esac`,
+    )
+    const { log } = run(COSENSE)
+    expect(log).toContain('open -b com.mitchellh.ghostty')
+    expect(log).not.toContain('open -a tmux')
+  })
+
   test('an origin the reader added is matched too', () => {
     writeFileSync(join(root, 'data', 'origins'), 'scrapbox.io\ncosense.example.com\n')
     nvimSocket('a')

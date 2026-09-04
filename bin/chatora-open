@@ -47,10 +47,18 @@ for sock in "${TMPDIR:-/tmp}"/nvim."$(id -un)"/*/nvim.*.0; do
       "$TMUX_BIN" switch-client -t "$pane" 2>/dev/null || true
       ;;
   esac
-  term=$("$NVIM" --server "$sock" --remote-expr 'getenv("TERM_PROGRAM")' 2>/dev/null || true)
-  case $term in
-    '' | v:null) ;;
-    *) open -a "$term" 2>/dev/null || true ;;
+  # Inside tmux TERM_PROGRAM says "tmux", which is no app to bring forward. The app that
+  # started the tmux server left its bundle id in the environment, and Neovim inherited it.
+  app=$("$NVIM" --server "$sock" --remote-expr 'getenv("__CFBundleIdentifier")' 2>/dev/null || true)
+  case $app in
+    '' | v:null)
+      term=$("$NVIM" --server "$sock" --remote-expr 'getenv("TERM_PROGRAM")' 2>/dev/null || true)
+      case $term in
+        '' | v:null) ;;
+        *) open -a "$term" 2>/dev/null || true ;;
+      esac
+      ;;
+    *) open -b "$app" 2>/dev/null || true ;;
   esac
   exit 0
 done
