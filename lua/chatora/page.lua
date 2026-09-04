@@ -55,7 +55,8 @@ local function schedule_autosave(bufnr)
     math.max(1000, math.floor(secs * 1000)),
     0,
     vim.schedule_wrap(function()
-      if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].modified then
+      -- An untitled page is saved by hand: naming it is the reader's decision.
+      if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].modified and not vim.b[bufnr].chatora_untitled then
         -- Not `:write`: that is BufWriteCmd, which blocks the editor until the save
         -- round-trips because `:wq` needs it to. Nothing is waiting on an autosave, so it
         -- goes straight to the request and the cursor keeps moving while it is in flight.

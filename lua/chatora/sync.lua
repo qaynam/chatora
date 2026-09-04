@@ -46,6 +46,8 @@ local function is_page(bufnr)
     -- A read-only page holds no local edits to merge, and re-fetching one nobody can
     -- change is a request spent on nothing.
     and not vim.b[bufnr].chatora_read_only
+    -- An untitled page has no name the server knows yet, so there is nothing to merge with.
+    and not vim.b[bufnr].chatora_untitled
 end
 
 --- Conflicts currently marked in bufnr, in buffer order.

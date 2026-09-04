@@ -1757,6 +1757,13 @@ local ok, err = pcall(function()
     vim.cmd('write')
     assert(vim.b[buf].chatora_untitled and #asked == 0, 'an empty title is refused before anything is asked')
 
+    -- Nor does the sync ask for it: the server knows no page by the stand-in name.
+    local synced = nil
+    require('chatora.sync').run(buf, function(changed)
+      synced = changed
+    end)
+    assert(synced == false and #asked == 0, 'an untitled page is not synced')
+
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '新しいページ', '本文' })
     exists = true
     vim.cmd('write')
