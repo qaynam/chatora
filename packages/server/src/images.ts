@@ -50,13 +50,19 @@ const isFetchableImage = (src: string): boolean => {
 const DRAWABLE: ReadonlySet<string> = new Set(['image', 'icon'])
 
 /**
- * A bare Gyazo link is a picture. The parser only reads `https://gyazo.com/<hash>` that
- * way — a team's `https://<team>.gyazo.com/<hash>` has no form it can turn into an image
- * URL, so it arrives as an ordinary link — but Cosense draws both, and so does chatora:
- * what the URL resolves to is the asset layer's problem (see gyazo.ts), not the parser's.
+ * A bracketed Gyazo link is a picture. The parser only reads `[https://gyazo.com/<hash>]`
+ * that way — a team's `[https://<team>.gyazo.com/<hash>]` has no form it can turn into an
+ * image URL, so it arrives as an ordinary link — but Cosense draws both, and so does
+ * chatora: what the URL resolves to is the asset layer's problem (see gyazo.ts), not the
+ * parser's. The brackets are what makes it a picture, as they are on the web: the same
+ * URL bare in the text is a link, and the parser reports both as the same node, so the
+ * line's text is what tells them apart.
  */
-const isGyazoImageLink = (node: AnyNode): boolean =>
-  node.type === 'externalLink' && node.label === node.target && isGyazoUrl(node.target)
+const isGyazoImageLink = (node: AnyNode, lineText: string): boolean =>
+  node.type === 'externalLink' &&
+  node.label === node.target &&
+  isGyazoUrl(node.target) &&
+  lineText[node.position.start.column] === '['
 
 const ICON_SUFFIX = /^(.+)\.icon$/
 
@@ -104,7 +110,7 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
       content.every(
         (child) =>
           DRAWABLE.has(child.type) ||
-          isGyazoImageLink(child) ||
+          isGyazoImageLink(child, lineText) ||
           largeIconUser(child, lineText) !== undefined,
       )
     if (node.type === 'decoration') {
@@ -124,7 +130,7 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
       }
       return
     }
-    if (isGyazoImageLink(node) && node.type === 'externalLink') {
+    if (isGyazoImageLink(node, lineText) && node.type === 'externalLink') {
       out.push({
         line,
         startChar: column,

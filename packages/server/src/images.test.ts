@@ -19,6 +19,12 @@ describe('computeImageTargets', () => {
     ])
   })
 
+  test('the same Gyazo URL bare in the text stays a link, as it does on the web', () => {
+    const url = 'https://myteam.gyazo.com/d5a22192d87effa875686051a0c5a179.png'
+    expect(computeImageTargets(`タイトル\n${url}`)).toEqual([])
+    expect(computeImageTargets(`タイトル\n写真は ${url} です`)).toEqual([])
+  })
+
   test('a Gyazo link with a label of its own stays a link', () => {
     const targets = computeImageTargets(
       'タイトル\n[ラベル https://myteam.gyazo.com/d5a22192d87effa875686051a0c5a179]',
