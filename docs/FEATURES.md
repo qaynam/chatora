@@ -567,6 +567,9 @@ bin/chatora-url-handler install
 いないときや何かに失敗したときも、同じくブラウザへ行きます。既定ブラウザを預かる以上、リンクが
 「どこも開かない」にはなりません。
 
+chatora 自身がブラウザで開く操作（外部リンクの `gd` や、ページをブラウザで開く）は、既定ではなく
+控えておいたブラウザへ直接渡します。既定に渡すと、自分のところへ戻ってきてしまうためです。
+
 対象にする origin は `~/.local/share/chatora/url-handler/origins` に 1 行 1 件で書きます（既定は
 `scrapbox.io`）。今どうなっているかは `chatora-url-handler status` で見え、元に戻すのは
 `chatora-url-handler uninstall` です。

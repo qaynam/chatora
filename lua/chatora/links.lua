@@ -64,7 +64,7 @@ function M.open_external(url)
   if mode ~= 'open' and vim.fn.confirm('ブラウザで開きますか？\n' .. url, '&Yes\n&No', 1) ~= 1 then
     return
   end
-  local ok, err = pcall(vim.ui.open, url)
+  local ok, err = pcall(require('chatora.browser').open, url)
   if not ok then
     vim.notify('[chatora] ブラウザを開けませんでした: ' .. tostring(err), vim.log.levels.ERROR)
   end

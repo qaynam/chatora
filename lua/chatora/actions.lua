@@ -44,7 +44,7 @@ function M.open_in_browser()
   if not project then
     return
   end
-  vim.ui.open(uri.web_url(config.options.origin, project, title))
+  require('chatora.browser').open(uri.web_url(config.options.origin, project, title))
 end
 
 --- Merge the server's copy into the current page — the working copy's `git pull`. Nothing

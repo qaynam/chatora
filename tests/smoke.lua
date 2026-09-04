@@ -1611,6 +1611,47 @@ local ok, err = pcall(function()
     quote.ensure_hl()
   end
 
+  -- With the URL handler installed the system default browser is chatora itself, so a URL
+  -- sent to "the browser" would come straight back; the browser the handler recorded gets it.
+  do
+    local browser = require('chatora.browser')
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, 'p')
+    local orig_dir, orig_system, orig_open = vim.env.CHATORA_URL_HANDLER_DIR, vim.system, vim.ui.open
+    vim.env.CHATORA_URL_HANDLER_DIR = dir
+    local spawned, opened, code = nil, nil, 0
+    vim.system = function(cmd)
+      spawned = cmd
+      return {
+        wait = function()
+          return { code = code }
+        end,
+      }
+    end
+    vim.ui.open = function(url)
+      opened = url
+    end
+
+    browser.open('https://scrapbox.io/p/t')
+    assert(spawned == nil and opened == 'https://scrapbox.io/p/t', 'without the handler, the default is asked')
+
+    vim.fn.writefile({ 'com.example.Browser' }, dir .. '/fallback')
+    spawned, opened = nil, nil
+    browser.open('https://scrapbox.io/p/t')
+    assert(
+      vim.deep_equal(spawned, { 'open', '-b', 'com.example.Browser', 'https://scrapbox.io/p/t' }) and opened == nil,
+      'with the handler, the recorded browser gets it, got ' .. vim.inspect(spawned)
+    )
+
+    code = 1
+    spawned, opened = nil, nil
+    browser.open('https://example.com')
+    assert(opened == 'https://example.com', 'a recorded browser that cannot open falls back to the default')
+
+    vim.env.CHATORA_URL_HANDLER_DIR, vim.system, vim.ui.open = orig_dir, orig_system, orig_open
+    vim.fn.delete(dir, 'rf')
+  end
+
   -- The sidebar follows the page the reader moves to, and a project it has listed before
   -- comes back without asking the server again.
   do
