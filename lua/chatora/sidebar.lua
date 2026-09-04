@@ -537,13 +537,7 @@ function M.open_current()
 end
 
 function M.new_page()
-  vim.ui.input({ prompt = 'New page title: ' }, function(title)
-    if not title or title == '' then
-      return
-    end
-    local target = ensure_editor_win()
-    page.open(project, title, target)
-  end)
+  page.open_untitled(project, ensure_editor_win())
 end
 
 function M.search()

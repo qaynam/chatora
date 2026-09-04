@@ -1710,6 +1710,78 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- A new page starts as an empty buffer, as on the web: the first line becomes the title on
+  -- the first save, which is when the page comes to exist. An empty title, or one a page
+  -- already has, leaves the buffer as it is.
+  do
+    local page = require('chatora.page')
+    local lsp = require('chatora.lsp')
+    local orig_request, orig_ok, orig_start = lsp.request, lsp.request_ok, lsp.ensure_start
+    local asked, exists = {}, false
+    lsp.ensure_start = function()
+      return true
+    end
+    lsp.request_ok = function(method, params, cb)
+      if method == 'chatora/openPage' then
+        cb({ ok = true, exists = exists, text = params.title .. '\n' })
+      end
+    end
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/openPage' then
+        asked[#asked + 1] = 'open ' .. params.title
+        cb(nil, { ok = true, exists = exists, text = params.title .. '\n' })
+      elseif method == 'chatora/savePage' then
+        asked[#asked + 1] = 'save ' .. params.uri
+        cb(nil, { ok = true })
+      end
+    end
+    local orig_notify = vim.notify
+    vim.notify = function() end
+    -- Opening a page can open the related panel beside it, a window later tests would
+    -- land in; this test is about the page alone.
+    local config = require('chatora.config')
+    local orig_related = config.options.related_auto_open
+    config.options.related_auto_open = false
+
+    vim.cmd('new')
+    vim.wo.winfixbuf = false
+    page.open_untitled('proj', vim.api.nvim_get_current_win())
+    local buf = vim.api.nvim_get_current_buf()
+    vim.cmd('stopinsert')
+    assert(
+      vim.api.nvim_buf_get_name(buf) == 'cosense://proj/無題' and vim.b[buf].chatora_untitled,
+      'an untitled page wears a stand-in name'
+    )
+    assert(vim.deep_equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), { '' }), 'and starts empty')
+
+    vim.cmd('write')
+    assert(vim.b[buf].chatora_untitled and #asked == 0, 'an empty title is refused before anything is asked')
+
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '新しいページ', '本文' })
+    exists = true
+    vim.cmd('write')
+    assert(vim.b[buf].chatora_untitled, 'a title a page already has is refused')
+    assert(vim.deep_equal(asked, { 'open 新しいページ' }), 'and nothing is saved: ' .. vim.inspect(asked))
+
+    exists = false
+    asked = {}
+    vim.cmd('write')
+    assert(
+      vim.api.nvim_buf_get_name(buf) == 'cosense://proj/新しいページ' and not vim.b[buf].chatora_untitled,
+      'the first line names the page, got ' .. vim.api.nvim_buf_get_name(buf)
+    )
+    assert(
+      vim.deep_equal(asked, { 'open 新しいページ', 'save cosense://proj/新しいページ' }),
+      'the page is opened under its name and then saved: ' .. vim.inspect(asked)
+    )
+
+    vim.notify = orig_notify
+    config.options.related_auto_open = orig_related
+    lsp.request, lsp.request_ok, lsp.ensure_start = orig_request, orig_ok, orig_start
+    vim.cmd('close!')
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- The sidebar follows the page the reader moves to, and a project it has listed before
   -- comes back without asking the server again.
   do

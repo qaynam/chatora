@@ -99,17 +99,11 @@ end
 function M.new(title)
   auth.ensure_auth(function()
     M.resolve_project(function(project)
-      local function open_new(t)
-        if not t or t == '' then
-          return
-        end
-        local target = require('chatora.winutil').ensure_editor_win()
-        require('chatora.page').open(project, t, target)
-      end
+      local target = require('chatora.winutil').ensure_editor_win()
       if title and title ~= '' then
-        open_new(title)
+        require('chatora.page').open(project, title, target)
       else
-        vim.ui.input({ prompt = 'New page title: ' }, open_new)
+        require('chatora.page').open_untitled(project, target)
       end
     end)
   end)

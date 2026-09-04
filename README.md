@@ -124,7 +124,7 @@ URL を受け取る小さなアプリを作って登録します。あとは**�
 | `:Chatora`                | サイドバーを開く（初回は認証 → プロジェクト選択）                                  |
 | `:Chatora <url>`          | Cosense のページ URL をそのまま開く                                                |
 | `:Chatora toggle`         | サイドバーを開閉                                                                   |
-| `:Chatora new [title]`    | 新規ページ（title 省略時は入力プロンプト）                                         |
+| `:Chatora new [title]`    | 新規ページ。title を省くと空のページが開き、1 行目がタイトルになる                 |
 | `:Chatora search [query]` | 全文検索（内蔵ピッカー）                                                           |
 | `:Chatora related`        | 関連ページパネルを開閉                                                             |
 | `:Chatora account`        | アカウントの切り替え・追加                                                         |

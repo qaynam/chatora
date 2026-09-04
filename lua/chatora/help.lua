@@ -15,7 +15,7 @@ local SECTIONS = {
       { ':Chatora [open]', 'サイドバーを開く（初回は PAT 認証 → プロジェクト選択）' },
       { ':Chatora <url>', 'Cosense のページ URL を直接開く' },
       { ':Chatora toggle', 'サイドバーを開閉' },
-      { ':Chatora new [title]', '新規ページを作成（title 省略された場合は入力プロンプトが表示される）' },
+      { ':Chatora new [title]', '新規ページを作成（title を省くと空のページが開き、1 行目がタイトルになる）' },
       { ':Chatora search [q]', 'ページを検索（q 省略時は入力プロンプトが表示される）' },
       { ':Chatora related', '関連ページパネルをトグル' },
       { ':Chatora project [name]', 'プロジェクトを切り替え（name を渡すとアカウントも切り替わる）' },

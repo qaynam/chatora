@@ -239,18 +239,10 @@ function M.mark_read_only(bufnr, project)
   end
 end
 
-local function handle_read(ev)
-  local project, title = uri.parse(ev.match)
-  if not project or not title then
-    vim.notify('[chatora] invalid cosense uri: ' .. ev.match, vim.log.levels.ERROR)
-    return
-  end
-
-  local bufnr = ev.buf
-  -- Set buffer options synchronously, before the async fetch: UI plugins
-  -- (winbar/statusline/icon providers) react to the buffer as soon as
-  -- BufReadCmd returns, and must see a typed special buffer, not a normal
-  -- file buffer with a percent-encoded name.
+--- The options every page buffer has. Set synchronously, before any fetch: UI plugins
+--- (winbar/statusline/icon providers) react to the buffer as soon as BufReadCmd returns,
+--- and must see a typed special buffer, not a normal file buffer with a percent-encoded name.
+local function prepare_buffer(bufnr)
   vim.bo[bufnr].buftype = 'acwrite'
   vim.bo[bufnr].swapfile = false
   vim.bo[bufnr].filetype = 'cosense'
@@ -266,6 +258,17 @@ local function handle_read(ev)
   -- lines indented deeper than its `code:` marker, so a new line at column 0 silently
   -- *ends the block*. Carrying the previous indent is what the web editor does.
   vim.bo[bufnr].autoindent = true
+end
+
+local function handle_read(ev)
+  local project, title = uri.parse(ev.match)
+  if not project or not title then
+    vim.notify('[chatora] invalid cosense uri: ' .. ev.match, vim.log.levels.ERROR)
+    return
+  end
+
+  local bufnr = ev.buf
+  prepare_buffer(bufnr)
 
   -- Paint what this page said last time, so the buffer has its lines before Neovim puts the
   -- cursor back. The fetch below replaces the run that differs, extmarks and all.
@@ -407,6 +410,50 @@ function send_save(bufnr, on_done)
   end)
 end
 
+--- Ask the server and wait for the answer, for the write path, which has to be synchronous
+--- (see handle_write). nil when the request failed or timed out.
+local function await_request(method, params)
+  local reply, done = nil, false
+  lsp.request(method, params, function(err, result)
+    reply = (not err) and result or nil
+    done = true
+  end)
+  vim.wait(SAVE_TIMEOUT_MS, function()
+    return done
+  end, 10)
+  return reply
+end
+
+--- Give an untitled buffer the name its first line says, and have the server know the page
+--- under it. False when it cannot be saved yet: no title, or one a page already has, which
+--- the web would open rather than overwrite.
+local function name_untitled(bufnr)
+  local project = uri.parse(vim.api.nvim_buf_get_name(bufnr))
+  local title = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ''
+  if vim.trim(title) == '' then
+    vim.notify('[chatora] 1 行目にページのタイトルを書いてください', vim.log.levels.WARN)
+    return false
+  end
+  local new_uri = uri.format(project, title)
+  local opened = await_request('chatora/openPage', { project = project, title = title })
+  if not opened or opened.ok == false then
+    local why = (opened and opened.message) or 'サーバーが応答しません'
+    vim.notify('[chatora] ページを作れませんでした: ' .. why, vim.log.levels.ERROR)
+    return false
+  end
+  if opened.exists or vim.fn.bufnr(new_uri) ~= -1 then
+    vim.notify(
+      '[chatora] 「' .. title .. '」というページは既にあります。別のタイトルにしてください',
+      vim.log.levels.WARN
+    )
+    return false
+  end
+  vim.api.nvim_buf_set_name(bufnr, new_uri)
+  vim.b[bufnr].chatora_untitled = nil
+  related.on_page_opened(project, title)
+  return true
+end
+
 --- BufWriteCmd. The reply is awaited synchronously because `:wq` and `:x` check 'modified'
 --- the moment this returns — an async write would read as unsaved and demand a second
 --- `:wq`. vim.wait pumps the main loop, which is what lets the reply land while we block.
@@ -417,6 +464,9 @@ local function handle_write(ev)
       '[chatora] このプロジェクトには書き込めません（読み取り専用で開いています）',
       vim.log.levels.WARN
     )
+    return
+  end
+  if vim.b[ev.buf].chatora_untitled and not name_untitled(ev.buf) then
     return
   end
   local done = false
@@ -534,6 +584,29 @@ vim.api.nvim_create_autocmd('ExitPre', {
 --- `opts.row` is a 1-based line to put the cursor on once the page has loaded. It cannot be
 --- set here: the buffer has no lines until the fetch lands, so it is remembered and applied
 --- by the read handler.
+local UNTITLED = '無題'
+
+--- Open an empty page for `project`, the way the web does: the reader writes the title on
+--- line 1 and the page comes to exist on the first save. Until then the buffer wears a
+--- stand-in name, since a `cosense://` URI cannot go without a title.
+function M.open_untitled(project, target_win)
+  if target_win and vim.api.nvim_win_is_valid(target_win) then
+    vim.api.nvim_set_current_win(target_win)
+  end
+  local title, n = UNTITLED, 1
+  while vim.fn.bufnr(uri.format(project, title)) ~= -1 do
+    n = n + 1
+    title = UNTITLED .. ' ' .. n
+  end
+  local bufnr = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_buf_set_name(bufnr, uri.format(project, title))
+  vim.b[bufnr].chatora_untitled = true
+  prepare_buffer(bufnr)
+  vim.api.nvim_win_set_buf(0, bufnr)
+  finalize_buffer(bufnr, project, title)
+  vim.cmd('startinsert')
+end
+
 function M.open(project, title, target_win, opts)
   if target_win and vim.api.nvim_win_is_valid(target_win) then
     vim.api.nvim_set_current_win(target_win)
