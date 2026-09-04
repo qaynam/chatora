@@ -1090,6 +1090,18 @@ local ok, err = pcall(function()
       end
     end
     assert(global['\\ct'], 'expected the sidebar toggle to be mapped globally')
+
+    -- The pair only comes at the end of the line, as on the web; in front of text the `[`
+    -- stands alone.
+    local function type_at(line, col, keys)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { line })
+      vim.api.nvim_win_set_cursor(0, { 1, col })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), 'x', false)
+      return vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+    end
+    assert(type_at('文字がある', #'文字がある', 'a[<Esc>') == '文字がある[]', 'at the end the bracket is paired')
+    assert(type_at('文字がある', #'文字', 'i[<Esc>') == '文字[がある', 'in front of text it is not')
+    assert(type_at('文字がある  ', #'文字がある', 'i[<Esc>') == '文字がある[]  ', 'trailing blanks are not text')
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 

@@ -218,8 +218,15 @@ local function autopair_maps(bufnr)
   end
 
   -- Cosense inserts the closing bracket for you, which is also what makes link
-  -- completion fire: the server only completes inside a *closed* pair.
+  -- completion fire: the server only completes inside a *closed* pair. Only at the end of
+  -- the line, though, as on the web: a `[` typed in front of text is opening a link around
+  -- it, and a `]` dropped there would split what follows.
   vim.keymap.set('i', '[', function()
+    local line = vim.api.nvim_get_current_line()
+    local col = vim.api.nvim_win_get_cursor(0)[2]
+    if line:sub(col + 1):find('%S') then
+      return '['
+    end
     return '[]<Left>'
   end, opts('chatora: [] を自動ペア'))
 
