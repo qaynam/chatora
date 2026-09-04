@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   server:
@@ -21,18 +22,30 @@ jobs:
         with:
           bun-version: latest
 
-      # `bun test` includes a test that runs the Lua side in a headless Neovim
-      # (tests/uri-parity.test.ts); without one the run errors before the build.
-      - name: Install Neovim
+      # The tests live in Test (test.yml) and the typecheck, build and lint in CI (ci.yml);
+      # both run on every push to main and every PR, with the tools they need. A release
+      # only builds, and refuses a commit they have not passed on rather than shipping it.
+      # A tag pushed right after a merge may find those runs still going, so this waits.
+      - name: Require green Test and CI runs on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSLO https://github.com/neovim/neovim/releases/download/stable/nvim-linux-x86_64.tar.gz
-          tar xzf nvim-linux-x86_64.tar.gz
-          echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+          await_green() {
+            for _ in $(seq 1 40); do
+              state=$(gh run list --workflow "$1" --commit "$GITHUB_SHA" --limit 1 \
+                --json status,conclusion --jq 'first // {} | "\(.status)/\(.conclusion)"')
+              case "$state" in
+                completed/success) return 0 ;;
+                completed/*) echo "::error::$1 failed on $GITHUB_SHA ($state)"; return 1 ;;
+                null/null) echo "::error::$1 never ran on $GITHUB_SHA"; return 1 ;;
+              esac
+              sleep 30
+            done
+            echo "::error::$1 is still running on $GITHUB_SHA"; return 1
+          }
+          await_green test.yml && await_green ci.yml
 
       - run: bun install --frozen-lockfile
-
-      - run: bun run typecheck
-      - run: bun test
 
       - run: bun run build
 

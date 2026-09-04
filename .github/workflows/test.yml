@@ -1,0 +1,59 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    # macOS is where the Keychain path can actually run; Linux is where most contributors
+    # and most CI live. Neither alone covers this.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # The server runs on node, not bun, so the E2E has to prove it works there.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The URI parity test, the smoke test and the E2E all drive a headless Neovim;
+      # >= 0.11 is required.
+      - name: Install Neovim (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSLO https://github.com/neovim/neovim/releases/download/stable/nvim-linux-x86_64.tar.gz
+          tar xzf nvim-linux-x86_64.tar.gz
+          echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
+
+      - name: Install Neovim (macOS)
+        if: runner.os == 'macOS'
+        run: brew install neovim
+
+      # ImageMagick backs the SVG, GIF, border and gallery paths. Ubuntu ships version 6,
+      # whose binary is `convert`; the tests take either that or 7's `magick`, and skip
+      # without both — which is what the macOS runner does rather than pay for a brew install.
+      - name: Install ImageMagick
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
+
+      - run: bun install --frozen-lockfile
+
+      - run: nvim --version | head -1
+
+      - run: bun test
+      - run: nvim --headless --clean -u NORC -c "luafile tests/smoke.lua"
+      # Builds the server bundle itself when none is there.
+      - run: bun tests/e2e/run.ts
