@@ -1,17 +1,33 @@
-import { execFile } from 'node:child_process'
-import { createHash, randomBytes } from 'node:crypto'
-import { mkdir, open, readdir, rename, writeFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
+// The two asset requests a page makes: `chatora/fetchAsset` for one picture and
+// `chatora/composeAssets` for a row of them. Fetching is the one place page content turns
+// into a network call; what happens to the bytes afterwards lives in assetStore.ts (disk),
+// imageTools.ts (ImageMagick) and assetCache.ts (what the session remembers).
+
 import { join } from 'node:path'
-import { promisify } from 'node:util'
 import type { Credential, HttpClientShape } from '@chatora/core'
 import { HttpClient } from '@chatora/core'
-import { Clock, Context, Data, Deferred, Effect, Layer, Option, Ref, SynchronizedRef } from 'effect'
+import { Data, Effect, Option } from 'effect'
+import { AssetCache } from './assetCache'
+import { cacheKey, extensionFor, findCached, resolveCacheDir, writeAtomic } from './assetStore'
 import { resolveGyazo } from './gyazo'
-import { type ImageSize, imageSizeOf } from './imageSize'
+import {
+  type BorderParams,
+  borderArgs,
+  execFileAsync,
+  flattenGif,
+  measure,
+  rasterizeSvg,
+  resolveMagick,
+  sanitizeBorder,
+  shrink,
+  withBorder,
+} from './imageTools'
 import { log } from './log'
 import type { ErrCode, ErrEnvelope } from './pages'
 import { SessionState } from './state'
+
+export { AssetCache, AssetCacheLive } from './assetCache'
+export type { BorderParams } from './imageTools'
 
 const err = (code: ErrCode, message: string): ErrEnvelope => ({ ok: false, code, message })
 const UNAUTHORIZED_STATUSES: ReadonlySet<number> = new Set([401, 403])
@@ -45,89 +61,6 @@ const retryAfterMs = (header: string | null): number | undefined => {
   const at = Date.parse(header)
   return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now())
 }
-
-// ---------------------------------------------------------------------------
-// cache directory + on-disk lookup
-// ---------------------------------------------------------------------------
-
-/**
- * `$XDG_CACHE_HOME/chatora/assets`, falling back to `~/.cache/chatora/assets`.
- * `CHATORA_CACHE_DIR` overrides the whole path when set, so tests can point the cache at a
- * throwaway temp directory instead of touching the real home directory.
- */
-const resolveCacheDir = (): string => {
-  const override = process.env.CHATORA_CACHE_DIR
-  if (override !== undefined && override !== '') return override
-  const xdgCacheHome = process.env.XDG_CACHE_HOME
-  const base =
-    xdgCacheHome !== undefined && xdgCacheHome !== '' ? xdgCacheHome : join(homedir(), '.cache')
-  return join(base, 'chatora', 'assets')
-}
-
-/** First 32 hex chars of sha256(url) — enough to make collisions a non-concern for a local icon/image cache. */
-const cacheKey = (url: string): string =>
-  createHash('sha256').update(url).digest('hex').slice(0, 32)
-
-const CONTENT_TYPE_EXTENSIONS: Readonly<Record<string, string>> = {
-  'image/png': '.png',
-  'image/jpeg': '.jpg',
-  'image/jpg': '.jpg',
-  'image/gif': '.gif',
-  'image/webp': '.webp',
-  'image/svg+xml': '.svg',
-}
-const FALLBACK_EXTENSION = '.img'
-
-// snacks.nvim sniffs image content itself, so an unrecognized content-type isn't fatal —
-// '.img' just keeps the cache file's name meaningful without guessing wrong.
-const extensionFor = (contentType: string | null): string => {
-  if (contentType === null) return FALLBACK_EXTENSION
-  const mime = contentType.split(';', 1)[0]?.trim().toLowerCase() ?? ''
-  return CONTENT_TYPE_EXTENSIONS[mime] ?? FALLBACK_EXTENSION
-}
-
-/**
- * Any file already on disk for this hash, regardless of which extension it was written with —
- * a cache hit skips the network entirely, since icons rarely change (a future refresh command
- * can invalidate by deleting the cache directory).
- */
-const findCached = (cacheDir: string, hash: string): Effect.Effect<Option.Option<string>> =>
-  Effect.tryPromise(() => readdir(cacheDir)).pipe(
-    Effect.map((names) => names.find((name) => name.startsWith(hash))),
-    Effect.map((name) => (name === undefined ? Option.none() : Option.some(join(cacheDir, name)))),
-    // readdir fails with ENOENT before the cache directory has ever been created; either way
-    // that just means "not cached yet".
-    Effect.orElseSucceed(() => Option.none<string>()),
-  )
-
-const writeAtomic = (
-  cacheDir: string,
-  hash: string,
-  ext: string,
-  body: Uint8Array,
-): Effect.Effect<string, AssetFetchError> =>
-  Effect.gen(function* () {
-    yield* Effect.tryPromise(() => mkdir(cacheDir, { recursive: true })).pipe(
-      Effect.mapError(
-        () => new AssetFetchError({ status: 0, message: 'failed to create asset cache directory' }),
-      ),
-    )
-    const finalPath = join(cacheDir, `${hash}${ext}`)
-    // Write-then-rename: a concurrent reader (snacks placing the previous refresh's image)
-    // never observes a partially-written file at the final path.
-    const tmpPath = join(cacheDir, `.${hash}${ext}.${randomBytes(4).toString('hex')}.tmp`)
-    yield* Effect.tryPromise(() => writeFile(tmpPath, body)).pipe(
-      Effect.mapError(
-        () => new AssetFetchError({ status: 0, message: 'failed to write cached asset' }),
-      ),
-    )
-    yield* Effect.tryPromise(() => rename(tmpPath, finalPath)).pipe(
-      Effect.mapError(
-        () => new AssetFetchError({ status: 0, message: 'failed to finalize cached asset' }),
-      ),
-    )
-    return finalPath
-  })
 
 // ---------------------------------------------------------------------------
 // credential-scoped fetch with manual redirects
@@ -225,7 +158,9 @@ const fetchAndCache = (
       ),
     )
     const ext = extensionFor(response.headers.get('content-type'))
-    const path = yield* writeAtomic(cacheDir, hash, ext, new Uint8Array(body))
+    const path = yield* writeAtomic(cacheDir, hash, ext, new Uint8Array(body)).pipe(
+      Effect.mapError((error) => new AssetFetchError({ status: 0, message: error.message })),
+    )
     return { ok: true as const, path }
   }).pipe(
     // A failed asset is deliberately silent in the UI, since a missing picture is
@@ -239,113 +174,8 @@ const fetchAndCache = (
   )
 
 // ---------------------------------------------------------------------------
-// border compositing
+// the drawable variant of what is on disk
 // ---------------------------------------------------------------------------
-
-export interface BorderParams {
-  readonly width: number
-  readonly color: string
-  readonly padding: number
-}
-
-const execFileAsync = promisify(execFile)
-
-// Everything reaching an ImageMagick argv goes through these. A rejected value came from
-// user config, so the whole border is skipped rather than guessed at.
-const clampPx = (value: unknown, fallback: number): number => {
-  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback
-  return Math.min(64, Math.max(0, n))
-}
-const COLOR_RE = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+)$/
-
-const sanitizeBorder = (border: BorderParams): BorderParams | null => {
-  if (!COLOR_RE.test(border.color)) return null
-  const width = clampPx(border.width, 1)
-  const padding = clampPx(border.padding, 12)
-  if (width === 0 && padding === 0) return null
-  return { width, color: border.color, padding }
-}
-
-/**
- * Builds a resolver that returns the first of `candidates` whose command answers
- * `versionFlag`, or `null` when none is installed.
- *
- * @remarks
- * The verdict is memoized for the life of the process, so a missing tool costs one failed
- * spawn overall rather than one per request. A tool installed after startup is not picked
- * up until the server restarts.
- */
-const firstAvailable = <T extends { readonly cmd: string }>(
-  candidates: readonly T[],
-  versionFlag: string,
-): (() => Promise<T | null>) => {
-  let resolved: T | null | undefined
-  return async () => {
-    if (resolved !== undefined) return resolved
-    for (const candidate of candidates) {
-      try {
-        await execFileAsync(candidate.cmd, [versionFlag])
-        resolved = candidate
-        return candidate
-      } catch {}
-    }
-    resolved = null
-    return null
-  }
-}
-
-/**
- * ImageMagick 7 ships `magick`; some installs only have the IM6 `convert`. `null` (no
- * ImageMagick at all) disables compositing.
- */
-const resolveMagick = firstAvailable([{ cmd: 'magick' }, { cmd: 'convert' }], '-version')
-
-// -compose copy on the second -border: without it, IM floods the border color through the
-// transparent padding ring instead of only framing it.
-const borderArgs = (border: BorderParams): string[] => [
-  '-alpha',
-  'set',
-  '-bordercolor',
-  'none',
-  '-border',
-  String(border.padding),
-  '-compose',
-  'copy',
-  '-bordercolor',
-  border.color,
-  '-border',
-  String(border.width),
-]
-
-/**
- * Composites a frame into the image itself — a transparent padding ring, then the border
- * line — since a terminal can only frame an image by baking it into the pixels. The cache
- * name is *prefixed* with the params hash so the plain `findCached(hash)` prefix lookup can
- * never pick up a bordered variant. Falls back to the original path when ImageMagick is
- * missing or the composite fails: the border is cosmetic, the image is not.
- */
-const withBorder = (
-  cacheDir: string,
-  hash: string,
-  sourcePath: string,
-  border: BorderParams,
-): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    const paramsHash = cacheKey(`${border.width}\0${border.color}\0${border.padding}`).slice(0, 8)
-    const borderedName = `b${paramsHash}-${hash}`
-    const borderedPath = join(cacheDir, `${borderedName}.png`)
-    const existing = yield* findCached(cacheDir, borderedName)
-    if (Option.isSome(existing)) return existing.value
-
-    const magick = yield* Effect.promise(resolveMagick)
-    if (magick === null) return sourcePath
-
-    const args = [sourcePath, ...borderArgs(border), borderedPath]
-    return yield* Effect.tryPromise(() => execFileAsync(magick.cmd, args)).pipe(
-      Effect.as(borderedPath),
-      Effect.orElseSucceed(() => sourcePath),
-    )
-  })
 
 const applyBorder = (
   cacheDir: string,
@@ -359,92 +189,6 @@ const applyBorder = (
     path,
   }))
 }
-
-// ---------------------------------------------------------------------------
-// SVG rasterization
-// ---------------------------------------------------------------------------
-
-const RASTER_DPI = '192'
-
-/**
- * SVG rasterizers, best first. librsvg is what ImageMagick itself delegates to when present;
- * without it ImageMagick falls back to its own renderer, which cannot resolve fonts and so
- * fails outright on any SVG containing text.
- */
-const RASTERIZERS: readonly {
-  readonly cmd: string
-  readonly args: (i: string, o: string) => string[]
-}[] = [
-  {
-    cmd: 'rsvg-convert',
-    args: (i, o) => ['--dpi-x', RASTER_DPI, '--dpi-y', RASTER_DPI, '-o', o, i],
-  },
-  // -density must precede the input: SVG has no pixel size, and the default 72 DPI is blurry.
-  { cmd: 'magick', args: (i, o) => ['-density', RASTER_DPI, '-background', 'none', i, o] },
-  { cmd: 'convert', args: (i, o) => ['-density', RASTER_DPI, '-background', 'none', i, o] },
-]
-
-const resolveRasterizer = firstAvailable(RASTERIZERS, '--version')
-
-/**
- * Terminal graphics protocols composite raster formats only, so an `image/svg+xml` asset is
- * unusable as-is. Cached under an `r`-prefixed name — same reasoning as `withBorder`'s `b`
- * prefix: it must never collide with the plain `findCached(hash)` lookup for the `.svg`.
- * `Option.none` means the SVG could not be rasterized and there is nothing to display.
- */
-const rasterizeSvg = (
-  cacheDir: string,
-  hash: string,
-  svgPath: string,
-): Effect.Effect<Option.Option<string>> =>
-  Effect.gen(function* () {
-    const rasterName = `r${hash}`
-    const rasterPath = join(cacheDir, `${rasterName}.png`)
-    const existing = yield* findCached(cacheDir, rasterName)
-    if (Option.isSome(existing)) return existing
-
-    const tool = yield* Effect.promise(resolveRasterizer)
-    if (tool === null) return Option.none()
-
-    return yield* Effect.tryPromise(() =>
-      execFileAsync(tool.cmd, tool.args(svgPath, rasterPath)),
-    ).pipe(
-      Effect.as(Option.some(rasterPath)),
-      Effect.orElseSucceed(() => Option.none<string>()),
-    )
-  })
-
-/**
- * The first frame of a GIF, as a PNG.
- *
- * A terminal graphics protocol composites stills, and neither render backend animates. The
- * catch is that ImageMagick writes *one file per frame* unless a frame is named: converting
- * `a.gif` yields `a-0.png`, `a-1.png`… and never the path it was handed, so frame 0 is named.
- *
- * Cached under a `g`-prefixed name, for the same reason the rasterized SVG is: it must never
- * be picked up by the plain `findCached(hash)` lookup for the `.gif` itself.
- */
-const flattenGif = (
-  cacheDir: string,
-  hash: string,
-  gifPath: string,
-): Effect.Effect<Option.Option<string>> =>
-  Effect.gen(function* () {
-    const frameName = `g${hash}`
-    const framePath = join(cacheDir, `${frameName}.png`)
-    const existing = yield* findCached(cacheDir, frameName)
-    if (Option.isSome(existing)) return existing
-
-    const magick = yield* Effect.promise(resolveMagick)
-    if (magick === null) return Option.none()
-
-    return yield* Effect.tryPromise(() =>
-      execFileAsync(magick.cmd, [`${gifPath}[0]`, framePath]),
-    ).pipe(
-      Effect.as(Option.some(framePath)),
-      Effect.orElseSucceed(() => Option.none<string>()),
-    )
-  })
 
 /**
  * Unlike an SVG, a GIF that cannot be flattened is still worth handing over: a single-frame
@@ -483,203 +227,6 @@ const applySvgRaster = (
     }),
   )
 }
-
-// ---------------------------------------------------------------------------
-// in-flight dedupe
-// ---------------------------------------------------------------------------
-
-export interface AssetCacheShape {
-  /**
-   * Runs `effect` for `key` at most once at a time: a second call for the same key while the
-   * first is still in flight joins the first's result instead of starting its own fetch. A
-   * page full of repeated icon notation for the same page name is the motivating case.
-   */
-  readonly dedupe: (
-    key: string,
-    effect: Effect.Effect<FetchAssetResult>,
-  ) => Effect.Effect<FetchAssetResult>
-
-  /**
-   * The remembered failure for `key` while it is still cooling off, or none when the network
-   * may be tried again.
-   */
-  readonly recallFailure: (key: string) => Effect.Effect<Option.Option<FetchAssetResult>>
-
-  /** Remember that `key` failed, and hold off the next attempt for longer than the last. */
-  readonly noteFailure: (key: string, status: number, wait?: number) => Effect.Effect<void>
-
-  /** Forget `key`'s failures — it answered. */
-  readonly noteSuccess: (key: string) => Effect.Effect<void>
-}
-
-/**
- * How long a failed asset waits before it is fetched again, per attempt. Only successes are
- * cached, so without this a picture that 404s is re-requested on every redraw — measured at
- * 69 requests for one deleted image, and 24 rate-limited ones for a GitHub preview that had
- * already said no. After the last of these the URL is left alone for the session.
- */
-const FAILURE_BACKOFF_MS = [30_000, 120_000, 600_000] as const
-
-interface FailureRecord {
-  readonly attempts: number
-  /** Epoch ms before which nothing is sent; `Infinity` once the attempts are spent. */
-  readonly until: number
-  readonly status: number
-}
-
-export class AssetCache extends Context.Tag('@chatora/server/AssetCache')<
-  AssetCache,
-  AssetCacheShape
->() {}
-
-interface PendingLookup {
-  readonly deferred: Deferred.Deferred<FetchAssetResult>
-  readonly isNew: boolean
-}
-
-export const AssetCacheLive: Layer.Layer<AssetCache> = Layer.effect(
-  AssetCache,
-  Effect.gen(function* () {
-    const pendingRef = yield* SynchronizedRef.make<
-      ReadonlyMap<string, Deferred.Deferred<FetchAssetResult>>
-    >(new Map())
-    const failuresRef = yield* Ref.make<ReadonlyMap<string, FailureRecord>>(new Map())
-
-    const recallFailure: AssetCacheShape['recallFailure'] = (key) =>
-      Effect.gen(function* () {
-        const record = (yield* Ref.get(failuresRef)).get(key)
-        if (record === undefined) return Option.none()
-        const now = yield* Clock.currentTimeMillis
-        if (now >= record.until) return Option.none()
-        return Option.some(
-          UNAUTHORIZED_STATUSES.has(record.status)
-            ? err('unauthorized', 'authentication failed')
-            : err('error', `HTTP ${record.status}`),
-        )
-      })
-
-    const noteFailure: AssetCacheShape['noteFailure'] = (key, status, wait) =>
-      Effect.gen(function* () {
-        const now = yield* Clock.currentTimeMillis
-        const attempts = ((yield* Ref.get(failuresRef)).get(key)?.attempts ?? 0) + 1
-        const backoff = FAILURE_BACKOFF_MS[attempts - 1]
-        // A server that named its own wait gets it, but never less than our own step: the
-        // point is to stop asking, not to obey a `Retry-After: 1`.
-        const until =
-          backoff === undefined ? Number.POSITIVE_INFINITY : now + Math.max(backoff, wait ?? 0)
-        yield* Ref.update(failuresRef, (map) => new Map(map).set(key, { attempts, until, status }))
-      })
-
-    const noteSuccess: AssetCacheShape['noteSuccess'] = (key) =>
-      Ref.update(failuresRef, (map) => {
-        if (!map.has(key)) return map
-        const next = new Map(map)
-        next.delete(key)
-        return next
-      })
-
-    const dedupe: AssetCacheShape['dedupe'] = (key, effect) =>
-      Effect.gen(function* () {
-        // SynchronizedRef serializes this read-or-register step, so two callers racing on the
-        // same key can never both conclude "I'm first" and start two fetches.
-        const { deferred, isNew } = yield* SynchronizedRef.modifyEffect(
-          pendingRef,
-          (
-            pending,
-          ): Effect.Effect<
-            readonly [PendingLookup, ReadonlyMap<string, Deferred.Deferred<FetchAssetResult>>]
-          > => {
-            const existing = pending.get(key)
-            if (existing !== undefined) {
-              return Effect.succeed([{ deferred: existing, isNew: false }, pending])
-            }
-            return Deferred.make<FetchAssetResult>().pipe(
-              Effect.map((fresh) => [
-                { deferred: fresh, isNew: true },
-                new Map(pending).set(key, fresh),
-              ]),
-            )
-          },
-        )
-
-        if (isNew) {
-          yield* effect.pipe(
-            Effect.exit,
-            Effect.flatMap((exit) => Deferred.done(deferred, exit)),
-            Effect.zipRight(
-              SynchronizedRef.update(pendingRef, (pending) => {
-                if (!pending.has(key)) return pending
-                const next = new Map(pending)
-                next.delete(key)
-                return next
-              }),
-            ),
-            Effect.forkDaemon,
-          )
-        }
-
-        return yield* Deferred.await(deferred)
-      })
-
-    return AssetCache.of({ dedupe, recallFailure, noteFailure, noteSuccess })
-  }),
-)
-
-// ---------------------------------------------------------------------------
-// chatora/fetchAsset
-// ---------------------------------------------------------------------------
-
-// Every format imageSizeOf understands puts its dimensions in the first few hundred
-// bytes; reading a prefix keeps a multi-megabyte GIF off the heap.
-const HEADER_BYTES = 1024
-
-/** The intrinsic pixel size of the file at `path`, or undefined when it cannot be read. */
-const measure = (path: string): Effect.Effect<ImageSize | undefined> =>
-  Effect.tryPromise(async () => {
-    const handle = await open(path, 'r')
-    try {
-      const buffer = new Uint8Array(HEADER_BYTES)
-      const { bytesRead } = await handle.read(buffer, 0, HEADER_BYTES, 0)
-      return imageSizeOf(buffer.subarray(0, bytesRead))
-    } finally {
-      await handle.close()
-    }
-  }).pipe(Effect.orElseSucceed((): ImageSize | undefined => undefined))
-
-/**
- * Longest edge a picture is handed over with. A terminal keeps every image it shows
- * decoded and evicts old ones past a budget (Ghostty: 320 MB); a phone photo decodes to
- * 50 MB and a tall screenshot to 130 MB, so a page of them pushes its own pictures off the
- * screen. Nothing is drawn taller than a few dozen rows, which this covers at retina
- * density.
- */
-const MAX_IMAGE_EDGE = 2048
-
-/**
- * `path`, or a copy no larger than MAX_IMAGE_EDGE on either side, cached under an
- * `s`-prefixed name (same reasoning as the `b`, `r` and `g` prefixes). A picture that
- * cannot be measured or shrunk passes through as it is.
- */
-const shrink = (cacheDir: string, hash: string, path: string): Effect.Effect<string> =>
-  Effect.gen(function* () {
-    const size = yield* measure(path)
-    if (size === undefined || (size.width <= MAX_IMAGE_EDGE && size.height <= MAX_IMAGE_EDGE))
-      return path
-    const shrunkName = `s${hash}`
-    const shrunkPath = join(cacheDir, `${shrunkName}.png`)
-    const existing = yield* findCached(cacheDir, shrunkName)
-    if (Option.isSome(existing)) return existing.value
-
-    const magick = yield* Effect.promise(resolveMagick)
-    if (magick === null) return path
-    const fit = `${MAX_IMAGE_EDGE}x${MAX_IMAGE_EDGE}>`
-    return yield* Effect.tryPromise(() =>
-      execFileAsync(magick.cmd, [`${path}[0]`, '-auto-orient', '-resize', fit, shrunkPath]),
-    ).pipe(
-      Effect.as(shrunkPath),
-      Effect.orElseSucceed(() => path),
-    )
-  })
 
 const applyShrink = (
   cacheDir: string,
