@@ -298,7 +298,12 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         // A preview without a page id creates the page: its lines are the inserts, in
         // order, and the first of them is the title (the real API works the same way).
         if (pendingPreview.pageId === undefined) {
-          const created: FixturePage = { id: `pg${pages.size + 1}`, title: '', commitId: 'c3', lines: [] }
+          const created: FixturePage = {
+            id: `pg${pages.size + 1}`,
+            title: '',
+            commitId: 'c3',
+            lines: [],
+          }
           applyChanges(created, pendingPreview.changes)
           created.title = created.lines[0]?.text ?? ''
           pages.set(created.title, created)
