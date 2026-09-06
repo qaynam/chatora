@@ -1813,6 +1813,159 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- Renaming a page is editing its title line. The rename is settled when the cursor leaves
+  -- the line (or on :w): a free title is saved and the buffer renamed in place, a title
+  -- another page has is offered as a merge or a numbered name, and a page others link to
+  -- gets the offer to rewrite those links.
+  do
+    local page = require('chatora.page')
+    local rename = require('chatora.rename')
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_request, orig_ok, orig_start = lsp.request, lsp.request_ok, lsp.ensure_start
+    local orig_confirm, orig_notify = vim.fn.confirm, vim.notify
+    local orig_related, orig_autosave = config.options.related_auto_open, config.options.autosave
+    config.options.related_auto_open = false
+    vim.notify = function() end
+
+    local asked, prompts, answers, attached = {}, {}, {}, {}
+    -- Titles other pages have, as Cosense spells them.
+    local taken = {}
+    vim.fn.confirm = function(msg, _, default)
+      prompts[#prompts + 1] = msg
+      return table.remove(answers, 1) or default
+    end
+    lsp.ensure_start = function(b)
+      attached[#attached + 1] = vim.api.nvim_buf_get_name(b)
+      return true
+    end
+    lsp.request_ok = function(method, params, cb)
+      if method == 'chatora/openPage' then
+        cb({ ok = true, exists = true, title = params.title, text = params.title .. '\n本文', meta = { linked = 2 } })
+      end
+    end
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/titleTaken' then
+        asked[#asked + 1] = 'taken? ' .. params.title
+        cb(nil, { ok = true, taken = taken[params.title] ~= nil, title = taken[params.title] })
+      elseif method == 'chatora/savePage' then
+        local b = vim.fn.bufnr(params.uri)
+        local _, title = require('chatora.uri').parse(params.uri)
+        local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+        asked[#asked + 1] = 'save ' .. title
+        -- Cosense numbers a title another page has, and reports the rename either way.
+        local final = taken[lines[1]] and (lines[1] .. '_1') or lines[1]
+        local reply = { ok = true, commitId = 'c', title = final }
+        if final ~= title then
+          reply.titleChanged = { from = title, to = final }
+        end
+        if final ~= lines[1] then
+          lines[1] = final
+          reply.text = table.concat(lines, '\n')
+        end
+        cb(nil, reply)
+      elseif method == 'chatora/replaceLinks' then
+        asked[#asked + 1] = ('links %s -> %s'):format(params.from, params.to)
+        cb(nil, { ok = true, message = '2 pages have been successfully updated!', pages = 2 })
+      elseif method == 'chatora/mergePage' then
+        asked[#asked + 1] = 'merge into ' .. params.into
+        cb(nil, { ok = true, title = params.into, appended = 1 })
+      end
+    end
+
+    vim.cmd('new')
+    vim.wo.winfixbuf = false
+    local win = vim.api.nvim_get_current_win()
+    page.open('proj', '古い題')
+    local buf = vim.api.nvim_get_current_buf()
+    assert(vim.b[buf].chatora_title == '古い題' and not rename.pending(buf), 'an opened page knows its title')
+
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { '新しい題' })
+    assert(rename.pending(buf), 'a changed title line is a pending rename')
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+    rename.settle(buf)
+    assert(#asked == 0, 'nothing is asked while the cursor is on the title line: ' .. vim.inspect(asked))
+
+    -- Nor by the autosave, which would rename the page mid-word.
+    config.options.autosave = 1
+    vim.api.nvim_buf_set_lines(buf, 1, 2, false, { '本文を直した' })
+    vim.wait(1400, function()
+      return #asked > 0
+    end)
+    assert(#asked == 0, 'the autosave leaves a page with a pending title alone: ' .. vim.inspect(asked))
+    config.options.autosave = false
+
+    -- Leaving the line settles it: a free title is saved, the buffer takes the name in place,
+    -- and rewriting the links is offered with the count.
+    answers = { 1 }
+    vim.api.nvim_win_set_cursor(win, { 2, 0 })
+    vim.cmd('doautocmd CursorMoved')
+    assert(
+      vim.deep_equal(asked, { 'taken? 新しい題', 'save 古い題', 'links 古い題 -> 新しい題' }),
+      'free title: ' .. vim.inspect(asked)
+    )
+    assert(
+      vim.api.nvim_buf_get_name(buf) == 'cosense://proj/新しい題',
+      'the buffer is renamed in place, got ' .. vim.api.nvim_buf_get_name(buf)
+    )
+    assert(vim.b[buf].chatora_title == '新しい題' and not rename.pending(buf), 'and knows its new title')
+    assert(not vim.bo[buf].modified and vim.api.nvim_win_get_cursor(win)[1] == 2, 'saved, with the cursor where it was')
+    assert(attached[#attached] == 'cosense://proj/新しい題', 'the LSP client is attached again under the new name')
+    assert(
+      #prompts == 1 and prompts[1]:find('2 個のページが「古い題」にリンクしています', 1, true),
+      'the link rewrite is offered with the count: ' .. vim.inspect(prompts)
+    )
+
+    -- A title another page has: declining saves nothing, and the question is not repeated
+    -- on the next cursor movement, only on an explicit :w.
+    asked, prompts = {}, {}
+    taken['既存'] = '既存'
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { '既存' })
+    answers = { 3 }
+    vim.cmd('doautocmd CursorMoved')
+    assert(
+      vim.deep_equal(asked, { 'taken? 既存' }) and vim.api.nvim_buf_get_name(buf) == 'cosense://proj/新しい題',
+      'declining saves nothing: ' .. vim.inspect(asked)
+    )
+    assert(prompts[1]:find('「既存」というページは既にあります', 1, true), vim.inspect(prompts))
+    vim.cmd('doautocmd CursorMoved')
+    assert(#asked == 1, 'a declined title is not asked about again on the next move: ' .. vim.inspect(asked))
+
+    -- Letting Cosense number the title renames the buffer to what it chose, text and all.
+    answers = { 2, 2 }
+    vim.cmd('write')
+    assert(vim.deep_equal(asked, { 'taken? 既存', 'taken? 既存', 'save 新しい題' }), ':w asks again: ' .. vim.inspect(asked))
+    assert(
+      vim.api.nvim_buf_get_name(buf) == 'cosense://proj/既存_1'
+        and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == '既存_1',
+      'the numbered title comes back into the buffer, got ' .. vim.api.nvim_buf_get_name(buf)
+    )
+
+    -- Merging: the body goes to the page that has the title, this page goes away, and that
+    -- page is what the window shows.
+    asked, prompts = {}, {}
+    taken['統合先'] = '統合先'
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { '統合先' })
+    answers = { 1 }
+    vim.cmd('doautocmd CursorMoved')
+    assert(vim.deep_equal(asked, { 'taken? 統合先', 'merge into 統合先' }), 'merge: ' .. vim.inspect(asked))
+    vim.wait(500, function()
+      return not vim.api.nvim_buf_is_valid(buf)
+    end)
+    assert(not vim.api.nvim_buf_is_valid(buf), 'the merged page is gone')
+    local shown = vim.api.nvim_win_get_buf(win)
+    assert(
+      vim.api.nvim_buf_get_name(shown) == 'cosense://proj/統合先',
+      'and the page it went into is shown, got ' .. vim.api.nvim_buf_get_name(shown)
+    )
+
+    vim.fn.confirm, vim.notify = orig_confirm, orig_notify
+    config.options.related_auto_open, config.options.autosave = orig_related, orig_autosave
+    lsp.request, lsp.request_ok, lsp.ensure_start = orig_request, orig_ok, orig_start
+    vim.cmd('close!')
+    pcall(vim.api.nvim_buf_delete, shown, { force = true })
+  end
+
   -- The sidebar follows the page the reader moves to, and a project it has listed before
   -- comes back without asking the server again.
   do

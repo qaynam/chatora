@@ -102,6 +102,22 @@ function M.request(method, params, cb)
   end
 end
 
+--- Send a request and wait for its answer, for the write path, which has to be
+--- synchronous: `:wq` checks 'modified' the moment BufWriteCmd returns. vim.wait pumps the
+--- main loop, which is what lets the reply land while we block. nil when the request failed
+--- or `timeout_ms` passed.
+function M.request_wait(method, params, timeout_ms)
+  local reply, done = nil, false
+  M.request(method, params, function(err, result)
+    reply = (not err) and result or nil
+    done = true
+  end)
+  vim.wait(timeout_ms, function()
+    return done
+  end, 10)
+  return reply
+end
+
 --- Like request(), but unwraps the {ok=true,...}/{ok=false,code,message}
 --- envelope used by every chatora/* response: notifies on transport error
 --- or ok=false, and only calls cb(result) on success.

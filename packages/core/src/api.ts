@@ -12,6 +12,7 @@ import {
   ProjectDetailSchema,
   ProjectsResponseSchema,
   ProjectUsersResponseSchema,
+  ReplaceLinksResponseSchema,
   SearchFullTextResponseSchema,
   SearchVectorResponseSchema,
   SubmitResponseSchema,
@@ -254,6 +255,17 @@ export interface CosenseApiShape {
     project: string,
     previewId: string,
   ) => Effect.Effect<SubmitResponse, CosenseApiError, HttpClient>
+  /**
+   * Rewrites every `[from]`, `#from` and `[from.icon]` in the project to name `to`; the
+   * page itself keeps its title (that is a title-line edit). Matching ignores case and the
+   * space/underscore difference, and cross-project `[/p/from]` links are left alone.
+   * A 500 means some pages were not rewritten, and the same call can be repeated safely.
+   */
+  readonly replaceLinks: (
+    project: string,
+    from: string,
+    to: string,
+  ) => Effect.Effect<{ readonly message: string }, CosenseApiError, HttpClient>
   /** Records a visit, which is what clears the page's unread state. Never fails: see the implementation. */
   readonly markAccessed: (project: string, pageId: string) => Effect.Effect<void, never, HttpClient>
 }
@@ -455,6 +467,12 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
       body: { previewId },
     }).pipe(Effect.flatMap((res) => decode(SubmitResponseSchema, res)))
 
+  const replaceLinks: CosenseApiShape['replaceLinks'] = (project, from, to) =>
+    request(`/api/pages/${project}/replace/links`, {
+      method: 'POST',
+      body: { from, to },
+    }).pipe(Effect.flatMap((res) => decode(ReplaceLinksResponseSchema, res)))
+
   return {
     me,
     projects,
@@ -468,6 +486,7 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
     searchTitles,
     previewEdit,
     submitEdit,
+    replaceLinks,
     markAccessed,
   }
 }

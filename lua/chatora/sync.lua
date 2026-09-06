@@ -157,6 +157,9 @@ function M.run(bufnr, cb)
       if result.meta then
         vim.b[bufnr].chatora_meta = result.meta
       end
+      if result.title then
+        vim.b[bufnr].chatora_title = result.title
+      end
       require('chatora.status').sync(bufnr)
     end
     for _, pending in ipairs(waiting) do

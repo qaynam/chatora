@@ -78,6 +78,8 @@ const makeFixturePages = (): Map<string, FixturePage> => {
         updated: LONG_AGO,
         userId: AUTHOR,
       },
+      // A link back, for the link rewrite that follows a rename to find.
+      { id: 'm4', text: '[ホーム]に戻る', updated: LONG_AGO, userId: AUTHOR },
     ],
   })
   return pages
@@ -97,7 +99,14 @@ interface RawDeleteChange {
   _delete: string
 }
 type RawChange = RawInsertChange | RawUpdateChange | RawDeleteChange
+/** The whole-page delete sentinel a preview carries instead of line changes. */
+interface RawPageDelete {
+  deleted: true
+}
+type PreviewChange = RawChange | RawPageDelete
 
+const isPageDelete = (c: PreviewChange | undefined): c is RawPageDelete =>
+  c !== undefined && 'deleted' in c
 const isInsert = (c: RawChange): c is RawInsertChange => '_insert' in c
 const isUpdate = (c: RawChange): c is RawUpdateChange => '_update' in c
 const isDelete = (c: RawChange): c is RawDeleteChange => '_delete' in c
@@ -156,7 +165,7 @@ export const startFakeCosense = (): FakeCosenseHandle => {
   let requests: RequestLogEntry[] = []
   // The last successful preview's recorded change set, keyed by the previewId we handed
   // out (always 'pv1' — this fake only ever needs one live preview at a time).
-  let pendingPreview: { pageId?: string; changes: RawChange[] } | null = null
+  let pendingPreview: { pageId?: string; changes: PreviewChange[] } | null = null
 
   const jsonResponse = (body: unknown, status: number): Response =>
     new Response(JSON.stringify(body), {
@@ -280,13 +289,40 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         return respond([{ title: 'ホーム' }, { title: 'メモ' }], 200)
       }
 
+      // POST /api/pages/testproj/replace/links -- the link rewrite that follows a rename.
+      // Exact `[from]` only; the real one also takes hashtags, icons, case and spacing.
+      if (path === `/api/pages/${PROJECT}/replace/links` && method === 'POST') {
+        const { from, to } = body as { from: string; to: string }
+        let updated = 0
+        for (const page of pages.values()) {
+          let touched = false
+          for (const line of page.lines) {
+            const next = line.text.split(`[${from}]`).join(`[${to}]`)
+            if (next !== line.text) {
+              line.text = next
+              touched = true
+            }
+          }
+          if (touched) updated += 1
+        }
+        return respond({ message: `${updated} pages have been successfully updated!` }, 200)
+      }
+
       // POST /api/pages/v2/testproj/page-edit-for-ai/preview
       if (path === `/api/pages/v2/${PROJECT}/page-edit-for-ai/preview` && method === 'POST') {
-        const reqBody = body as { pageId?: string; changes?: RawChange[] } | undefined
+        const reqBody = body as { pageId?: string; changes?: PreviewChange[] } | undefined
         const changes = reqBody?.changes ?? []
         pendingPreview = { changes }
         if (reqBody?.pageId !== undefined) pendingPreview.pageId = reqBody.pageId
-        return respond({ previewId: 'pv1', expireAt: '2999-01-01T00:00:00Z' }, 200)
+        // A delete is echoed as `pageDelete`, which the client checks before submitting one.
+        return respond(
+          {
+            previewId: 'pv1',
+            expireAt: '2999-01-01T00:00:00Z',
+            ...(isPageDelete(changes[0]) ? { pageDelete: true } : {}),
+          },
+          200,
+        )
       }
 
       // POST /api/pages/v2/testproj/page-edit-for-ai/submit
@@ -297,28 +333,49 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         }
         // A preview without a page id creates the page: its lines are the inserts, in
         // order, and the first of them is the title (the real API works the same way).
-        if (pendingPreview.pageId === undefined) {
+        const { pageId, changes } = pendingPreview
+        pendingPreview = null
+        if (pageId === undefined) {
           const created: FixturePage = {
             id: `pg${pages.size + 1}`,
             title: '',
             commitId: 'c3',
             lines: [],
           }
-          applyChanges(created, pendingPreview.changes)
+          applyChanges(
+            created,
+            changes.filter((c) => !isPageDelete(c)),
+          )
           created.title = created.lines[0]?.text ?? ''
           pages.set(created.title, created)
-          pendingPreview = null
           return respond({ commitId: 'c3', page: { title: created.title } }, 200)
         }
-        // Mutate the in-memory ホーム page so a post-submit refetch sees consistent data —
-        // this fake only ever edits ホーム in the e2e scenario, so hardcoding is fine.
-        const page = pages.get('ホーム')
-        if (page) {
-          applyChanges(page, pendingPreview.changes)
-          page.commitId = 'c2'
+        const page = [...pages.values()].find((p) => p.id === pageId)
+        if (!page) return respond({ error: 'NotFound' }, 404)
+        if (isPageDelete(changes[0])) {
+          pages.delete(page.title)
+          return respond({ commitId: 'c2', pageDeleted: { title: page.title } }, 200)
         }
-        pendingPreview = null
-        return respond({ commitId: 'c2', page: { title: 'ホーム' } }, 200)
+        applyChanges(
+          page,
+          changes.filter((c) => !isPageDelete(c)),
+        )
+        page.commitId = 'c2'
+        // The first line is the title. A title another page has gets a number, as on
+        // Cosense, and either way the rename is reported.
+        const from = page.title
+        let to = page.lines[0]?.text ?? from
+        if (to !== from) {
+          if (pages.has(to)) {
+            to = `${to}_1`
+            if (page.lines[0]) page.lines[0].text = to
+          }
+          pages.delete(from)
+          page.title = to
+          pages.set(to, page)
+          return respond({ commitId: 'c2', page: { title: to }, titleChanged: { from, to } }, 200)
+        }
+        return respond({ commitId: 'c2', page: { title: page.title } }, 200)
       }
 
       // POST /api/pages/:project/:pageId/accessed -> 204, the real read-tracking

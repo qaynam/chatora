@@ -243,3 +243,7 @@ export const SubmitResponseSchema = Schema.Struct({
     exact: true,
   }),
 })
+
+export const ReplaceLinksResponseSchema = Schema.Struct({
+  message: optionalString,
+})

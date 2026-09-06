@@ -901,6 +901,95 @@ local ok, err = pcall(function()
   vim.bo[sync_buf].modified = false
 
   -- ===================================================================================
+  -- STEP: rename -- editing the title line renames the page once the cursor leaves the
+  -- line; the page is linked from メモ, so rewriting that link is offered and taken.
+  -- ===================================================================================
+  step('rename')
+
+  -- The questions a rename asks are answered from this list, in order, and recorded.
+  local prompts, answers = {}, {}
+  local orig_confirm = vim.fn.confirm
+  vim.fn.confirm = function(msg, _, default)
+    prompts[#prompts + 1] = msg
+    return table.remove(answers, 1) or default
+  end
+
+  local rename_win = vim.fn.bufwinid(sync_buf)
+  if rename_win == -1 then
+    fail('rename: ホーム has no window')
+  end
+  vim.api.nvim_buf_set_lines(sync_buf, 0, 1, false, { 'ホーム改' })
+  -- The LSP has to have seen the edit before the save can send it.
+  vim.wait(300)
+  answers = { 1 } -- リンクも書き換える
+  vim.api.nvim_win_set_cursor(rename_win, { 2, 0 })
+  -- CursorMoved is what the main loop fires on a real cursor movement; here nothing
+  -- returns to the main loop between steps.
+  vim.api.nvim_win_call(rename_win, function()
+    vim.cmd('doautocmd CursorMoved')
+  end)
+  if vim.api.nvim_buf_get_name(sync_buf) ~= 'cosense://testproj/ホーム改' then
+    fail('rename: the buffer was not renamed in place: ' .. vim.api.nvim_buf_get_name(sync_buf))
+  end
+  if vim.bo[sync_buf].modified then
+    fail('rename: the save that renames the page must leave the buffer clean')
+  end
+  if not (prompts[1] or ''):find('「ホーム」にリンクしています', 1, true) then
+    fail('rename: the link rewrite was not offered: ' .. vim.inspect(prompts))
+  end
+  if not wait_for(10000, function()
+    for _, n in ipairs(notify_log) do
+      if n.msg:find('ページのリンクを「ホーム改」に書き換えました', 1, true) then
+        return true
+      end
+    end
+    return false
+  end) then
+    fail('rename: the link rewrite did not report back: ' .. vim.inspect(notify_log))
+  end
+  log('rename settled when the cursor left the title line, and the links were rewritten')
+
+  -- ===================================================================================
+  -- STEP: merge -- a title another page has: merging appends this page's body to that
+  -- page, deletes this one, and shows the page it went into.
+  -- ===================================================================================
+  step('merge')
+
+  local body_before = vim.api.nvim_buf_get_lines(sync_buf, 1, -1, false)
+  vim.api.nvim_buf_set_lines(sync_buf, 0, 1, false, { 'メモ' })
+  vim.wait(300)
+  prompts, answers = {}, { 1 } -- 統合する
+  vim.api.nvim_win_call(rename_win, function()
+    vim.cmd('doautocmd CursorMoved')
+  end)
+  if not (prompts[1] or ''):find('「メモ」というページは既にあります', 1, true) then
+    fail('merge: the merge was not offered: ' .. vim.inspect(prompts))
+  end
+  if not wait_for(10000, function()
+    local shown = vim.api.nvim_win_get_buf(rename_win)
+    if vim.api.nvim_buf_get_name(shown) ~= 'cosense://testproj/メモ' or vim.api.nvim_buf_is_valid(sync_buf) then
+      return false
+    end
+    local lines = vim.api.nvim_buf_get_lines(shown, 0, -1, false)
+    return lines[#lines] == body_before[#body_before]
+  end) then
+    local shown = vim.api.nvim_win_get_buf(rename_win)
+    fail(
+      'merge: the window must show メモ with the body appended, got '
+        .. vim.api.nvim_buf_get_name(shown)
+        .. ' '
+        .. vim.inspect(vim.api.nvim_buf_get_lines(shown, 0, -1, false))
+    )
+  end
+  local merged = vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(rename_win), 0, -1, false)
+  if merged[1] ~= 'メモ' or not vim.tbl_contains(merged, '[ホーム改]に戻る') then
+    fail('merge: メモ must keep its own lines, with the rewritten link: ' .. vim.inspect(merged))
+  end
+  log('merge appended the body to メモ, dropped the old page and showed the merged one')
+
+  vim.fn.confirm = orig_confirm
+
+  -- ===================================================================================
   -- STEP: final-checks
   -- ===================================================================================
   step('final-checks')
