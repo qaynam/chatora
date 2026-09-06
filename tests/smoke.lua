@@ -1966,6 +1966,73 @@ local ok, err = pcall(function()
     pcall(vim.api.nvim_buf_delete, shown, { force = true })
   end
 
+  -- Pasted text gets the web's adjustments: on a blank line the lines after the first take
+  -- the whitespace up to the cursor, so a block pasted into a code block stays inside it;
+  -- in a quote they take the marker; anywhere else the paste goes in as it is.
+  do
+    local paste = require('chatora.paste')
+    assert(
+      vim.deep_equal(paste.prefixed({ 'a', 'b', '' }, '  ', false), { 'a', '  b', '  ' }),
+      'every line but the first is prefixed'
+    )
+    assert(paste.line_prefix('    ', 4, true) == '    ', 'a blank line in a code block: its indent')
+    assert(paste.line_prefix('\t\t', 2, true) == '\t\t', 'tabs stay tabs')
+    assert(paste.line_prefix('    ', 2, false) == '  ', 'up to the cursor, not the whole indent')
+    assert(paste.line_prefix('  text', 6, false) == nil, 'a line with text is left alone')
+    assert(paste.line_prefix(' > 引用', 4, false) == ' > ', 'a quote takes the marker')
+    assert(paste.line_prefix(' > code', 4, true) == nil, 'but not inside a code block')
+    assert(
+      vim.deep_equal(paste.prefixed({ 'a', '', 'b' }, '> ', true), { 'a', '> b' }),
+      'a quote loses its blank lines'
+    )
+
+    vim.cmd('new')
+    vim.bo.buftype = 'nofile'
+    vim.bo.filetype = 'cosense'
+    local page_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:sample.py', ' ' })
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    vim.paste({ 'def f():', '    return 1', '' }, -1)
+    local got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'code:sample.py', ' def f():', '     return 1', ' ' }),
+      'a paste on a blank line inside a code block stays inside it: ' .. vim.inspect(got)
+    )
+
+    -- A line with text: the paste goes in as it is, after the character under the cursor.
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', ' 本文' })
+    vim.api.nvim_win_set_cursor(0, { 2, 1 })
+    vim.paste({ 'x', 'y' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', ' 本x', 'y文' }), 'a line with text is left alone: ' .. vim.inspect(got))
+
+    -- Streamed: the first chunk decides, and a later chunk continues the line it ended on.
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:x', '  ' })
+    vim.api.nvim_win_set_cursor(0, { 3, 1 })
+    vim.paste({ 'one', 'tw' }, 1)
+    vim.paste({ 'o', 'three', '' }, 3)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'code:x', '  one', '  two', '  three', '  ' }),
+      'a streamed paste is prefixed chunk by chunk: ' .. vim.inspect(got)
+    )
+
+    -- Not a page: Neovim's own paste, untouched.
+    vim.cmd('new')
+    vim.bo.buftype = 'nofile'
+    local plain_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { '  ' })
+    vim.api.nvim_win_set_cursor(0, { 1, 1 })
+    vim.paste({ 'a', 'b' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { '  a', 'b' }), 'other buffers paste as before: ' .. vim.inspect(got))
+
+    vim.cmd('close!')
+    vim.cmd('close!')
+    vim.api.nvim_buf_delete(plain_buf, { force = true })
+    vim.api.nvim_buf_delete(page_buf, { force = true })
+  end
+
   -- The sidebar follows the page the reader moves to, and a project it has listed before
   -- comes back without asking the server again.
   do
