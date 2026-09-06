@@ -123,6 +123,11 @@ function M.delete()
   if not title then
     return
   end
+  -- An untitled page exists nowhere but in this buffer, so dropping the buffer is the deletion.
+  if vim.b[bufnr].chatora_untitled then
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    return
+  end
   local choice = vim.fn.confirm(
     ('「%s」を削除します。元に戻せません。'):format(title),
     '削除する(&D)\nやめる(&C)',

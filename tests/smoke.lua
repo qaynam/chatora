@@ -1734,6 +1734,10 @@ local ok, err = pcall(function()
       return true
     end
     lsp.request_ok = function(method, params, cb)
+      -- Anything asked by the stand-in name is a request the server would refuse.
+      if params.uri and params.uri:find('無題', 1, true) then
+        asked[#asked + 1] = 'by stand-in name: ' .. method
+      end
       if method == 'chatora/openPage' then
         cb({ ok = true, exists = exists, text = params.title .. '\n' })
       end
@@ -1766,8 +1770,10 @@ local ok, err = pcall(function()
     )
     assert(vim.deep_equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), { '' }), 'and starts empty')
 
+    -- The telomere asks on every change, and would be told "page state not found".
+    require('chatora.telomere').refresh(buf)
     vim.cmd('write')
-    assert(vim.b[buf].chatora_untitled and #asked == 0, 'an empty title is refused before anything is asked')
+    assert(vim.b[buf].chatora_untitled and #asked == 0, 'nothing is asked by the stand-in name: ' .. vim.inspect(asked))
 
     -- Nor does the sync ask for it: the server knows no page by the stand-in name.
     local synced = nil
