@@ -995,6 +995,8 @@ export interface SavePageResult {
   readonly commitId: string
   /** What the page is called after the save, suffix and all when Cosense had to add one. */
   readonly title: string
+  /** The buffer's title line was withheld: the page keeps the title it had. */
+  readonly keptTitle?: true
   readonly noop?: true
   readonly text?: string
   readonly titleChanged?: { readonly from: string; readonly to: string }
@@ -1030,6 +1032,7 @@ const isNotFastForward = (error: unknown): boolean =>
 export const savePage = (
   uri: string,
   docText: string | undefined,
+  opts?: { readonly keepTitle?: boolean },
 ): Effect.Effect<
   SavePageResult | SaveConflictResult | ErrEnvelope,
   never,
@@ -1060,6 +1063,10 @@ export const savePage = (
         })
 
       let nextLines: readonly string[] = textToLines(docText)
+      // A title the buffer changed but nobody has confirmed yet stays local: the body goes
+      // under the title the server has.
+      const keptTitle = opts?.keepTitle === true && nextLines.length > 0
+      if (keptTitle) nextLines = [base.baseLines[0]?.text ?? base.title, ...nextLines.slice(1)]
       let attempt = yield* Effect.either(push(base.baseLines, nextLines))
       // A merged save wrote something the buffer does not hold, so its text has to travel
       // back whatever the refetch says; without it the buffer would keep the pre-merge
@@ -1107,6 +1114,7 @@ export const savePage = (
           ok: true as const,
           commitId: base.commitId ?? '',
           title: base.title,
+          ...(keptTitle ? { keptTitle: true as const } : {}),
           noop: true as const,
         }
       }
@@ -1162,6 +1170,7 @@ export const savePage = (
         ok: true as const,
         commitId: newBase.commitId ?? '',
         title: finalTitle,
+        ...(keptTitle ? { keptTitle: true as const } : {}),
         ...(responseText !== undefined ? { text: responseText } : {}),
         ...(submit.titleChanged !== undefined ? { titleChanged: submit.titleChanged } : {}),
       }

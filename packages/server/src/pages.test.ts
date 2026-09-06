@@ -712,6 +712,46 @@ describe('savePage', () => {
     expect(JSON.parse(submitCall?.init.body as string)).toEqual({ previewId: 'pv1' })
   })
 
+  test('keepTitle: the body goes under the title the server has, and the reply says so', async () => {
+    let submitted = false
+    const { layer: httpLayer, calls } = testHttpClient((url) => {
+      if (url.endsWith('/page-edit-for-ai/preview')) {
+        return json({ previewId: 'pv1', expireAt: 'later', pagePreview: null })
+      }
+      if (url.endsWith('/page-edit-for-ai/submit')) {
+        submitted = true
+        return json({ commitId: 'c2', page: { title: 'Page' } })
+      }
+      return json({
+        id: 'pg1',
+        title: 'Page',
+        commitId: submitted ? 'c2' : 'c1',
+        persistent: true,
+        lines: submitted
+          ? [
+              { id: 'l1', text: 'Page' },
+              { id: 'l2', text: 'body' },
+            ]
+          : [{ id: 'l1', text: 'Page' }],
+      })
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      return yield* handlers.savePage('cosense://proj/Page', 'Renamed\nbody\n', { keepTitle: true })
+    })
+    const result = await runOnce(program, httpLayer, credLayer)
+    expect(result).toEqual({ ok: true, commitId: 'c2', title: 'Page', keptTitle: true })
+
+    const previewCall = calls.find((c) => c.url.endsWith('/preview'))
+    const body = JSON.parse(previewCall?.init.body as string) as {
+      changes: readonly { _insert?: string; _update?: string; lines: { text: string } }[]
+    }
+    expect(body.changes.map((c) => [c._insert ?? c._update, c.lines.text])).toEqual([
+      ['_end', 'body'],
+    ])
+  })
+
   test('a 409 NotFastForward preview conflict maps to code "notFastForward"', async () => {
     const { layer: httpLayer } = testHttpClient((url) => {
       if (url.endsWith('/page-edit-for-ai/preview')) return json({ error: 'NotFastForward' }, 409)

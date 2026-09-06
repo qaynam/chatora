@@ -291,8 +291,12 @@ connection.onRequest('chatora/logPath', async () => ({
   ok: true as const,
   path: activeLogPath() ?? null,
 }))
-connection.onRequest('chatora/savePage', (params: { uri: string }) =>
-  runtime.runPromise(handlers.savePage(params.uri, documents.get(params.uri)?.getText())),
+connection.onRequest('chatora/savePage', (params: { uri: string; keepTitle?: boolean }) =>
+  runtime.runPromise(
+    handlers.savePage(params.uri, documents.get(params.uri)?.getText(), {
+      keepTitle: params.keepTitle === true,
+    }),
+  ),
 )
 connection.onRequest('chatora/syncPage', (params: { uri: string }) =>
   runtime.runPromise(handlers.syncPage(params.uri, documents.get(params.uri)?.getText())),

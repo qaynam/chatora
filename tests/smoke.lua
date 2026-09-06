@@ -1833,6 +1833,7 @@ local ok, err = pcall(function()
     local taken = {}
     vim.fn.confirm = function(msg, _, default)
       prompts[#prompts + 1] = msg
+      asked[#asked + 1] = 'ask'
       return table.remove(answers, 1) or default
     end
     lsp.ensure_start = function(b)
@@ -1852,6 +1853,11 @@ local ok, err = pcall(function()
         local b = vim.fn.bufnr(params.uri)
         local _, title = require('chatora.uri').parse(params.uri)
         local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+        if params.keepTitle then
+          asked[#asked + 1] = 'body under ' .. title
+          cb(nil, { ok = true, commitId = 'c', title = title, keptTitle = true })
+          return
+        end
         asked[#asked + 1] = 'save ' .. title
         -- Cosense numbers a title another page has, and reports the rename either way.
         local final = taken[lines[1]] and (lines[1] .. '_1') or lines[1]
@@ -1886,22 +1892,28 @@ local ok, err = pcall(function()
     rename.settle(buf)
     assert(#asked == 0, 'nothing is asked while the cursor is on the title line: ' .. vim.inspect(asked))
 
-    -- Nor by the autosave, which would rename the page mid-word.
+    -- The autosave goes on, with the body under the title the server has; the typed title
+    -- stays in the buffer, unsaved.
     config.options.autosave = 1
     vim.api.nvim_buf_set_lines(buf, 1, 2, false, { '本文を直した' })
     vim.wait(1400, function()
       return #asked > 0
     end)
-    assert(#asked == 0, 'the autosave leaves a page with a pending title alone: ' .. vim.inspect(asked))
+    assert(vim.deep_equal(asked, { 'body under 古い題' }), 'the autosave keeps the old title: ' .. vim.inspect(asked))
+    assert(
+      rename.pending(buf) and vim.bo[buf].modified and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == '新しい題',
+      'and the typed title stays, unsaved'
+    )
     config.options.autosave = false
+    asked = {}
 
-    -- Leaving the line settles it: a free title is saved, the buffer takes the name in place,
-    -- and rewriting the links is offered with the count.
+    -- Leaving the line settles it: the links question comes first, then the save with the
+    -- new title, then the rewrite; the buffer takes the name in place.
     answers = { 1 }
     vim.api.nvim_win_set_cursor(win, { 2, 0 })
     vim.cmd('doautocmd CursorMoved')
     assert(
-      vim.deep_equal(asked, { 'taken? 新しい題', 'save 古い題', 'links 古い題 -> 新しい題' }),
+      vim.deep_equal(asked, { 'taken? 新しい題', 'ask', 'save 古い題', 'links 古い題 -> 新しい題' }),
       'free title: ' .. vim.inspect(asked)
     )
     assert(
@@ -1924,17 +1936,21 @@ local ok, err = pcall(function()
     answers = { 3 }
     vim.cmd('doautocmd CursorMoved')
     assert(
-      vim.deep_equal(asked, { 'taken? 既存' }) and vim.api.nvim_buf_get_name(buf) == 'cosense://proj/新しい題',
+      vim.deep_equal(asked, { 'taken? 既存', 'ask' }) and vim.api.nvim_buf_get_name(buf) == 'cosense://proj/新しい題',
       'declining saves nothing: ' .. vim.inspect(asked)
     )
     assert(prompts[1]:find('「既存」というページは既にあります', 1, true), vim.inspect(prompts))
     vim.cmd('doautocmd CursorMoved')
-    assert(#asked == 1, 'a declined title is not asked about again on the next move: ' .. vim.inspect(asked))
+    assert(#asked == 2, 'a declined title is not asked about again on the next move: ' .. vim.inspect(asked))
 
-    -- Letting Cosense number the title renames the buffer to what it chose, text and all.
+    -- Letting Cosense number the title renames the buffer to what it chose, text and all;
+    -- the links are left alone when the reader says so.
     answers = { 2, 2 }
     vim.cmd('write')
-    assert(vim.deep_equal(asked, { 'taken? 既存', 'taken? 既存', 'save 新しい題' }), ':w asks again: ' .. vim.inspect(asked))
+    assert(
+      vim.deep_equal(asked, { 'taken? 既存', 'ask', 'taken? 既存', 'ask', 'ask', 'save 新しい題' }),
+      ':w asks again: ' .. vim.inspect(asked)
+    )
     assert(
       vim.api.nvim_buf_get_name(buf) == 'cosense://proj/既存_1'
         and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == '既存_1',
@@ -1948,7 +1964,7 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_set_lines(buf, 0, 1, false, { '統合先' })
     answers = { 1 }
     vim.cmd('doautocmd CursorMoved')
-    assert(vim.deep_equal(asked, { 'taken? 統合先', 'merge into 統合先' }), 'merge: ' .. vim.inspect(asked))
+    assert(vim.deep_equal(asked, { 'taken? 統合先', 'ask', 'merge into 統合先' }), 'merge: ' .. vim.inspect(asked))
     vim.wait(500, function()
       return not vim.api.nvim_buf_is_valid(buf)
     end)
