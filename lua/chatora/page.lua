@@ -449,8 +449,15 @@ local function name_untitled(bufnr)
     )
     return false
   end
+  -- The LSP client opened the document under the stand-in name, and a rename alone would
+  -- leave it there: detach first, so the close goes out under the old name, and attach
+  -- again under the new one before anything is asked about it.
+  for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+    vim.lsp.buf_detach_client(bufnr, client.id)
+  end
   vim.api.nvim_buf_set_name(bufnr, new_uri)
   vim.b[bufnr].chatora_untitled = nil
+  lsp.ensure_start(bufnr)
   related.on_page_opened(project, title)
   return true
 end

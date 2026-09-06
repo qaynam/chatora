@@ -295,6 +295,16 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         if (reqBody?.previewId !== 'pv1' || !pendingPreview) {
           return respond({ error: 'InvalidPreview' }, 422)
         }
+        // A preview without a page id creates the page: its lines are the inserts, in
+        // order, and the first of them is the title (the real API works the same way).
+        if (pendingPreview.pageId === undefined) {
+          const created: FixturePage = { id: `pg${pages.size + 1}`, title: '', commitId: 'c3', lines: [] }
+          applyChanges(created, pendingPreview.changes)
+          created.title = created.lines[0]?.text ?? ''
+          pages.set(created.title, created)
+          pendingPreview = null
+          return respond({ commitId: 'c3', page: { title: created.title } }, 200)
+        }
         // Mutate the in-memory ホーム page so a post-submit refetch sees consistent data —
         // this fake only ever edits ホーム in the e2e scenario, so hardcoding is fine.
         const page = pages.get('ホーム')

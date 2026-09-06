@@ -1730,7 +1730,9 @@ local ok, err = pcall(function()
     local lsp = require('chatora.lsp')
     local orig_request, orig_ok, orig_start = lsp.request, lsp.request_ok, lsp.ensure_start
     local asked, exists = {}, false
-    lsp.ensure_start = function()
+    local attached = {}
+    lsp.ensure_start = function(b)
+      attached[#attached + 1] = vim.api.nvim_buf_get_name(b)
       return true
     end
     lsp.request_ok = function(method, params, cb)
@@ -1798,6 +1800,10 @@ local ok, err = pcall(function()
     assert(
       vim.deep_equal(asked, { 'open 新しいページ', 'save cosense://proj/新しいページ' }),
       'the page is opened under its name and then saved: ' .. vim.inspect(asked)
+    )
+    assert(
+      attached[#attached] == 'cosense://proj/新しいページ',
+      'the LSP client is attached again under the new name, got ' .. vim.inspect(attached)
     )
 
     vim.notify = orig_notify
