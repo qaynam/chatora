@@ -492,6 +492,46 @@ local ok, err = pcall(function()
   log('save OK (modified=false, buffer has the new line)')
 
   -- ===================================================================================
+  -- STEP: new-page — an untitled buffer becomes a page on its first save, under the name
+  -- its first line gives it, through the real LSP client: the document has to be
+  -- re-synced under that name before the save asks about it.
+  -- ===================================================================================
+  step('new-page')
+
+  require('chatora.page').open_untitled('testproj', vim.fn.bufwinid(page_buf))
+  local new_buf = vim.api.nvim_get_current_buf()
+  vim.cmd('stopinsert')
+  if vim.api.nvim_buf_get_name(new_buf) ~= 'cosense://testproj/無題' then
+    fail('untitled page has the wrong stand-in name: ' .. vim.api.nvim_buf_get_name(new_buf))
+  end
+  vim.api.nvim_buf_set_lines(new_buf, 0, -1, false, { '生まれたてのページ', '最初の行' })
+  vim.wait(300)
+  vim.api.nvim_win_call(vim.fn.bufwinid(new_buf), function()
+    vim.cmd('write')
+  end)
+  if not wait_for(10000, function()
+    return vim.bo[new_buf].modified == false
+  end) then
+    fail('timed out waiting for the untitled page to save')
+  end
+  if vim.api.nvim_buf_get_name(new_buf) ~= 'cosense://testproj/生まれたてのページ' or vim.b[new_buf].chatora_untitled then
+    fail('the first line did not become the page name: ' .. vim.api.nvim_buf_get_name(new_buf))
+  end
+  local seen = vim.system({ 'curl', '-fsS', vim.env.CHATORA_TEST_ORIGIN .. '/__test/requests' }, { text = true }):wait()
+  local created = false
+  for _, req in ipairs(vim.json.decode(seen.stdout or '[]')) do
+    if req.path:match('page%-edit%-for%-ai/preview$') and type(req.body) == 'table' and req.body.pageId == nil then
+      created = created or vim.inspect(req.body.changes):find('生まれたてのページ', 1, true) ~= nil
+    end
+  end
+  if not created then
+    fail('the fake server never saw a preview creating 生まれたてのページ')
+  end
+  -- The window goes back to the page the later steps look at.
+  vim.api.nvim_win_set_buf(vim.fn.bufwinid(new_buf), page_buf)
+  log('new-page OK (named by its first line, created through preview without a page id)')
+
+  -- ===================================================================================
   -- STEP: sidebar
   -- ===================================================================================
   step('sidebar')

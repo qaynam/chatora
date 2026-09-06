@@ -60,3 +60,6 @@ bun run verify   # typecheck + bun test + build + biome + smoke + E2E
 - 折り返した行の字下げ（`breakindent`）は、インデントの文字と固定の shift しか数えません。inline の
   仮想テキストは数えないので、pads が 1 行に足すセルは常に 1（中点）でなければ、折り返した行が
   本文からずれます
+- バッファ名を付け替えても、LSP クライアントは古い名前で文書を開いたままです。名前を変える前に
+  `vim.lsp.buf_detach_client`、変えたあとに付け直さないと、新しい名前への要求が
+  `document not synced` になります（`page.lua` の `name_untitled`）

@@ -376,8 +376,9 @@ local function apply_save(bufnr, uri_str, save_err, save_result, tick)
   require('chatora.telomere').refresh(bufnr)
 
   if result.titleChanged then
-    -- Renaming the buffer in place would desync the LSP client (didOpen was sent for the
-    -- old URI), so reopen the page under its new URI instead.
+    -- Reopened under the new URI rather than renamed in place: the server renamed the page
+    -- on its side, and a fresh open is what fetches what it made of that. (Renaming in
+    -- place is possible, see name_untitled, but there is nothing to refetch there.)
     local project = uri.parse(uri_str)
     local new_uri = uri.format(project, result.titleChanged.to)
     vim.notify(
@@ -449,8 +450,15 @@ local function name_untitled(bufnr)
     )
     return false
   end
+  -- The LSP client opened the document under the stand-in name, and a rename alone would
+  -- leave it there: detach first, so the close goes out under the old name, and attach
+  -- again under the new one before anything is asked about it.
+  for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+    vim.lsp.buf_detach_client(bufnr, client.id)
+  end
   vim.api.nvim_buf_set_name(bufnr, new_uri)
   vim.b[bufnr].chatora_untitled = nil
+  lsp.ensure_start(bufnr)
   related.on_page_opened(project, title)
   return true
 end

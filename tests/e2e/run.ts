@@ -234,10 +234,13 @@ check('GET .../ホーム/links2hop happened', links2hopReq !== undefined)
 
 // (d) preview POST shape
 const previewRequests = requests.filter((r) => r.method === 'POST' && r.path === PREVIEW_PATH)
+// The save step edits ホーム; the new-page step then creates a page, which is the one
+// preview that names no page id.
+check('two POSTs .../page-edit-for-ai/preview', previewRequests.length === 2, previewRequests)
 check(
-  'exactly one POST .../page-edit-for-ai/preview',
-  previewRequests.length === 1,
-  previewRequests,
+  'the second preview creates a page (no pageId)',
+  (previewRequests[1]?.body as { pageId?: string } | undefined)?.pageId === undefined,
+  previewRequests[1],
 )
 
 const previewReq = previewRequests[0]
@@ -269,7 +272,7 @@ if (previewReq) {
 
 // (e) submit POST carries previewId 'pv1'
 const submitRequests = requests.filter((r) => r.method === 'POST' && r.path === SUBMIT_PATH)
-check('exactly one POST .../page-edit-for-ai/submit', submitRequests.length === 1, submitRequests)
+check('two POSTs .../page-edit-for-ai/submit', submitRequests.length === 2, submitRequests)
 const submitReq = submitRequests[0]
 if (submitReq) {
   const body = submitReq.body as { previewId?: string } | undefined

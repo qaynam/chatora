@@ -181,6 +181,11 @@ function M.refresh(bufnr)
   if not options() or not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
+  -- An untitled page has no saved copy to date its lines against, and the server knows no
+  -- page by the stand-in name.
+  if vim.b[bufnr].chatora_untitled then
+    return
+  end
   local sent = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local tick = vim.b[bufnr].changedtick
   local params = { uri = vim.api.nvim_buf_get_name(bufnr), lines = sent }

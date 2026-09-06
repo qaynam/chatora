@@ -155,6 +155,11 @@ local user_closed = false
 --- open, opens it first when related_auto_open is on, otherwise just
 --- remembers the target page for next time it opens.
 function M.on_page_opened(project, title)
+  -- An untitled page has no links yet and no name the server could look up; the panel
+  -- follows it once the first save names it.
+  if vim.b[vim.api.nvim_get_current_buf()].chatora_untitled then
+    return
+  end
   cur_project, cur_title = project, title
   if is_open() then
     M.refresh(project, title)

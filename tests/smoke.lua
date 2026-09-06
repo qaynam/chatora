@@ -1090,6 +1090,18 @@ local ok, err = pcall(function()
       end
     end
     assert(global['\\ct'], 'expected the sidebar toggle to be mapped globally')
+
+    -- The pair only comes at the end of the line, as on the web; in front of text the `[`
+    -- stands alone.
+    local function type_at(line, col, keys)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { line })
+      vim.api.nvim_win_set_cursor(0, { 1, col })
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(keys, true, false, true), 'x', false)
+      return vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+    end
+    assert(type_at('文字がある', #'文字がある', 'a[<Esc>') == '文字がある[]', 'at the end the bracket is paired')
+    assert(type_at('文字がある', #'文字', 'i[<Esc>') == '文字[がある', 'in front of text it is not')
+    assert(type_at('文字がある  ', #'文字がある', 'i[<Esc>') == '文字がある[]  ', 'trailing blanks are not text')
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
@@ -1718,10 +1730,16 @@ local ok, err = pcall(function()
     local lsp = require('chatora.lsp')
     local orig_request, orig_ok, orig_start = lsp.request, lsp.request_ok, lsp.ensure_start
     local asked, exists = {}, false
-    lsp.ensure_start = function()
+    local attached = {}
+    lsp.ensure_start = function(b)
+      attached[#attached + 1] = vim.api.nvim_buf_get_name(b)
       return true
     end
     lsp.request_ok = function(method, params, cb)
+      -- Anything asked by the stand-in name is a request the server would refuse.
+      if params.uri and params.uri:find('無題', 1, true) then
+        asked[#asked + 1] = 'by stand-in name: ' .. method
+      end
       if method == 'chatora/openPage' then
         cb({ ok = true, exists = exists, text = params.title .. '\n' })
       end
@@ -1754,8 +1772,10 @@ local ok, err = pcall(function()
     )
     assert(vim.deep_equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), { '' }), 'and starts empty')
 
+    -- The telomere asks on every change, and would be told "page state not found".
+    require('chatora.telomere').refresh(buf)
     vim.cmd('write')
-    assert(vim.b[buf].chatora_untitled and #asked == 0, 'an empty title is refused before anything is asked')
+    assert(vim.b[buf].chatora_untitled and #asked == 0, 'nothing is asked by the stand-in name: ' .. vim.inspect(asked))
 
     -- Nor does the sync ask for it: the server knows no page by the stand-in name.
     local synced = nil
@@ -1780,6 +1800,10 @@ local ok, err = pcall(function()
     assert(
       vim.deep_equal(asked, { 'open 新しいページ', 'save cosense://proj/新しいページ' }),
       'the page is opened under its name and then saved: ' .. vim.inspect(asked)
+    )
+    assert(
+      attached[#attached] == 'cosense://proj/新しいページ',
+      'the LSP client is attached again under the new name, got ' .. vim.inspect(attached)
     )
 
     vim.notify = orig_notify
