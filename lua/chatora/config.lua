@@ -15,6 +15,8 @@ local defaults = {
   },
   -- true derives the underline's color from the theme; a color string sets it outright.
   sidebar_separator = true,
+  -- A page's first picture, one row tall, in front of its title. Needs an image backend.
+  sidebar_thumbnails = false,
   sidebar_poll = 60,
 
   related_height = 8,

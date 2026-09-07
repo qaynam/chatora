@@ -20,6 +20,7 @@ import {
   resolveMagick,
   sanitizeBorder,
   shrink,
+  thumbnail,
   withBorder,
 } from './imageTools'
 import { log } from './log'
@@ -247,10 +248,26 @@ const withSize = (result: FetchAssetResult): Effect.Effect<FetchAssetResult> => 
   return Effect.map(measure(result.path), (size) => (size ? { ...result, ...size } : result))
 }
 
+/** A square cut of `size` pixels instead of the whole picture, for a row-high preview. */
+const applyThumb = (
+  cacheDir: string,
+  hash: string,
+  result: FetchAssetResult,
+  size: number | undefined,
+): Effect.Effect<FetchAssetResult> => {
+  if (size === undefined || !Number.isFinite(size) || !result.ok) return Effect.succeed(result)
+  return Effect.map(thumbnail(cacheDir, hash, result.path, size), (path) => ({
+    ok: true as const,
+    path,
+  }))
+}
+
 export const fetchAsset = (params: {
   readonly project: string
   readonly url: string
   readonly border?: BorderParams
+  /** Pixels on a side of the square to cut; the border, if any, goes around the cut. */
+  readonly thumb?: number
 }): Effect.Effect<FetchAssetResult, never, SessionState | HttpClient | AssetCache> =>
   Effect.gen(function* () {
     // This is the only place chatora turns page content into a network call, and page content
@@ -277,7 +294,8 @@ export const fetchAsset = (params: {
           yield* applySvgRaster(cacheDir, hash, { ok: true, path: cached.value }),
         ),
       )
-      return yield* withSize(yield* applyBorder(cacheDir, hash, drawable, border))
+      const cut = yield* applyThumb(cacheDir, hash, drawable, params.thumb)
+      return yield* withSize(yield* applyBorder(cacheDir, hash, cut, border))
     }
 
     // Nothing on disk, and nothing cached for a failure either — see FAILURE_BACKOFF_MS.
@@ -308,7 +326,8 @@ export const fetchAsset = (params: {
       hash,
       yield* applyGifFrame(cacheDir, hash, yield* applySvgRaster(cacheDir, hash, fetched)),
     )
-    return yield* withSize(yield* applyBorder(cacheDir, hash, drawable, border))
+    const cut = yield* applyThumb(cacheDir, hash, drawable, params.thumb)
+    return yield* withSize(yield* applyBorder(cacheDir, hash, cut, border))
   })
 
 // ---------------------------------------------------------------------------

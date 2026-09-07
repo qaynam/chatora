@@ -2716,6 +2716,118 @@ local ok, err = pcall(function()
     lsp.request_ok, lsp.ensure_start = orig_ok, orig_start
   end
 
+  -- Sidebar thumbnails: a page's first picture sits in front of its title, cut square
+  -- server-side and placed for the rows on screen only. A refresh of the marks leaves
+  -- them alone; the lines changing takes them down and draws them again.
+  do
+    local sidebar = require('chatora.sidebar')
+    local images = require('chatora.images')
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_backend, orig_request, orig_ok, orig_start = images.backend, lsp.request, lsp.request_ok, lsp.ensure_start
+    local orig_thumbs, orig_images, orig_tabs =
+      config.options.sidebar_thumbnails, config.options.images, config.options.sidebar_tabs
+    config.options.sidebar_thumbnails = true
+    config.options.images = 'auto'
+    config.options.sidebar_tabs = { { name = 'a' }, { name = 'b', filter = 'x' } }
+
+    local placed, closed, fetched = {}, {}, {}
+    images.backend = function()
+      return {
+        place = function(_, path, geom, opts)
+          local id = #placed + 1
+          placed[id] = { path = path, row = geom.row, byte_col = geom.byte_col, screen_col = geom.screen_col, opts = opts }
+          return {
+            close = function()
+              closed[#closed + 1] = id
+            end,
+            ok = function()
+              return true
+            end,
+          }
+        end,
+      }
+    end
+    lsp.ensure_start = function() end
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/fetchAsset' then
+        fetched[#fetched + 1] = { url = params.url, thumb = params.thumb }
+        cb(nil, { ok = true, path = '/tmp/' .. params.url:match('[^/]+$') })
+      else
+        cb('no client', nil)
+      end
+    end
+    local pages = {}
+    for i = 1, 60 do
+      pages[i] = { id = 'id' .. i, title = 'ページ' .. i, updated = 100 - i }
+      if i % 2 == 1 then
+        pages[i].image = 'https://cdn.example.com/' .. i .. '.png'
+      end
+    end
+    lsp.request_ok = function(method, params, cb)
+      if method == 'chatora/listPages' then
+        local list = pages
+        if params.filterValue == 'x' then
+          list = {}
+          for i = #pages, 1, -1 do
+            list[#list + 1] = pages[i]
+          end
+        end
+        cb({ ok = true, count = #list, scanned = #list, pages = list })
+      end
+    end
+
+    sidebar.close()
+    sidebar.open('proj')
+    local buf = vim.fn.bufnr('chatora://sidebar')
+    local win = vim.fn.bufwinid(buf)
+    local first = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+    assert(first == '     ページ1', 'the title moves right to leave room: ' .. vim.inspect(first))
+
+    -- On screen plus one screen's worth below, as the sidebar counts it (the winbar takes
+    -- a row of the window's height).
+    local top, bottom
+    vim.api.nvim_win_call(win, function()
+      top, bottom = vim.fn.line('w0'), vim.fn.line('w$')
+    end)
+    local expected = 0
+    for r = 0, math.min(bottom + (bottom - top + 1), 60) - 1 do
+      if (r + 1) % 2 == 1 then
+        expected = expected + 1
+      end
+    end
+    assert(#placed == expected, ('%d rows on or near the screen get a picture, placed %d'):format(expected, #placed))
+    assert(
+      placed[1].row == 1 and placed[1].byte_col == 1 and placed[1].screen_col == 1 and placed[1].opts.max_width == 3 and placed[1].opts.height == 1 and placed[1].opts.conceal == true,
+      'placed after the bar over three concealed cells, one row tall: ' .. vim.inspect(placed[1])
+    )
+    assert(fetched[1].thumb == 64 and fetched[1].url == 'https://cdn.example.com/1.png', 'asked as a square cut: ' .. vim.inspect(fetched[1]))
+    assert(vim.tbl_isempty(closed), 'nothing closed yet')
+
+    sidebar.refresh_marks()
+    assert(#placed == expected and vim.tbl_isempty(closed), 'a refresh of the marks leaves the pictures alone')
+
+    sidebar.select_tab(2)
+    assert(#closed == expected, 'a different list takes them all down: ' .. #closed)
+    assert(#placed == 2 * expected, 'and draws the new rows: ' .. #placed)
+    assert(placed[expected + 1].path == '/tmp/59.png', 'the reversed list starts with its own picture: ' .. vim.inspect(placed[expected + 1]))
+
+    local before_scroll = #placed
+    vim.api.nvim_win_call(win, function()
+      vim.cmd('normal! Gzt')
+    end)
+    vim.api.nvim_exec_autocmds('WinScrolled', { pattern = tostring(win) })
+    assert(#placed > before_scroll, 'scrolling places the rows that came on screen: ' .. #placed)
+
+    sidebar.close()
+    assert(#closed == #placed, 'closing the sidebar takes every picture down: ' .. #closed .. ' of ' .. #placed)
+    -- The tab index outlives the tab list; later tests expect the first one.
+    sidebar.select_tab(1)
+
+    config.options.sidebar_thumbnails, config.options.images, config.options.sidebar_tabs = orig_thumbs, orig_images, orig_tabs
+    images.backend, lsp.request, lsp.request_ok, lsp.ensure_start = orig_backend, orig_request, orig_ok, orig_start
+  end
+
   -- sidebar polling: a refetched first batch replaces the head and pulls an
   -- edited page up out of the tail, without duplicating it or dropping the
   -- rest of what infinite scroll already loaded.

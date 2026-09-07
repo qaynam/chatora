@@ -14,6 +14,19 @@ local buf, win
 local project
 local line_pages = {}
 local line_folders = {}
+
+-- A page's first picture in front of its title, one row tall and this many cells wide, cut
+-- square server-side so every row's is the same width. Three cells because that is what
+-- snacks gives a square picture drawn inline (its width in cells plus two), and the cells
+-- reserved in the line have to match what replaces them. Placements are bound to the
+-- window and to the lines they were made on: `thumbs` is emptied whenever either changes,
+-- and refilled for the rows on screen.
+local THUMB_CELLS = 3
+local THUMB_PX = 64
+local thumbs = {}
+local thumbs_win = nil
+local thumbs_generation = 0
+local wanted_thumbs = {}
 local ns = vim.api.nvim_create_namespace('chatora_sidebar')
 
 local function ensure_hl()
@@ -426,6 +439,53 @@ local UNREAD_BAR = '▍'
 local READ_BAR = ' '
 local PIN_MARK = '󰐃 '
 
+local function thumbnails_on()
+  return config.options.sidebar_thumbnails == true
+end
+
+local function drop_thumbs()
+  thumbs_generation = thumbs_generation + 1
+  for _, thumb in pairs(thumbs) do
+    if thumb.close then
+      pcall(thumb.close)
+    end
+  end
+  thumbs = {}
+  thumbs_win = nil
+end
+
+--- Place the thumbnails of the rows on screen that have none yet. Only what is on screen:
+--- every picture is a fetch the first time, and a list is a hundred rows long.
+local function sync_thumbs()
+  if not is_open() or not thumbnails_on() then
+    return
+  end
+  if thumbs_win ~= win then
+    drop_thumbs()
+    thumbs_win = win
+  end
+  local top, bottom
+  vim.api.nvim_win_call(win, function()
+    top, bottom = vim.fn.line('w0'), vim.fn.line('w$')
+  end)
+  local margin = bottom - top + 1
+  local generation = thumbs_generation
+  for row, wanted in pairs(wanted_thumbs) do
+    if row + 1 >= top - margin and row + 1 <= bottom + margin and not thumbs[row] then
+      local entry = { url = wanted.url }
+      thumbs[row] = entry
+      require('chatora.images').place_one(buf, project, wanted.url, row, wanted.col, function(placement)
+        -- The list moved on while the picture was being fetched.
+        if thumbs_generation ~= generation or thumbs[row] ~= entry then
+          pcall(placement.close)
+          return
+        end
+        entry.close = placement.close
+      end, { thumb = THUMB_PX, cells = THUMB_CELLS, screen_col = 1, conceal = true })
+    end
+  end
+end
+
 --- The save-state glyph for a page, or nil when it has no open buffer.
 local function status_of(entry)
   if not (project and entry.title) then
@@ -476,6 +536,7 @@ function render()
   line_pages, line_folders = {}, {}
   local lines = {}
   local rows = {}
+  local pad = thumbnails_on() and string.rep(' ', THUMB_CELLS + 1) or ''
   local function add_page(p, depth)
     local unread = is_unread(p)
     local icon, hl_group = status_of(p)
@@ -483,13 +544,14 @@ function render()
     local pinned = type(p.pin) == 'number' and p.pin > 0
     local bar = unread and UNREAD_BAR or READ_BAR
     local indent = string.rep('  ', depth or 0)
-    lines[#lines + 1] = bar .. indent .. (pinned and PIN_MARK or '') .. (p.title or '(untitled)')
+    lines[#lines + 1] = bar .. pad .. indent .. (pinned and PIN_MARK or '') .. (p.title or '(untitled)')
     rows[#rows + 1] = {
       unread = unread,
       icon = icon,
       hl_group = hl_group,
-      pin_at = #bar + #indent,
+      pin_at = #bar + #pad + #indent,
       pin_width = pinned and #PIN_MARK or 0,
+      thumb = pad ~= '' and type(p.image) == 'string' and p.image ~= '' and { url = p.image, col = #bar } or nil,
     }
     line_pages[#lines] = p
   end
@@ -542,11 +604,23 @@ function render()
   end
   sync_spinner()
 
-  vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  -- The lines are only written when they differ: a refresh of the marks alone comes on
+  -- every keystroke in a page, and rewriting the lines would collapse the extmarks the
+  -- thumbnails ride on, so each refresh would take every picture down and draw it again.
+  local changed = not vim.deep_equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines)
+  if changed then
+    drop_thumbs()
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.bo[buf].modifiable = false
+  end
+  wanted_thumbs = {}
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   for i, row_info in ipairs(rows) do
     local row = i - 1
+    if row_info.thumb then
+      wanted_thumbs[row] = row_info.thumb
+    end
     if row_info.folder then
       vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { end_line = row + 1, hl_group = 'ChatoraSidebarFolder' })
     elseif not row_info.note then
@@ -579,11 +653,11 @@ function render()
       end
     end
   end
-  vim.bo[buf].modifiable = false
   -- Rendering marks an acwrite buffer modified, which makes Neovim offer to save it on
   -- exit. This is a view; there is nothing to save.
   vim.bo[buf].modified = false
   apply_winbar()
+  sync_thumbs()
 end
 
 --- Re-render the save-state / unread marks from cached pages, without refetching.
@@ -1064,6 +1138,7 @@ function M.search()
 end
 
 function M.close()
+  drop_thumbs()
   if is_open() then
     remember_cursor()
     vim.api.nvim_win_close(win, true)
@@ -1170,6 +1245,12 @@ function M.open(proj, opts)
     vim.cmd('topleft ' .. tostring(config.options.sidebar_width) .. 'vsplit')
     win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(win, buf)
+    -- Scrolling brings rows on screen whose thumbnails were never fetched.
+    vim.api.nvim_create_autocmd('WinScrolled', {
+      group = vim.api.nvim_create_augroup('ChatoraSidebarScroll', { clear = true }),
+      pattern = tostring(win),
+      callback = sync_thumbs,
+    })
     if not focus and vim.api.nvim_win_is_valid(origin) then
       vim.api.nvim_set_current_win(origin)
     end
@@ -1189,6 +1270,9 @@ function M.open(proj, opts)
   -- Pin the window to its buffer: opening a file while the sidebar is
   -- focused must not hijack this window (E1513 instead).
   vim.wo[win].winfixbuf = true
+  -- The cells a thumbnail replaces are concealed, which only takes effect at this level.
+  vim.wo[win].conceallevel = 2
+  vim.wo[win].concealcursor = 'nvc'
   apply_statusline()
   apply_winbar()
 

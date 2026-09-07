@@ -232,6 +232,54 @@ describe('fetchAsset', () => {
       expect(result.height).toBe(1502)
     })
 
+    test.skipIf(magickCmd === undefined)('a thumb is a square cut of the size asked', async () => {
+      const { layer: httpLayer, calls } = testHttpClient(() => served(picture('300x220')))
+      const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+      const program = Effect.gen(function* () {
+        const thumb = yield* fetchAsset({
+          project: 'p',
+          url: 'https://cdn.example.com/w.png',
+          thumb: 64,
+        })
+        const whole = yield* fetchAsset({ project: 'p', url: 'https://cdn.example.com/w.png' })
+        return { thumb, whole }
+      })
+      const { thumb, whole } = await runOnce(program, httpLayer, credLayer)
+      expect(thumb.ok && whole.ok).toBe(true)
+      if (!thumb.ok || !whole.ok) return
+      expect([thumb.width, thumb.height]).toEqual([64, 64])
+      expect([whole.width, whole.height]).toEqual([300, 220])
+      expect(thumb.path).not.toBe(whole.path)
+      expect(calls.filter((c) => c.url === 'https://cdn.example.com/w.png')).toHaveLength(1)
+    })
+
+    test.skipIf(magickCmd === undefined)(
+      'a thumb keeps a transparent picture transparent',
+      async () => {
+        const clear = new Uint8Array(
+          Bun.spawnSync([magickCmd as string, '-size', '300x220', 'xc:none', 'png:-']).stdout,
+        )
+        const { layer: httpLayer } = testHttpClient(() => served(clear))
+        const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+        const result = await runOnce(
+          fetchAsset({ project: 'p', url: 'https://cdn.example.com/clear.png', thumb: 64 }),
+          httpLayer,
+          credLayer,
+        )
+        expect(result.ok).toBe(true)
+        if (!result.ok) return
+        const opaque = Bun.spawnSync([
+          magickCmd as string,
+          result.path,
+          '-format',
+          '%[opaque]',
+          'info:',
+        ])
+        // ImageMagick 6 prints "false", 7 prints "False".
+        expect(opaque.stdout.toString().trim().toLowerCase()).toBe('false')
+      },
+    )
+
     test.skipIf(magickCmd === undefined)('leaves one that already fits untouched', async () => {
       const { layer: httpLayer } = testHttpClient(() => served(picture('300x220')))
       const { layer: credLayer } = testCredentialStore(Option.some(PAT))

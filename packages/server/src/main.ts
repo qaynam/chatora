@@ -366,7 +366,7 @@ connection.onRequest(
 )
 connection.onRequest(
   'chatora/fetchAsset',
-  (params: { project: string; url: string; border?: BorderParams }) =>
+  (params: { project: string; url: string; border?: BorderParams; thumb?: number }) =>
     runtime.runPromise(fetchAsset(params)),
 )
 connection.onRequest(
