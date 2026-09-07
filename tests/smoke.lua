@@ -2591,6 +2591,11 @@ local ok, err = pcall(function()
         { name = 'fixed', pages = function()
           return { '固定' }
         end },
+        { name = 'group', folders = {
+          { name = 'inner', pages = function()
+            return { '奥' }
+          end },
+        } },
       },
     })
     sidebar.select_tab(11)
@@ -2598,8 +2603,12 @@ local ok, err = pcall(function()
       return vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
     end
     assert(
-      vim.deep_equal(lines(), { '▾ 📅 daily', ' 新しい方', ' 古い方', '▸ note', '▾ fixed', ' 固定' }),
-      'open folders list their pages under a header, a closed one only its header: ' .. vim.inspect(lines())
+      vim.deep_equal(
+        lines(),
+        { '▾ 📅 daily', ' 新しい方', ' 古い方', '▸ note', '▾ fixed', ' 固定', '▾ group', '  ▾ inner', '   奥' }
+      ),
+      'open folders list their pages under a header, a closed one only its header, a nested one indents: '
+        .. vim.inspect(lines())
     )
     assert(vim.deep_equal(listed, { 'related daily' }), 'a closed folder is not fetched: ' .. vim.inspect(listed))
 
@@ -2609,6 +2618,10 @@ local ok, err = pcall(function()
     assert(listed[#listed] == 'icon=note', 'with its own query: ' .. vim.inspect(listed))
     sidebar.open_current()
     assert(lines()[4] == '▸ note' and lines()[5] == '▾ fixed', 'and closes it again: ' .. vim.inspect(lines()))
+
+    vim.api.nvim_win_set_cursor(win, { 8, 0 })
+    sidebar.open_current()
+    assert(lines()[8] == '  ▸ inner' and #lines() == 8, 'a nested folder closes on its own header: ' .. vim.inspect(lines()))
 
     vim.api.nvim_win_set_cursor(win, { 1, 0 })
     sidebar.open_current()

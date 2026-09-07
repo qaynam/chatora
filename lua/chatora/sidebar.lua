@@ -77,8 +77,8 @@ local DEFAULT_TABS = {
   { label = '未読', filter = 'me', unread_only = true },
 }
 
--- What a `sidebar_tabs` entry, or a folder in one, may say. A key outside this list is a
--- typo the reader would otherwise only notice as a tab that lists everything.
+-- What a `sidebar_tabs` entry, or a folder at any depth in one, may say. A key outside
+-- this list is a typo the reader would otherwise only notice as a tab that lists everything.
 local LIST_KEYS = {
   label = true,
   name = true,
@@ -89,8 +89,8 @@ local LIST_KEYS = {
   unread = true,
   unread_only = true,
   open = true,
+  folders = true,
 }
-local TAB_KEYS = vim.tbl_extend('force', LIST_KEYS, { folders = true })
 
 local FOLDER_OPEN = '▾ '
 local FOLDER_CLOSED = '▸ '
@@ -125,14 +125,13 @@ end
 --- One list from its spec: a tab, or a folder inside one. `prior` is the list that stood
 --- at the same position before a rebuild; its pages are carried over only under the same
 --- label, since a reordered or renamed list is a different query.
-local function make_list(spec, keys, where, fallback_label, prior)
+local function make_list(spec, where, fallback_label, prior)
   for key in pairs(spec) do
-    if not keys[key] then
+    if not LIST_KEYS[key] then
       vim.notify_once(
-        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, filter, related, pages, unread%s）'):format(
+        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, filter, related, pages, unread, open, folders）'):format(
           where,
-          key,
-          keys.folders and ', folders' or ', open'
+          key
         ),
         vim.log.levels.WARN
       )
@@ -161,6 +160,24 @@ local function make_list(spec, keys, where, fallback_label, prior)
   }
 end
 
+--- The folders of `spec`, at any depth, hung on `list`. A folder that holds folders is
+--- only a heading: its own state is never fetched.
+local function attach_folders(list, spec, where, prior)
+  if type(spec.folders) ~= 'table' then
+    return
+  end
+  list.folders = {}
+  for j, fspec in ipairs(spec.folders) do
+    local folder_where = ('%sのフォルダー %d'):format(where, j)
+    local folder = make_list(fspec, folder_where, '#' .. j, prior and prior.folders and prior.folders[j] or nil)
+    -- Whether the reader left it open outlives a rebuild; the spec only says how it starts.
+    folder.open = folder.carried and folder.carried.open or (not folder.carried and fspec.open ~= false)
+    attach_folders(folder, fspec, folder_where, folder.carried)
+    folder.carried = nil
+    list.folders[j] = folder
+  end
+end
+
 --- Rebuild the tab list from config, carrying each tab's already-fetched pages over.
 --- Closing and reopening the sidebar must not cost a full refetch — the poll loop is what
 --- keeps the list current.
@@ -178,24 +195,9 @@ local function build_tabs(keep_state)
   tabs = {}
   for i, spec in ipairs(specs) do
     local prior = keep_state and previous[i] or nil
-    local tab = make_list(spec, TAB_KEYS, ('sidebar_tabs の %d 番目'):format(i), '#' .. i, prior)
-    if type(spec.folders) == 'table' then
-      tab.folders = {}
-      for j, fspec in ipairs(spec.folders) do
-        local prior_folder = prior and prior.folders and prior.folders[j] or nil
-        local folder = make_list(
-          fspec,
-          LIST_KEYS,
-          ('sidebar_tabs の %d 番目のフォルダー %d'):format(i, j),
-          '#' .. j,
-          prior_folder
-        )
-        -- Whether the reader left it open outlives a rebuild; the spec only says how it starts.
-        folder.open = folder.carried and folder.carried.open or (not folder.carried and fspec.open ~= false)
-        folder.carried = nil
-        tab.folders[j] = folder
-      end
-    end
+    local where = ('sidebar_tabs の %d 番目'):format(i)
+    local tab = make_list(spec, where, '#' .. i, prior)
+    attach_folders(tab, spec, where, tab.carried)
     tab.carried = nil
     tabs[i] = tab
   end
@@ -204,19 +206,30 @@ local function build_tabs(keep_state)
   end
 end
 
---- The lists a tab draws: its open folders, or the tab itself.
-local function visible_lists(tab)
-  if not tab.folders then
-    return { tab }
+--- The lists under `list` that hold pages: itself when it has no folders, else the
+--- folders at the bottom of its tree, only the open ones (under open ones) when
+--- `open_only`.
+local function collect_lists(list, open_only, out)
+  if not list.folders then
+    out[#out + 1] = list
+    return out
   end
-  return vim.tbl_filter(function(folder)
-    return folder.open
-  end, tab.folders)
+  for _, folder in ipairs(list.folders) do
+    if not open_only or folder.open then
+      collect_lists(folder, open_only, out)
+    end
+  end
+  return out
+end
+
+--- The lists a tab draws.
+local function visible_lists(tab)
+  return collect_lists(tab, true, {})
 end
 
 --- Every list a tab holds, open or not.
 local function all_lists(tab)
-  return tab.folders or { tab }
+  return collect_lists(tab, false, {})
 end
 
 --- The `filterType`/`filterValue` pair for a tab, or nil for "no filter".
@@ -337,35 +350,54 @@ function render()
   line_pages, line_folders = {}, {}
   local lines = {}
   local rows = {}
-  local function add_page(p)
+  local function add_page(p, depth)
     local unread = is_unread(p)
     local icon, hl_group = status_of(p)
     -- Cosense sorts pinned pages to the front; the mark says why they are there.
     local pinned = type(p.pin) == 'number' and p.pin > 0
-    local prefix = (unread and UNREAD_BAR or READ_BAR) .. (pinned and PIN_MARK or '')
-    lines[#lines + 1] = prefix .. (p.title or '(untitled)')
-    rows[#rows + 1] = { unread = unread, icon = icon, hl_group = hl_group, pin_width = pinned and #PIN_MARK or 0 }
+    local bar = unread and UNREAD_BAR or READ_BAR
+    local indent = string.rep('  ', depth or 0)
+    lines[#lines + 1] = bar .. indent .. (pinned and PIN_MARK or '') .. (p.title or '(untitled)')
+    rows[#rows + 1] = {
+      unread = unread,
+      icon = icon,
+      hl_group = hl_group,
+      pin_at = #bar + #indent,
+      pin_width = pinned and #PIN_MARK or 0,
+    }
     line_pages[#lines] = p
   end
   local function add_note(state, indent)
     lines[#lines + 1] = indent .. (state.fetched and '(該当なし)' or (spinner.frame() .. ' 読み込み中…'))
     rows[#rows + 1] = { note = true }
   end
+  local function add_folder(folder, depth)
+    local indent = string.rep('  ', depth)
+    lines[#lines + 1] = indent
+      .. (folder.open and FOLDER_OPEN or FOLDER_CLOSED)
+      .. (folder.icon and (folder.icon .. ' ') or '')
+      .. folder.label
+    rows[#rows + 1] = { folder = true }
+    line_folders[#lines] = folder
+    if not folder.open then
+      return
+    end
+    if folder.folders then
+      for _, child in ipairs(folder.folders) do
+        add_folder(child, depth + 1)
+      end
+      return
+    end
+    for _, p in ipairs(folder.state.pages) do
+      add_page(p, depth)
+    end
+    if #folder.state.pages == 0 then
+      add_note(folder.state, indent .. '  ')
+    end
+  end
   if tab and tab.folders then
     for _, folder in ipairs(tab.folders) do
-      lines[#lines + 1] = (folder.open and FOLDER_OPEN or FOLDER_CLOSED)
-        .. (folder.icon and (folder.icon .. ' ') or '')
-        .. folder.label
-      rows[#rows + 1] = { folder = true }
-      line_folders[#lines] = folder
-      if folder.open then
-        for _, p in ipairs(folder.state.pages) do
-          add_page(p)
-        end
-        if #folder.state.pages == 0 then
-          add_note(folder.state, '  ')
-        end
-      end
+      add_folder(folder, 0)
     end
     if #lines == 0 then
       lines = { ' (フォルダーがありません)' }
@@ -403,8 +435,8 @@ function render()
         })
       end
       if row_info.pin_width > 0 then
-        vim.api.nvim_buf_set_extmark(buf, ns, row, #UNREAD_BAR, {
-          end_col = #UNREAD_BAR + row_info.pin_width,
+        vim.api.nvim_buf_set_extmark(buf, ns, row, row_info.pin_at, {
+          end_col = row_info.pin_at + row_info.pin_width,
           hl_group = 'ChatoraSidebarPin',
         })
       end
@@ -617,35 +649,27 @@ local function load_list(list, index)
   end)
 end
 
---- Fetch what the active tab is missing (infinite scroll). In a tab of folders that is
---- every open folder still without its first batch; once they all have one, the scroll
---- reaching the bottom extends the last open folder, which is what the bottom belongs to.
+--- Fetch what the active tab is missing (infinite scroll): every list on screen still
+--- without its first batch; once they all have one, the scroll reaching the bottom extends
+--- the last of them, which is what the bottom belongs to.
 function M.load_more()
   local index = active
   local tab = tabs[index]
   if not (project and tab) then
     return
   end
-  if not tab.folders then
-    load_list(tab, index)
-    return
-  end
+  local lists = visible_lists(tab)
   local pending = false
-  for _, folder in ipairs(tab.folders) do
-    if folder.open and not folder.state.fetched then
-      load_list(folder, index)
+  for _, list in ipairs(lists) do
+    if not list.state.fetched then
+      load_list(list, index)
       pending = true
     end
   end
-  if pending then
+  if pending or #lists == 0 then
     return
   end
-  for j = #tab.folders, 1, -1 do
-    if tab.folders[j].open then
-      load_list(tab.folders[j], index)
-      return
-    end
-  end
+  load_list(lists[#lists], index)
 end
 
 --- Pin one more tab, as an entry at the end of `sidebar_tabs` would.
