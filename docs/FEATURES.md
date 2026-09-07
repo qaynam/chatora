@@ -546,16 +546,33 @@ video = false                           -- 既定。ほかのリンクと同じ�
 
 ### サイドバーのタブ
 
+上部のタブは `sidebar_tabs` で決めます。既定は「すべて」と「未読」です。
+
 ```lua
 sidebar_tabs = {
-  { label = 'すべて' },
-  { label = '未読', filter = 'me', unread_only = true },
-  { label = '自分', filter = { type = 'icon', value = 'your-name' } },
+  { label = 'すべて', icon = '📖' },
+  { label = '未読', icon = '📩', filter = 'me', unread = true },
+  { label = 'sakura', filter = 'sakura' },
+  { label = 'ロードマップ', link = 'ロードマップ' },
 }
 ```
 
-`filter` は `'me'`（自分の保存済み Cosense フィルタ。無ければ自分の名前の icon フィルタ）か
-`{ type, value }` です。`sidebar_tabs = false` で、タブなしの単一リストになります。
+| キー | 意味 |
+|---|---|
+| `label` | タブの名前です。`name` でも書けます |
+| `icon` | 名前の前に付けます |
+| `filter` | web のフィルタと同じで、ページのタイトルを書きます。そのタイトルの `.icon` 記法を含むページと、その名前のユーザーが編集したページに絞ります。`'me'` は自分の保存済みフィルタで、無ければ自分の名前の icon です |
+| `link` | そのページにリンクしているページ（関連ページの 1 hop）に絞ります |
+| `unread` | 未読のページだけにします |
+
+`filter` は `{ type = 'icon', value = 'sakura' }` の形でも書けます。`sidebar_tabs = false` で、
+タブなしの単一リストになります。知らないキーがあると、起動時にそう言います。
+
+設定のあとから足すこともできます。
+
+```lua
+require('chatora').add_tab({ label = 'sakura', filter = 'sakura' })
+```
 
 ## 連携
 

@@ -2431,6 +2431,77 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- Sidebar tabs: `name`/`icon` label a tab, a bare `filter` string is the web's page
+  -- filter (icon), `link` lists the pages around a title, an unknown key is called out,
+  -- and add_tab pins one more after setup.
+  do
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
+    local orig_tabs, orig_notify = config.options.sidebar_tabs, vim.notify
+    local warned, listed = {}, {}
+    vim.notify = function(msg)
+      warned[#warned + 1] = msg
+    end
+    lsp.ensure_start = function() end
+    lsp.request = function(method, _, cb)
+      if method == 'chatora/relatedPages' then
+        listed[#listed + 1] = 'related'
+        cb(nil, {
+          ok = true,
+          links1hop = { { id = 'a', title = '古い方', updated = 1 }, { id = 'b', title = '新しい方', updated = 9 } },
+          links2hop = {},
+        })
+      else
+        cb('no client', nil)
+      end
+    end
+    lsp.request_ok = function(method, params, cb)
+      if method == 'chatora/listPages' then
+        listed[#listed + 1] = (params.filterType or '-') .. '=' .. (params.filterValue or '-')
+        cb({ ok = true, count = 1, scanned = 1, pages = { { id = 'p', title = 'ページ', updated = 1 } } })
+      end
+    end
+    sidebar.close()
+    config.options.sidebar_tabs = {
+      { name = 'All', icon = '📖' },
+      { name = 'sakura', filter = 'sakura' },
+      { label = 'リンク', link = 'ロードマップ' },
+      { name = 'typo', colour = 'red' },
+    }
+
+    sidebar.open('proj')
+    local win = vim.fn.bufwinid('chatora://sidebar')
+    local bar = vim.wo[win].winbar
+    assert(bar:find('📖 All', 1, true) and bar:find(' sakura ', 1, true), 'icon and name label the tabs: ' .. bar)
+    assert(
+      #warned == 1 and warned[1]:find('4 番目に知らないキー `colour`', 1, true),
+      'an unknown key is called out: ' .. vim.inspect(warned)
+    )
+    assert(vim.deep_equal(listed, { '-=-' }), 'the first tab lists everything: ' .. vim.inspect(listed))
+
+    sidebar.select_tab(2)
+    assert(vim.deep_equal(listed, { '-=-', 'icon=sakura' }), 'a bare filter string is an icon filter: ' .. vim.inspect(listed))
+
+    sidebar.select_tab(3)
+    assert(listed[3] == 'related', 'a link tab asks for the related pages: ' .. vim.inspect(listed))
+    local rows = vim.tbl_map(function(l)
+      return l:sub(2)
+    end, vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false))
+    assert(vim.deep_equal(rows, { '新しい方', '古い方' }), 'newest first: ' .. vim.inspect(rows))
+
+    require('chatora').add_tab({ name = '追加', filter = 'taro' })
+    assert(vim.wo[win].winbar:find(' 追加 ', 1, true), 'add_tab pins a tab while the sidebar is open')
+    sidebar.select_tab(5)
+    assert(listed[#listed] == 'icon=taro', 'and it queries like any other: ' .. vim.inspect(listed))
+
+    sidebar.close()
+    config.options.sidebar_tabs = orig_tabs
+    vim.notify = orig_notify
+    lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
+  end
+
   -- sidebar polling: a refetched first batch replaces the head and pulls an
   -- edited page up out of the tail, without duplicating it or dropping the
   -- rest of what infinite scroll already loaded.

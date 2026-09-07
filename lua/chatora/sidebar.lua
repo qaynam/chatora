@@ -75,6 +75,10 @@ local DEFAULT_TABS = {
   { label = '未読', filter = 'me', unread_only = true },
 }
 
+-- What a `sidebar_tabs` entry may say. A key outside this list is a typo the reader would
+-- otherwise only notice as a tab that lists everything.
+local TAB_KEYS = { label = true, name = true, icon = true, filter = true, link = true, unread = true, unread_only = true }
+
 local tabs = {}
 local active = 1
 
@@ -118,11 +122,26 @@ local function build_tabs(keep_state)
   local previous = tabs
   tabs = {}
   for i, spec in ipairs(specs) do
-    local label = spec.label or ('#' .. i)
+    for key in pairs(spec) do
+      if not TAB_KEYS[key] then
+        vim.notify_once(
+          ('[chatora] sidebar_tabs の %d 番目に知らないキー `%s` があります（使えるのは label, icon, filter, link, unread）'):format(i, key),
+          vim.log.levels.WARN
+        )
+      end
+    end
+    local label = spec.label or spec.name or ('#' .. i)
     -- Same position *and* same label: a reordered or renamed tab is a different query,
     -- so its old pages would be the wrong ones to show.
     local carried = keep_state and previous[i] and previous[i].label == label and previous[i].state
-    tabs[i] = vim.tbl_extend('force', { label = label }, spec, { state = carried or new_state() })
+    tabs[i] = {
+      label = label,
+      icon = spec.icon,
+      filter = spec.filter,
+      link = spec.link,
+      unread_only = (spec.unread_only or spec.unread) and true or nil,
+      state = carried or new_state(),
+    }
   end
   if active > #tabs then
     active = 1
@@ -148,6 +167,11 @@ local function filter_of(tab)
     end
     return nil
   end
+  -- The web's page filter takes a title and filters by its `.icon` notation; a bare
+  -- string here means the same thing.
+  if type(filter) == 'string' then
+    return 'icon', filter
+  end
   if type(filter) == 'table' and filter.type and filter.value then
     return filter.type, filter.value
   end
@@ -158,9 +182,9 @@ local function tabline()
   local parts = {}
   for i, tab in ipairs(tabs) do
     local hl = i == active and 'ChatoraSidebarTabActive' or 'ChatoraSidebarTabInactive'
+    local text = (tab.icon and (tab.icon .. ' ') or '') .. tab.label
     -- %<n>@fn@ … %X makes the label clickable; the handler switches to tab n.
-    parts[#parts + 1] = ('%%%d@v:lua.chatora_sidebar_tab_click@%%#%s# %s %%*%%X')
-      :format(i, hl, tab.label)
+    parts[#parts + 1] = ('%%%d@v:lua.chatora_sidebar_tab_click@%%#%s# %s %%*%%X'):format(i, hl, text)
   end
   return table.concat(parts)
 end
@@ -323,6 +347,22 @@ local function batch_params(tab, skip)
   }
 end
 
+--- The pages linked with `tab.link`, newest first, or nil with a message. The related
+--- list comes whole, so a link tab has no batches to page through.
+local function fetch_linked(tab, cb)
+  lsp.request('chatora/relatedPages', { project = project, title = tab.link }, function(err, result)
+    if err or not result or result.ok == false then
+      cb(nil, (result and result.message) or (err and tostring(err)) or 'request failed')
+      return
+    end
+    local pages = vim.list_slice(result.links1hop or {})
+    table.sort(pages, function(a, b)
+      return (a.updated or 0) > (b.updated or 0)
+    end)
+    cb(pages)
+  end)
+end
+
 --- Fetch the next batch for the active tab (infinite scroll).
 function M.load_more()
   local index = active
@@ -332,6 +372,26 @@ function M.load_more()
   end
   local state = tab.state
   if state.loading or state.exhausted then
+    return
+  end
+
+  if tab.link then
+    state.loading = true
+    fetch_linked(tab, function(pages, why)
+      state.loading = false
+      state.fetched = true
+      state.exhausted = true
+      if not pages then
+        vim.notify('[chatora] ' .. why, vim.log.levels.ERROR)
+      else
+        state.pages = pages
+        state.count = #pages
+        state.scanned = #pages
+      end
+      if index == active then
+        render()
+      end
+    end)
     return
   end
 
@@ -365,6 +425,24 @@ function M.load_more()
       end
     end
   end)
+end
+
+--- Pin one more tab, as an entry at the end of `sidebar_tabs` would.
+function M.add_tab(spec)
+  local specs = config.options.sidebar_tabs
+  if specs == false then
+    specs = { DEFAULT_TABS[1] }
+  elseif type(specs) ~= 'table' or #specs == 0 then
+    specs = vim.deepcopy(DEFAULT_TABS)
+  end
+  specs[#specs + 1] = spec
+  config.options.sidebar_tabs = specs
+  build_tabs(true)
+  if is_open() then
+    apply_winbar()
+    render()
+    M.load_more()
+  end
 end
 
 function M.reload()
@@ -423,6 +501,21 @@ function M.poll()
   local index = active
   local tab = tabs[index]
   if not (project and tab and is_open()) or tab.state.loading then
+    return
+  end
+  if tab.link then
+    fetch_linked(tab, function(fresh)
+      local state = tab.state
+      if not fresh or index ~= active or not is_open() then
+        return
+      end
+      if head_signature(fresh, #fresh) == head_signature(state.pages, #state.pages) then
+        return
+      end
+      state.pages = fresh
+      state.count = #fresh
+      keeping_view(render)
+    end)
     return
   end
   local params = batch_params(tab, 0)
