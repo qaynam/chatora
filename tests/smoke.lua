@@ -2531,18 +2531,26 @@ local ok, err = pcall(function()
       pages = function()
         return {
           { title = 'メモ帳', action = function(row, target)
-            acted = { row.title, target }
+            acted = { row.title, target, vim.api.nvim_get_current_win() }
           end },
         }
       end,
     })
     sidebar.select_tab(8)
+    -- Entering a window that shows a page makes the sidebar follow that page's project;
+    -- the windows an earlier test left behind must not pull this one off 'proj'.
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if w ~= win and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):match('^cosense://') then
+        pcall(vim.api.nvim_win_set_buf, w, vim.api.nvim_create_buf(false, true))
+      end
+    end
     vim.api.nvim_win_set_cursor(win, { 1, 0 })
     sidebar.open_current()
     assert(
-      acted and acted[1] == 'メモ帳' and acted[2] ~= win and vim.api.nvim_win_is_valid(acted[2]),
-      'the action runs with the row and an editor window: ' .. vim.inspect(acted)
+      acted and acted[1] == 'メモ帳' and acted[2] ~= win and vim.api.nvim_win_is_valid(acted[2]) and acted[3] == acted[2],
+      'the action runs with the row, in the editor window: ' .. vim.inspect(acted)
     )
+    vim.api.nvim_set_current_win(win)
 
     local deliver
     require('chatora').add_tab({

@@ -876,6 +876,11 @@ function M.open_current()
   end
   local target = ensure_editor_win()
   if type(p.action) == 'function' then
+    -- Run with the editor window current: the sidebar's own window refuses to show
+    -- another buffer ('winfixbuf'), so an `:edit` in the action would fail there.
+    if vim.api.nvim_win_is_valid(target) then
+      vim.api.nvim_set_current_win(target)
+    end
     p.action(p, target)
     return
   end

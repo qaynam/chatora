@@ -594,14 +594,14 @@ end },
 end },
 ```
 
-行に `action` を持たせると、`<CR>` でページを開く代わりにその関数を呼びます。引数はその行と、
-開き先にするウィンドウです。Cosense と関係ないものを並べるのはこれでできます。
+行に `action` を持たせると、`<CR>` でページを開く代わりにその関数を呼びます。呼ぶときには
+編集用のウィンドウがカレントになっているので、そのまま `:edit` などができます。引数はその行と、
+そのウィンドウです。Cosense と関係ないものを並べるのはこれでできます。
 
 ```lua
 { label = 'メモ帳', pages = function()
   return {
-    { title = 'today.md', action = function(_, win)
-      vim.api.nvim_set_current_win(win)
+    { title = 'today.md', action = function()
       vim.cmd.edit(vim.fn.expand('~/notes/today.md'))
     end },
   }
