@@ -2540,6 +2540,44 @@ local ok, err = pcall(function()
     rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
     assert(rows[1]:find('該当なし', 1, true) and warned[#warned]:find('boom', 1, true), 'an erroring function is reported: ' .. vim.inspect(warned))
 
+    -- Folders: a tab holds lists of any of the kinds above, each behind a header that
+    -- <CR> opens and closes; a folder fetches when it first opens, and stays as the reader
+    -- left it across a rebuild.
+    listed = {}
+    require('chatora').add_tab({
+      name = 'custom',
+      folders = {
+        { name = 'daily', icon = '📅', link = 'daily' },
+        { name = 'note', filter = 'note', open = false },
+        { name = 'fixed', pages = function()
+          return { '固定' }
+        end },
+      },
+    })
+    sidebar.select_tab(9)
+    local function lines()
+      return vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    end
+    assert(
+      vim.deep_equal(lines(), { '▾ 📅 daily', ' 新しい方', ' 古い方', '▸ note', '▾ fixed', ' 固定' }),
+      'open folders list their pages under a header, a closed one only its header: ' .. vim.inspect(lines())
+    )
+    assert(vim.deep_equal(listed, { 'related' }), 'a closed folder is not fetched: ' .. vim.inspect(listed))
+
+    vim.api.nvim_win_set_cursor(win, { 4, 0 })
+    sidebar.open_current()
+    assert(lines()[4] == '▾ note' and lines()[5] == ' ページ', '<CR> on a header opens the folder and fetches it: ' .. vim.inspect(lines()))
+    assert(listed[#listed] == 'icon=note', 'with its own query: ' .. vim.inspect(listed))
+    sidebar.open_current()
+    assert(lines()[4] == '▸ note' and lines()[5] == '▾ fixed', 'and closes it again: ' .. vim.inspect(lines()))
+
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+    sidebar.open_current()
+    sidebar.close()
+    sidebar.open('proj')
+    sidebar.select_tab(9)
+    assert(lines()[1] == '▸ 📅 daily', 'a folder the reader closed stays closed when the sidebar reopens: ' .. vim.inspect(lines()))
+
     sidebar.close()
     config.options.sidebar_tabs = orig_tabs
     vim.notify = orig_notify

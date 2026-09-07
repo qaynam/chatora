@@ -13,6 +13,7 @@ local uri = require('chatora.uri')
 local buf, win
 local project
 local line_pages = {}
+local line_folders = {}
 local ns = vim.api.nvim_create_namespace('chatora_sidebar')
 
 local function ensure_hl()
@@ -24,6 +25,7 @@ local function ensure_hl()
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabActive', { link = 'TabLineSel', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarTabInactive', { link = 'TabLine', default = true })
   vim.api.nvim_set_hl(0, 'ChatoraSidebarPin', { link = 'Special', default = true })
+  vim.api.nvim_set_hl(0, 'ChatoraSidebarFolder', { link = 'Directory', default = true })
   -- Underline spans the full row, separating rows without spending a line. A hairline
   -- rather than a window border's color, since every row carries one; a color given to
   -- `sidebar_separator` wins.
@@ -75,9 +77,9 @@ local DEFAULT_TABS = {
   { label = '未読', filter = 'me', unread_only = true },
 }
 
--- What a `sidebar_tabs` entry may say. A key outside this list is a typo the reader would
--- otherwise only notice as a tab that lists everything.
-local TAB_KEYS = {
+-- What a `sidebar_tabs` entry, or a folder in one, may say. A key outside this list is a
+-- typo the reader would otherwise only notice as a tab that lists everything.
+local LIST_KEYS = {
   label = true,
   name = true,
   icon = true,
@@ -86,7 +88,12 @@ local TAB_KEYS = {
   pages = true,
   unread = true,
   unread_only = true,
+  open = true,
 }
+local TAB_KEYS = vim.tbl_extend('force', LIST_KEYS, { folders = true })
+
+local FOLDER_OPEN = '▾ '
+local FOLDER_CLOSED = '▸ '
 
 local tabs = {}
 local active = 1
@@ -115,9 +122,42 @@ local function new_state()
   }
 end
 
---- Rebuild the tab list from config, carrying each tab's already-fetched pages over when
---- it is recognisably the same tab. Closing and reopening the sidebar must not cost a full
---- refetch — the poll loop is what keeps the list current.
+--- One list from its spec: a tab, or a folder inside one. `prior` is the list that stood
+--- at the same position before a rebuild; its pages are carried over only under the same
+--- label, since a reordered or renamed list is a different query.
+local function make_list(spec, keys, where, fallback_label, prior)
+  for key in pairs(spec) do
+    if not keys[key] then
+      vim.notify_once(
+        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, filter, link, pages, unread%s）'):format(
+          where,
+          key,
+          keys.folders and ', folders' or ', open'
+        ),
+        vim.log.levels.WARN
+      )
+    end
+  end
+  if spec.pages ~= nil and type(spec.pages) ~= 'function' then
+    vim.notify_once(('[chatora] %sの pages は関数にしてください'):format(where), vim.log.levels.WARN)
+  end
+  local label = spec.label or spec.name or fallback_label
+  local carried = prior ~= nil and prior.label == label and prior or nil
+  return {
+    label = label,
+    icon = spec.icon,
+    filter = spec.filter,
+    link = spec.link,
+    pages = type(spec.pages) == 'function' and spec.pages or nil,
+    unread_only = (spec.unread_only or spec.unread) and true or nil,
+    state = carried and carried.state or new_state(),
+    carried = carried,
+  }
+end
+
+--- Rebuild the tab list from config, carrying each tab's already-fetched pages over.
+--- Closing and reopening the sidebar must not cost a full refetch — the poll loop is what
+--- keeps the list current.
 ---
 --- @param keep_state boolean False when the project changed: another project's list is
 ---   not this one's.
@@ -131,37 +171,46 @@ local function build_tabs(keep_state)
   local previous = tabs
   tabs = {}
   for i, spec in ipairs(specs) do
-    for key in pairs(spec) do
-      if not TAB_KEYS[key] then
-        vim.notify_once(
-          ('[chatora] sidebar_tabs の %d 番目に知らないキー `%s` があります（使えるのは label, icon, filter, link, unread）'):format(i, key),
-          vim.log.levels.WARN
+    local prior = keep_state and previous[i] or nil
+    local tab = make_list(spec, TAB_KEYS, ('sidebar_tabs の %d 番目'):format(i), '#' .. i, prior)
+    if type(spec.folders) == 'table' then
+      tab.folders = {}
+      for j, fspec in ipairs(spec.folders) do
+        local prior_folder = prior and prior.folders and prior.folders[j] or nil
+        local folder = make_list(
+          fspec,
+          LIST_KEYS,
+          ('sidebar_tabs の %d 番目のフォルダー %d'):format(i, j),
+          '#' .. j,
+          prior_folder
         )
+        -- Whether the reader left it open outlives a rebuild; the spec only says how it starts.
+        folder.open = folder.carried and folder.carried.open or (not folder.carried and fspec.open ~= false)
+        folder.carried = nil
+        tab.folders[j] = folder
       end
     end
-    if spec.pages ~= nil and type(spec.pages) ~= 'function' then
-      vim.notify_once(
-        ('[chatora] sidebar_tabs の %d 番目の pages は関数にしてください'):format(i),
-        vim.log.levels.WARN
-      )
-    end
-    local label = spec.label or spec.name or ('#' .. i)
-    -- Same position *and* same label: a reordered or renamed tab is a different query,
-    -- so its old pages would be the wrong ones to show.
-    local carried = keep_state and previous[i] and previous[i].label == label and previous[i].state
-    tabs[i] = {
-      label = label,
-      icon = spec.icon,
-      filter = spec.filter,
-      link = spec.link,
-      pages = type(spec.pages) == 'function' and spec.pages or nil,
-      unread_only = (spec.unread_only or spec.unread) and true or nil,
-      state = carried or new_state(),
-    }
+    tab.carried = nil
+    tabs[i] = tab
   end
   if active > #tabs then
     active = 1
   end
+end
+
+--- The lists a tab draws: its open folders, or the tab itself.
+local function visible_lists(tab)
+  if not tab.folders then
+    return { tab }
+  end
+  return vim.tbl_filter(function(folder)
+    return folder.open
+  end, tab.folders)
+end
+
+--- Every list a tab holds, open or not.
+local function all_lists(tab)
+  return tab.folders or { tab }
 end
 
 --- The `filterType`/`filterValue` pair for a tab, or nil for "no filter".
@@ -251,11 +300,17 @@ local function is_unread(entry)
   return entry.unread == true and status_of(entry) == nil
 end
 
---- Animate only while the tab on screen has nothing to show yet: a tab with rows
---- already listed refreshes in place, and a settled empty tab is just empty.
+--- Animate only while a list on screen has nothing to show yet: a list with rows
+--- already listed refreshes in place, and a settled empty one is just empty.
 local function sync_spinner()
-  local state = tabs[active] and tabs[active].state
-  if is_open() and state and not state.fetched and #state.pages == 0 then
+  local tab = tabs[active]
+  local waiting = false
+  for _, list in ipairs(tab and is_open() and visible_lists(tab) or {}) do
+    if not list.state.fetched and #list.state.pages == 0 then
+      waiting = true
+    end
+  end
+  if waiting then
     spinner.subscribe('sidebar', function()
       render()
     end)
@@ -272,23 +327,51 @@ function render()
   -- back with option defaults.
   ensure_buf()
   local separators = config.options.sidebar_separator ~= false
-  local state = tabs[active] and tabs[active].state or new_state()
-  line_pages = {}
+  local tab = tabs[active]
+  line_pages, line_folders = {}, {}
   local lines = {}
   local rows = {}
-  for i, p in ipairs(state.pages) do
+  local function add_page(p)
     local unread = is_unread(p)
     local icon, hl_group = status_of(p)
     -- Cosense sorts pinned pages to the front; the mark says why they are there.
     local pinned = type(p.pin) == 'number' and p.pin > 0
     local prefix = (unread and UNREAD_BAR or READ_BAR) .. (pinned and PIN_MARK or '')
-    lines[i] = prefix .. (p.title or '(untitled)')
-    rows[i] = { unread = unread, icon = icon, hl_group = hl_group, pin_width = pinned and #PIN_MARK or 0 }
-    line_pages[i] = p
+    lines[#lines + 1] = prefix .. (p.title or '(untitled)')
+    rows[#rows + 1] = { unread = unread, icon = icon, hl_group = hl_group, pin_width = pinned and #PIN_MARK or 0 }
+    line_pages[#lines] = p
   end
-  if #lines == 0 then
-    lines = { ' ' .. (state.fetched and '(該当なし)' or (spinner.frame() .. ' 読み込み中…')) }
-    rows = {}
+  local function add_note(state, indent)
+    lines[#lines + 1] = indent .. (state.fetched and '(該当なし)' or (spinner.frame() .. ' 読み込み中…'))
+    rows[#rows + 1] = { note = true }
+  end
+  if tab and tab.folders then
+    for _, folder in ipairs(tab.folders) do
+      lines[#lines + 1] = (folder.open and FOLDER_OPEN or FOLDER_CLOSED)
+        .. (folder.icon and (folder.icon .. ' ') or '')
+        .. folder.label
+      rows[#rows + 1] = { folder = true }
+      line_folders[#lines] = folder
+      if folder.open then
+        for _, p in ipairs(folder.state.pages) do
+          add_page(p)
+        end
+        if #folder.state.pages == 0 then
+          add_note(folder.state, '  ')
+        end
+      end
+    end
+    if #lines == 0 then
+      lines = { ' (フォルダーがありません)' }
+    end
+  else
+    local state = tab and tab.state or new_state()
+    for _, p in ipairs(state.pages) do
+      add_page(p)
+    end
+    if #lines == 0 then
+      add_note(state, ' ')
+    end
   end
   sync_spinner()
 
@@ -297,32 +380,36 @@ function render()
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   for i, row_info in ipairs(rows) do
     local row = i - 1
-    if separators then
-      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { line_hl_group = 'ChatoraSidebarRow' })
-    end
-    if row_info.unread then
-      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
-        end_col = #UNREAD_BAR,
-        hl_group = 'ChatoraSidebarUnread',
-      })
-      vim.api.nvim_buf_set_extmark(buf, ns, row, #UNREAD_BAR, {
-        end_line = row + 1,
-        hl_group = 'ChatoraSidebarUnreadTitle',
-      })
-    end
-    if row_info.pin_width > 0 then
-      vim.api.nvim_buf_set_extmark(buf, ns, row, #UNREAD_BAR, {
-        end_col = #UNREAD_BAR + row_info.pin_width,
-        hl_group = 'ChatoraSidebarPin',
-      })
-    end
-    if row_info.icon then
-      -- Right-aligned so the save state never pushes titles around, and the
-      -- left edge stays reserved for the unread border.
-      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
-        virt_text = { { row_info.icon .. ' ', row_info.hl_group } },
-        virt_text_pos = 'right_align',
-      })
+    if row_info.folder then
+      vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { end_line = row + 1, hl_group = 'ChatoraSidebarFolder' })
+    elseif not row_info.note then
+      if separators then
+        vim.api.nvim_buf_set_extmark(buf, ns, row, 0, { line_hl_group = 'ChatoraSidebarRow' })
+      end
+      if row_info.unread then
+        vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+          end_col = #UNREAD_BAR,
+          hl_group = 'ChatoraSidebarUnread',
+        })
+        vim.api.nvim_buf_set_extmark(buf, ns, row, #UNREAD_BAR, {
+          end_line = row + 1,
+          hl_group = 'ChatoraSidebarUnreadTitle',
+        })
+      end
+      if row_info.pin_width > 0 then
+        vim.api.nvim_buf_set_extmark(buf, ns, row, #UNREAD_BAR, {
+          end_col = #UNREAD_BAR + row_info.pin_width,
+          hl_group = 'ChatoraSidebarPin',
+        })
+      end
+      if row_info.icon then
+        -- Right-aligned so the save state never pushes titles around, and the
+        -- left edge stays reserved for the unread border.
+        vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+          virt_text = { { row_info.icon .. ' ', row_info.hl_group } },
+          virt_text_pos = 'right_align',
+        })
+      end
     end
   end
   vim.bo[buf].modifiable = false
@@ -420,21 +507,17 @@ local function fetch_whole(tab, cb)
   end)
 end
 
---- Fetch the next batch for the active tab (infinite scroll).
-function M.load_more()
-  local index = active
-  local tab = tabs[index]
-  if not (project and tab) then
-    return
-  end
-  local state = tab.state
+--- Fetch the next batch of `list`, which belongs to tab `index`, and draw it if that tab is
+--- still the one on screen.
+local function load_list(list, index)
+  local state = list.state
   if state.loading or state.exhausted then
     return
   end
 
-  if comes_whole(tab) then
+  if comes_whole(list) then
     state.loading = true
-    fetch_whole(tab, function(pages, why)
+    fetch_whole(list, function(pages, why)
       state.loading = false
       state.fetched = true
       state.exhausted = true
@@ -454,7 +537,7 @@ function M.load_more()
 
   -- Paging advances by pages *scanned*, not kept: an unread tab may drop most
   -- of a batch, and skipping by the kept count would re-fetch what it dropped.
-  local params = batch_params(tab, state.scanned)
+  local params = batch_params(list, state.scanned)
   if not params then
     return
   end
@@ -478,10 +561,41 @@ function M.load_more()
     if index == active then
       render()
       if not state.exhausted and #state.pages < MIN_ROWS then
-        M.load_more()
+        load_list(list, index)
       end
     end
   end)
+end
+
+--- Fetch what the active tab is missing (infinite scroll). In a tab of folders that is
+--- every open folder still without its first batch; once they all have one, the scroll
+--- reaching the bottom extends the last open folder, which is what the bottom belongs to.
+function M.load_more()
+  local index = active
+  local tab = tabs[index]
+  if not (project and tab) then
+    return
+  end
+  if not tab.folders then
+    load_list(tab, index)
+    return
+  end
+  local pending = false
+  for _, folder in ipairs(tab.folders) do
+    if folder.open and not folder.state.fetched then
+      load_list(folder, index)
+      pending = true
+    end
+  end
+  if pending then
+    return
+  end
+  for j = #tab.folders, 1, -1 do
+    if tab.folders[j].open then
+      load_list(tab.folders[j], index)
+      return
+    end
+  end
 end
 
 --- Pin one more tab, as an entry at the end of `sidebar_tabs` would.
@@ -507,6 +621,9 @@ function M.reload()
     return
   end
   for _, tab in ipairs(tabs) do
+    for _, list in ipairs(all_lists(tab)) do
+      list.state = new_state()
+    end
     tab.state = new_state()
   end
   render()
@@ -551,18 +668,14 @@ local function merge_head(fresh, existing)
   return merged
 end
 
---- Refetch the active tab's first batch and adopt it only if it differs. The
---- request is asynchronous and the redraw is skipped when nothing changed, so
---- an idle project costs nothing but one request per interval.
-function M.poll()
-  local index = active
-  local tab = tabs[index]
-  if not (project and tab and is_open()) or tab.state.loading then
+--- Refetch the first batch of `list` (of tab `index`) and adopt it only if it differs.
+local function poll_list(list, index)
+  local state = list.state
+  if state.loading then
     return
   end
-  if comes_whole(tab) then
-    fetch_whole(tab, function(fresh)
-      local state = tab.state
+  if comes_whole(list) then
+    fetch_whole(list, function(fresh)
       if not fresh or index ~= active or not is_open() then
         return
       end
@@ -575,7 +688,7 @@ function M.poll()
     end)
     return
   end
-  local params = batch_params(tab, 0)
+  local params = batch_params(list, 0)
   if not params then
     return
   end
@@ -584,7 +697,6 @@ function M.poll()
     if err or not result or result.ok == false or index ~= active or not is_open() then
       return
     end
-    local state = tab.state
     local fresh = result.pages or {}
     if head_signature(fresh, #fresh) == head_signature(state.pages, #fresh) then
       return
@@ -593,6 +705,20 @@ function M.poll()
     state.pages = merge_head(fresh, state.pages)
     keeping_view(render)
   end)
+end
+
+--- Refetch what the active tab shows. The requests are asynchronous and the redraw is
+--- skipped when nothing changed, so an idle project costs nothing but one request per
+--- list per interval.
+function M.poll()
+  local index = active
+  local tab = tabs[index]
+  if not (project and tab and is_open()) then
+    return
+  end
+  for _, list in ipairs(visible_lists(tab)) do
+    poll_list(list, index)
+  end
 end
 
 local function stop_polling()
@@ -673,11 +799,26 @@ end
 -- actions
 -- ---------------------------------------------------------------------------
 
+--- Open or close a folder, fetching its list the first time it opens.
+function M.toggle_folder(folder)
+  folder.open = not folder.open
+  render()
+  if folder.open then
+    M.load_more()
+  end
+end
+
+--- Open the page under the cursor, or open and close the folder under it.
 function M.open_current()
   if not (win and vim.api.nvim_win_is_valid(win)) then
     return
   end
   local lnum = vim.api.nvim_win_get_cursor(win)[1]
+  local folder = line_folders[lnum]
+  if folder then
+    M.toggle_folder(folder)
+    return
+  end
   local p = line_pages[lnum]
   if not p or not p.title then
     return
@@ -847,8 +988,10 @@ function M.open(proj, opts)
       -- A tab whose filter needs `me` can never query now. Settle it to its empty state
       -- rather than leaving a spinner running for a request that will not arrive.
       for _, tab in ipairs(tabs) do
-        if tab.filter == 'me' then
-          tab.state.fetched = true
+        for _, list in ipairs(all_lists(tab)) do
+          if list.filter == 'me' then
+            list.state.fetched = true
+          end
         end
       end
       render()

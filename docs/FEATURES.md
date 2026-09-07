@@ -565,6 +565,7 @@ sidebar_tabs = {
 | `link` | そのページにリンクしているページ（関連ページの 1 hop）に絞ります |
 | `pages` | 一覧を自分で作る関数です。下記 |
 | `unread` | 未読のページだけにします |
+| `folders` | タブの中をフォルダーに分けます。下記 |
 
 `filter` は `{ type = 'icon', value = 'sakura' }` の形でも書けます。`sidebar_tabs = false` で、
 タブなしの単一リストになります。知らないキーがあると、起動時にそう言います。
@@ -596,6 +597,18 @@ end },
 `chatora/search` は `{ project, query, mode = 'fulltext' | 'vector' }`、`chatora/listPages` は
 `{ project, skip, limit, filterType, filterValue }`、`chatora/relatedPages` は `{ project, title }`
 を受け取り、どれも `{ ok = true, pages = ... }`（relatedPages は `links1hop`）で返します。
+
+`folders` で、1 つのタブの中をフォルダーに分けられます。フォルダーには上のキーがそのまま書けて、
+見出しの行で `<CR>` すると開閉します。初めて開いたときに取りに行き、閉じたままのフォルダーは
+取りに行きません。`open = false` で閉じた状態から始まります。
+
+```lua
+{ name = 'custom', folders = {
+  { name = 'daily', icon = '📅', link = 'daily' },
+  { name = 'note', filter = 'note' },
+  { name = 'random', open = false, pages = function() return { 'ホーム', 'TODO' } end },
+} },
+```
 
 ## 連携
 
