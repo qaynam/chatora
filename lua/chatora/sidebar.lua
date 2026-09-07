@@ -77,7 +77,16 @@ local DEFAULT_TABS = {
 
 -- What a `sidebar_tabs` entry may say. A key outside this list is a typo the reader would
 -- otherwise only notice as a tab that lists everything.
-local TAB_KEYS = { label = true, name = true, icon = true, filter = true, link = true, unread = true, unread_only = true }
+local TAB_KEYS = {
+  label = true,
+  name = true,
+  icon = true,
+  filter = true,
+  link = true,
+  pages = true,
+  unread = true,
+  unread_only = true,
+}
 
 local tabs = {}
 local active = 1
@@ -130,6 +139,12 @@ local function build_tabs(keep_state)
         )
       end
     end
+    if spec.pages ~= nil and type(spec.pages) ~= 'function' then
+      vim.notify_once(
+        ('[chatora] sidebar_tabs の %d 番目の pages は関数にしてください'):format(i),
+        vim.log.levels.WARN
+      )
+    end
     local label = spec.label or spec.name or ('#' .. i)
     -- Same position *and* same label: a reordered or renamed tab is a different query,
     -- so its old pages would be the wrong ones to show.
@@ -139,6 +154,7 @@ local function build_tabs(keep_state)
       icon = spec.icon,
       filter = spec.filter,
       link = spec.link,
+      pages = type(spec.pages) == 'function' and spec.pages or nil,
       unread_only = (spec.unread_only or spec.unread) and true or nil,
       state = carried or new_state(),
     }
@@ -347,9 +363,50 @@ local function batch_params(tab, skip)
   }
 end
 
---- The pages linked with `tab.link`, newest first, or nil with a message. The related
---- list comes whole, so a link tab has no batches to page through.
-local function fetch_linked(tab, cb)
+--- A tab whose list comes whole rather than in batches: the related list of `link`, or
+--- whatever the reader's `pages` function hands over.
+local function comes_whole(tab)
+  return tab.link ~= nil or tab.pages ~= nil
+end
+
+--- Only rows the renderer can draw: a title each, in the order given.
+local function as_rows(list)
+  local rows = {}
+  for _, entry in ipairs(type(list) == 'table' and list or {}) do
+    if type(entry) == 'string' then
+      rows[#rows + 1] = { title = entry }
+    elseif type(entry) == 'table' and entry.title then
+      rows[#rows + 1] = entry
+    end
+  end
+  return rows
+end
+
+--- The whole list of `tab`, or nil with a message. A `pages` function may return the
+--- list or hand it to `done` later, whichever suits what it asks; the related list of
+--- `link` is sorted newest first, as the other tabs are.
+local function fetch_whole(tab, cb)
+  if tab.pages then
+    local finished = false
+    local done = function(list, why)
+      if finished then
+        return
+      end
+      finished = true
+      if list == nil then
+        cb(nil, why or 'pages が一覧を返しませんでした')
+      else
+        cb(as_rows(list))
+      end
+    end
+    local ok, ret = pcall(tab.pages, { project = project }, done)
+    if not ok then
+      done(nil, 'pages: ' .. tostring(ret))
+    elseif ret ~= nil then
+      done(ret)
+    end
+    return
+  end
   lsp.request('chatora/relatedPages', { project = project, title = tab.link }, function(err, result)
     if err or not result or result.ok == false then
       cb(nil, (result and result.message) or (err and tostring(err)) or 'request failed')
@@ -375,9 +432,9 @@ function M.load_more()
     return
   end
 
-  if tab.link then
+  if comes_whole(tab) then
     state.loading = true
-    fetch_linked(tab, function(pages, why)
+    fetch_whole(tab, function(pages, why)
       state.loading = false
       state.fetched = true
       state.exhausted = true
@@ -503,8 +560,8 @@ function M.poll()
   if not (project and tab and is_open()) or tab.state.loading then
     return
   end
-  if tab.link then
-    fetch_linked(tab, function(fresh)
+  if comes_whole(tab) then
+    fetch_whole(tab, function(fresh)
       local state = tab.state
       if not fresh or index ~= active or not is_open() then
         return

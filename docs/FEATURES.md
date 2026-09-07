@@ -563,6 +563,7 @@ sidebar_tabs = {
 | `icon` | 名前の前に付けます |
 | `filter` | web のフィルタと同じで、ページのタイトルを書きます。そのタイトルの `.icon` 記法を含むページと、その名前のユーザーが編集したページに絞ります。`'me'` は自分の保存済みフィルタで、無ければ自分の名前の icon です |
 | `link` | そのページにリンクしているページ（関連ページの 1 hop）に絞ります |
+| `pages` | 一覧を自分で作る関数です。下記 |
 | `unread` | 未読のページだけにします |
 
 `filter` は `{ type = 'icon', value = 'sakura' }` の形でも書けます。`sidebar_tabs = false` で、
@@ -573,6 +574,28 @@ sidebar_tabs = {
 ```lua
 require('chatora').add_tab({ label = 'sakura', filter = 'sakura' })
 ```
+
+`pages` に関数を渡すと、一覧の中身を自分で決められます。関数は `{ project = 'my-project' }` と
+`done` を受け取り、タイトルの並び（文字列か `{ title = ... }` のテーブル）を返すか、あとで
+`done(list)` に渡します。サーバーに聞くときは `require('chatora.lsp').request` が使えます。
+
+```lua
+-- 決まったページを並べる
+{ label = 'よく見る', pages = function()
+  return { 'ホーム', 'TODO', 'ロードマップ' }
+end },
+
+-- 全文検索の結果を並べる
+{ label = '#tag', pages = function(ctx, done)
+  require('chatora.lsp').request('chatora/search', { project = ctx.project, query = '#tag' }, function(_, res)
+    done(res and res.pages or {})
+  end)
+end },
+```
+
+`chatora/search` は `{ project, query, mode = 'fulltext' | 'vector' }`、`chatora/listPages` は
+`{ project, skip, limit, filterType, filterValue }`、`chatora/relatedPages` は `{ project, title }`
+を受け取り、どれも `{ ok = true, pages = ... }`（relatedPages は `links1hop`）で返します。
 
 ## 連携
 

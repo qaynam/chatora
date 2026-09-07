@@ -2496,6 +2496,50 @@ local ok, err = pcall(function()
     sidebar.select_tab(5)
     assert(listed[#listed] == 'icon=taro', 'and it queries like any other: ' .. vim.inspect(listed))
 
+    -- A `pages` function fills the tab itself: returning a list, or handing it to `done`
+    -- later, with plain titles accepted as rows.
+    local seen_ctx
+    require('chatora').add_tab({
+      name = '固定',
+      pages = function(ctx)
+        seen_ctx = ctx
+        return { 'ホーム', { title = 'TODO', updated = 3 } }
+      end,
+    })
+    sidebar.select_tab(6)
+    rows = vim.tbl_map(function(l)
+      return l:sub(2)
+    end, vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false))
+    assert(vim.deep_equal(rows, { 'ホーム', 'TODO' }), 'a pages function lists what it returns: ' .. vim.inspect(rows))
+    assert(seen_ctx and seen_ctx.project == 'proj', 'and is told the project: ' .. vim.inspect(seen_ctx))
+
+    local deliver
+    require('chatora').add_tab({
+      name = '遅れて',
+      pages = function(_, done)
+        deliver = done
+      end,
+    })
+    sidebar.select_tab(7)
+    rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    assert(rows[1]:find('読み込み中', 1, true), 'waiting on done: ' .. vim.inspect(rows))
+    deliver({ 'あとから' })
+    rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    assert(rows[1]:sub(2) == 'あとから', 'the list lands when done is called: ' .. vim.inspect(rows))
+    deliver({ '二度目' })
+    rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    assert(rows[1]:sub(2) == 'あとから', 'a second done is ignored: ' .. vim.inspect(rows))
+
+    require('chatora').add_tab({
+      name = '壊れた',
+      pages = function()
+        error('boom')
+      end,
+    })
+    sidebar.select_tab(8)
+    rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    assert(rows[1]:find('該当なし', 1, true) and warned[#warned]:find('boom', 1, true), 'an erroring function is reported: ' .. vim.inspect(warned))
+
     sidebar.close()
     config.options.sidebar_tabs = orig_tabs
     vim.notify = orig_notify
