@@ -1792,9 +1792,18 @@ local ok, err = pcall(function()
     end)
     assert(synced == false and #asked == 0, 'an untitled page is not synced')
 
+    -- Once the cursor leaves the first line, the buffer is named by it while still
+    -- untitled, and nothing is asked of the server for that.
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '新しいページ', '本文' })
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.cmd('doautocmd CursorMoved')
+    assert(
+      vim.api.nvim_buf_get_name(buf) == 'cosense://proj/新しいページ' and vim.b[buf].chatora_untitled and #asked == 0,
+      'the name follows the first line: ' .. vim.api.nvim_buf_get_name(buf) .. ' ' .. vim.inspect(asked)
+    )
+
     -- A title a page already has asks whether to fold this page into it; declining saves
     -- nothing and leaves the page as it was.
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '新しいページ', '本文' })
     exists = true
     answers = { 2 }
     vim.cmd('write')

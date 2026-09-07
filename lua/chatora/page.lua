@@ -483,7 +483,8 @@ local function name_untitled(bufnr)
     end
     return false
   end
-  if vim.fn.bufnr(new_uri) ~= -1 then
+  local other = vim.fn.bufnr(new_uri)
+  if other ~= -1 and other ~= bufnr then
     vim.notify(
       '[chatora] 「' .. title .. '」はもう別のバッファで開いています。別のタイトルにしてください',
       vim.log.levels.WARN
@@ -571,17 +572,21 @@ vim.api.nvim_create_autocmd('QuitPre', {
     if not vim.bo[ev.buf].modified or vim.v.exiting ~= vim.NIL then
       return
     end
-    local _, title = uri.parse(vim.api.nvim_buf_get_name(ev.buf))
-    local question = '未保存の変更があります: ' .. (title or '?')
-    if vim.b[ev.buf].chatora_untitled then
-      -- The stand-in name says nothing; the first line is what the page would be called.
-      local first = vim.trim(vim.api.nvim_buf_get_lines(ev.buf, 0, 1, false)[1] or '')
-      question = 'このページはまだ保存していません' .. (first ~= '' and (': ' .. first) or '')
+    -- Neovim asks on its own when the buffer would be abandoned: this :q exits (no other
+    -- window anywhere) or 'hidden' is off. Only a window closing over a buffer that stays
+    -- hidden, and modified, gets no question from it. That case is asked here, in Neovim's
+    -- own words, and "Yes" is the same :write as :w, questions included.
+    local exits = #vim.api.nvim_list_wins() == 1 and #vim.api.nvim_list_tabpages() == 1
+    if exits or not vim.o.hidden then
+      return
     end
-    local choice = vim.fn.confirm(question, '保存して閉じる(&W)\n保存せず閉じる(&D)\nキャンセル(&C)', 1)
+    local choice = vim.fn.confirm(
+      ('Save changes to "%s"?'):format(vim.api.nvim_buf_get_name(ev.buf)),
+      '&Yes\n&No\n&Cancel',
+      1,
+      'Question'
+    )
     if choice == 1 then
-      -- The same save as :w, questions included: a title another page has asks whether to
-      -- merge, and declining that leaves the page unsaved and open.
       vim.api.nvim_buf_call(ev.buf, function()
         vim.cmd('write')
       end)
@@ -641,6 +646,30 @@ local UNTITLED = '無題'
 --- Open an empty page for `project`, the way the web does: the reader writes the title on
 --- line 1 and the page comes to exist on the first save. Until then the buffer wears a
 --- stand-in name, since a `cosense://` URI cannot go without a title.
+--- Name an untitled buffer by its first line once the cursor has left it, keeping it
+--- untitled. Anything that names the buffer, Neovim's own "Save changes to ...?" first
+--- of all, then says the title rather than the stand-in.
+local function follow_title(bufnr)
+  if not vim.b[bufnr].chatora_untitled then
+    return
+  end
+  local winid = vim.fn.bufwinid(bufnr)
+  if winid == -1 or vim.api.nvim_win_get_cursor(winid)[1] == 1 then
+    return
+  end
+  local first = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ''
+  if vim.trim(first) == '' then
+    return
+  end
+  local project = uri.parse(vim.api.nvim_buf_get_name(bufnr))
+  local wanted = uri.format(project, first)
+  -- A buffer already holding that title keeps it; the save is what says so.
+  if vim.api.nvim_buf_get_name(bufnr) == wanted or vim.fn.bufnr(wanted) ~= -1 then
+    return
+  end
+  M.rename_buffer(bufnr, wanted)
+end
+
 function M.open_untitled(project, target_win)
   if target_win and vim.api.nvim_win_is_valid(target_win) then
     vim.api.nvim_set_current_win(target_win)
@@ -656,6 +685,13 @@ function M.open_untitled(project, target_win)
   prepare_buffer(bufnr)
   vim.api.nvim_win_set_buf(0, bufnr)
   finalize_buffer(bufnr, project, title)
+  vim.api.nvim_create_autocmd({ 'CursorMoved', 'InsertLeave' }, {
+    group = vim.api.nvim_create_augroup('ChatoraUntitled' .. bufnr, { clear = true }),
+    buffer = bufnr,
+    callback = function()
+      follow_title(bufnr)
+    end,
+  })
   vim.cmd('startinsert')
 end
 
