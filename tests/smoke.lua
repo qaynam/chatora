@@ -2467,7 +2467,7 @@ local ok, err = pcall(function()
     config.options.sidebar_tabs = {
       { name = 'All', icon = '📖' },
       { name = 'sakura', filter = 'sakura' },
-      { label = 'リンク', link = 'ロードマップ' },
+      { label = 'リンク', related = 'ロードマップ' },
       { name = 'typo', colour = 'red' },
     }
 
@@ -2492,7 +2492,7 @@ local ok, err = pcall(function()
     assert(vim.deep_equal(rows, { '新しい方', '古い方' }), 'newest first: ' .. vim.inspect(rows))
 
     -- Several titles make one list, a page linked from two of them appearing once.
-    require('chatora').add_tab({ name = '合わせて', link = { 'ロードマップ', 'memo' } })
+    require('chatora').add_tab({ name = '合わせて', related = { 'ロードマップ', 'memo' } })
     sidebar.select_tab(5)
     rows = vim.tbl_map(function(l)
       return l:sub(2)
@@ -2524,6 +2524,26 @@ local ok, err = pcall(function()
     assert(vim.deep_equal(rows, { 'ホーム', 'TODO' }), 'a pages function lists what it returns: ' .. vim.inspect(rows))
     assert(seen_ctx and seen_ctx.project == 'proj', 'and is told the project: ' .. vim.inspect(seen_ctx))
 
+    -- A row with an `action` runs it instead of opening a page, in the editor window.
+    local acted
+    require('chatora').add_tab({
+      name = '自前',
+      pages = function()
+        return {
+          { title = 'メモ帳', action = function(row, target)
+            acted = { row.title, target }
+          end },
+        }
+      end,
+    })
+    sidebar.select_tab(8)
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+    sidebar.open_current()
+    assert(
+      acted and acted[1] == 'メモ帳' and acted[2] ~= win and vim.api.nvim_win_is_valid(acted[2]),
+      'the action runs with the row and an editor window: ' .. vim.inspect(acted)
+    )
+
     local deliver
     require('chatora').add_tab({
       name = '遅れて',
@@ -2531,7 +2551,7 @@ local ok, err = pcall(function()
         deliver = done
       end,
     })
-    sidebar.select_tab(8)
+    sidebar.select_tab(9)
     rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
     assert(rows[1]:find('読み込み中', 1, true), 'waiting on done: ' .. vim.inspect(rows))
     deliver({ 'あとから' })
@@ -2547,7 +2567,7 @@ local ok, err = pcall(function()
         error('boom')
       end,
     })
-    sidebar.select_tab(9)
+    sidebar.select_tab(10)
     rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
     assert(rows[1]:find('該当なし', 1, true) and warned[#warned]:find('boom', 1, true), 'an erroring function is reported: ' .. vim.inspect(warned))
 
@@ -2558,14 +2578,14 @@ local ok, err = pcall(function()
     require('chatora').add_tab({
       name = 'custom',
       folders = {
-        { name = 'daily', icon = '📅', link = 'daily' },
+        { name = 'daily', icon = '📅', related = 'daily' },
         { name = 'note', filter = 'note', open = false },
         { name = 'fixed', pages = function()
           return { '固定' }
         end },
       },
     })
-    sidebar.select_tab(10)
+    sidebar.select_tab(11)
     local function lines()
       return vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
     end
@@ -2586,7 +2606,7 @@ local ok, err = pcall(function()
     sidebar.open_current()
     sidebar.close()
     sidebar.open('proj')
-    sidebar.select_tab(10)
+    sidebar.select_tab(11)
     assert(lines()[1] == '▸ 📅 daily', 'a folder the reader closed stays closed when the sidebar reopens: ' .. vim.inspect(lines()))
 
     sidebar.close()

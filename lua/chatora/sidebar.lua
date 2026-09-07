@@ -84,7 +84,7 @@ local LIST_KEYS = {
   name = true,
   icon = true,
   filter = true,
-  link = true,
+  related = true,
   pages = true,
   unread = true,
   unread_only = true,
@@ -129,7 +129,7 @@ local function make_list(spec, keys, where, fallback_label, prior)
   for key in pairs(spec) do
     if not keys[key] then
       vim.notify_once(
-        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, filter, link, pages, unread%s）'):format(
+        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, filter, related, pages, unread%s）'):format(
           where,
           key,
           keys.folders and ', folders' or ', open'
@@ -141,8 +141,11 @@ local function make_list(spec, keys, where, fallback_label, prior)
   if spec.pages ~= nil and type(spec.pages) ~= 'function' then
     vim.notify_once(('[chatora] %sの pages は関数にしてください'):format(where), vim.log.levels.WARN)
   end
-  if spec.link ~= nil and type(spec.link) ~= 'string' and type(spec.link) ~= 'table' then
-    vim.notify_once(('[chatora] %sの link はページのタイトルか、その並びにしてください'):format(where), vim.log.levels.WARN)
+  if spec.related ~= nil and type(spec.related) ~= 'string' and type(spec.related) ~= 'table' then
+    vim.notify_once(
+      ('[chatora] %sの related はページのタイトルか、その並びにしてください'):format(where),
+      vim.log.levels.WARN
+    )
   end
   local label = spec.label or spec.name or fallback_label
   local carried = prior ~= nil and prior.label == label and prior or nil
@@ -150,7 +153,7 @@ local function make_list(spec, keys, where, fallback_label, prior)
     label = label,
     icon = spec.icon,
     filter = spec.filter,
-    link = (type(spec.link) == 'string' or type(spec.link) == 'table') and spec.link or nil,
+    related = (type(spec.related) == 'string' or type(spec.related) == 'table') and spec.related or nil,
     pages = type(spec.pages) == 'function' and spec.pages or nil,
     unread_only = (spec.unread_only or spec.unread) and true or nil,
     state = carried and carried.state or new_state(),
@@ -453,10 +456,10 @@ local function batch_params(tab, skip)
   }
 end
 
---- A tab whose list comes whole rather than in batches: the related list of `link`, or
+--- A tab whose list comes whole rather than in batches: the related pages of a title, or
 --- whatever the reader's `pages` function hands over.
 local function comes_whole(tab)
-  return tab.link ~= nil or tab.pages ~= nil
+  return tab.related ~= nil or tab.pages ~= nil
 end
 
 --- Only rows the renderer can draw: a title each, in the order given.
@@ -508,8 +511,8 @@ local function fetch_linked(titles, cb)
 end
 
 --- The whole list of `tab`, or nil with a message. A `pages` function may return the
---- list or hand it to `done` later, whichever suits what it asks; the related list of
---- `link` is sorted newest first, as the other tabs are.
+--- list or hand it to `done` later, whichever suits what it asks; the related pages of
+--- a title come newest first, as the other tabs are.
 local function fetch_whole(tab, cb)
   if tab.pages then
     local finished = false
@@ -532,7 +535,7 @@ local function fetch_whole(tab, cb)
     end
     return
   end
-  fetch_linked(type(tab.link) == 'table' and tab.link or { tab.link }, cb)
+  fetch_linked(type(tab.related) == 'table' and tab.related or { tab.related }, cb)
 end
 
 --- Fetch the next batch of `list`, which belongs to tab `index`, and draw it if that tab is
@@ -836,7 +839,8 @@ function M.toggle_folder(folder)
   end
 end
 
---- Open the page under the cursor, or open and close the folder under it.
+--- Open what is under the cursor: a page, a folder (opened or closed), or a row that
+--- brought its own `action`, which runs in the editor window instead of opening a page.
 function M.open_current()
   if not (win and vim.api.nvim_win_is_valid(win)) then
     return
@@ -852,6 +856,10 @@ function M.open_current()
     return
   end
   local target = ensure_editor_win()
+  if type(p.action) == 'function' then
+    p.action(p, target)
+    return
+  end
   page.open(project, p.title, target)
 end
 

@@ -553,7 +553,7 @@ sidebar_tabs = {
   { label = 'すべて', icon = '📖' },
   { label = '未読', icon = '📩', filter = 'me', unread = true },
   { label = 'sakura', filter = 'sakura' },
-  { label = 'ロードマップ', link = 'ロードマップ' },
+  { label = 'ロードマップ', related = 'ロードマップ' },
 }
 ```
 
@@ -562,7 +562,7 @@ sidebar_tabs = {
 | `label` | タブの名前です。`name` でも書けます |
 | `icon` | 名前の前に付けます |
 | `filter` | web のフィルタと同じで、ページのタイトルを書きます。そのタイトルの `.icon` 記法を含むページと、その名前のユーザーが編集したページに絞ります。`'me'` は自分の保存済みフィルタで、無ければ自分の名前の icon です |
-| `link` | そのページにリンクしているページ（関連ページの 1 hop）に絞ります。`{ 'daily', 'memo' }` のように並びで書くと、合わせて 1 つの一覧にします |
+| `related` | そのページの関連ページ（ページの下に出る「関連ページ」と同じで、リンクでつながった 1 hop）を並べます。`{ 'daily', 'memo' }` のように並びで書くと、合わせて 1 つの一覧にします |
 | `pages` | 一覧を自分で作る関数です。下記 |
 | `unread` | 未読のページだけにします |
 | `folders` | タブの中をフォルダーに分けます。下記 |
@@ -594,6 +594,20 @@ end },
 end },
 ```
 
+行に `action` を持たせると、`<CR>` でページを開く代わりにその関数を呼びます。引数はその行と、
+開き先にするウィンドウです。Cosense と関係ないものを並べるのはこれでできます。
+
+```lua
+{ label = 'メモ帳', pages = function()
+  return {
+    { title = 'today.md', action = function(_, win)
+      vim.api.nvim_set_current_win(win)
+      vim.cmd.edit(vim.fn.expand('~/notes/today.md'))
+    end },
+  }
+end },
+```
+
 `chatora/search` は `{ project, query, mode = 'fulltext' | 'vector' }`、`chatora/listPages` は
 `{ project, skip, limit, filterType, filterValue }`、`chatora/relatedPages` は `{ project, title }`
 を受け取り、どれも `{ ok = true, pages = ... }`（relatedPages は `links1hop`）で返します。
@@ -604,7 +618,7 @@ end },
 
 ```lua
 { name = 'custom', folders = {
-  { name = 'daily', icon = '📅', link = 'daily' },
+  { name = 'daily', icon = '📅', related = 'daily' },
   { name = 'note', filter = 'note' },
   { name = 'random', open = false, pages = function() return { 'ホーム', 'TODO' } end },
 } },
