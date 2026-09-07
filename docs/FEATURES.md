@@ -576,11 +576,17 @@ sidebar_tabs = {
 require('chatora').add_tab({ label = 'sakura', filter = 'sakura' })
 ```
 
-`pages` に関数を渡すと、一覧の中身を自分で決められます。関数は `{ project = 'my-project' }` と
-`done` を受け取り、タイトルの並び（文字列か `{ title = ... }` のテーブル）を返すか、あとで
-`done(list)` に渡します。`done` は `vim.system` のコールバックの中から呼んでも構いません。
-サーバーに聞くときは `require('chatora.lsp').request` が使えます。決まった並びなら、関数の
-代わりにその並びをそのまま書けます。
+`pages` に関数を渡すと、一覧の中身を自分で決められます。関数は `ctx` を 1 つ受け取り、タイトルの
+並び（文字列か `{ title = ... }` のテーブル）を `return` するか、あとで `ctx.done(list)` に渡します。
+どちらか一方で、両方したら `return` が勝ちます。`ctx.done` は `vim.system` のコールバックの中から
+呼んでも構いません。サーバーに聞くときは `require('chatora.lsp').request` が使えます。決まった
+並びなら、関数の代わりにその並びをそのまま書けます。
+
+| `ctx` のキー | 意味 |
+|---|---|
+| `project` | 今のプロジェクト名 |
+| `done(list)` | 非同期に結果を渡す。`done(nil, '理由')` で失敗を伝える |
+| `log(...)` | 下記 |
 
 書いている途中の様子は `ctx.log(...)` で見られます。どこから呼んでも安全で、`:messages` に出て、
 `:Chatora log`（`log = true` のとき）にもサーバーの記録と並んで残ります。`vim.system` の
@@ -593,9 +599,9 @@ require('chatora').add_tab({ label = 'sakura', filter = 'sakura' })
 end },
 
 -- 全文検索の結果を並べる
-{ label = '#tag', pages = function(ctx, done)
+{ label = '#tag', pages = function(ctx)
   require('chatora.lsp').request('chatora/search', { project = ctx.project, query = '#tag' }, function(_, res)
-    done(res and res.pages or {})
+    ctx.done(res and res.pages or {})
   end)
 end },
 ```
@@ -624,11 +630,11 @@ end },
 書けば入れ子になり、深さに応じて字下げして出ます。
 
 `folders` には関数も渡せます。`pages` と同じ形で、フォルダーの並び（上と同じ書き方のテーブル）を
-返すか `done` に渡すと、それがフォルダーになります。外の API から木を組み立てるのはこれで
+返すか `ctx.done` に渡すと、それがフォルダーになります。外の API から木を組み立てるのはこれで
 できます。`R` で読み込み直すと、この関数も呼び直します。
 
 ```lua
-{ name = 'kanban', folders = function(_, done)
+{ name = 'kanban', folders = function(ctx)
   vim.system({ 'curl', '-s', 'https://example.com/api/projects' }, { text = true }, function(out)
     local folders = {}
     for _, p in ipairs(vim.json.decode(out.stdout).projects) do
@@ -637,7 +643,7 @@ end },
         { name = 'done', pages = p.done, open = false },
       } }
     end
-    done(folders)
+    ctx.done(folders)
   end)
 end },
 ```

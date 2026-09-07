@@ -195,11 +195,12 @@ local function make_logger(label)
   end
 end
 
---- Run `fn(ctx, done)`, the reader's own source of rows or folders. It may return the
---- result, or hand it to `done` later, from wherever it likes: a `done` called off the main
+--- Run `fn(ctx)`, the reader's own source of rows or folders. It may return the result,
+--- or hand it to `ctx.done` later, from wherever it likes: a `done` called off the main
 --- loop (a vim.system callback, say) is brought back onto it. `cb` runs once, with the
 --- result or with nil and why, and never inside `fn` itself, so what is done with the
---- result cannot be mistaken for the function's own error.
+--- result cannot be mistaken for the function's own error. Everything the function is
+--- given rides on `ctx`, so a later addition never changes its arguments.
 local function call_source(fn, what, label, cb)
   local finished, returned, held = false, false, nil
   local function settle(value, why)
@@ -225,7 +226,7 @@ local function call_source(fn, what, label, cb)
     end
   end
   local ok, ret = xpcall(function()
-    return fn({ project = project, log = make_logger(label) }, done)
+    return fn({ project = project, log = make_logger(label), done = done })
   end, function(e)
     -- Where it broke, since an error out of a C function (table.sort, say) names no line.
     return debug.traceback(tostring(e), 2)

@@ -2555,8 +2555,8 @@ local ok, err = pcall(function()
     local deliver
     require('chatora').add_tab({
       name = '遅れて',
-      pages = function(_, done)
-        deliver = done
+      pages = function(ctx)
+        deliver = ctx.done
       end,
     })
     sidebar.select_tab(9)
@@ -2635,9 +2635,9 @@ local ok, err = pcall(function()
     local deliver_folders, folder_asks = nil, 0
     require('chatora').add_tab({
       name = 'dyn',
-      folders = function(_, done)
+      folders = function(ctx)
         folder_asks = folder_asks + 1
-        deliver_folders = done
+        deliver_folders = ctx.done
       end,
     })
     sidebar.select_tab(12)
@@ -2653,12 +2653,12 @@ local ok, err = pcall(function()
     -- `done` called off the main loop (a vim.system callback, say) still lands.
     require('chatora').add_tab({
       name = 'later',
-      pages = function(ctx, done)
+      pages = function(ctx)
         local timer = vim.uv.new_timer()
         timer:start(0, 0, function()
           timer:close()
           ctx.log('got', { n = 1 })
-          done({ 'x' })
+          ctx.done({ 'x' })
         end)
       end,
     })
