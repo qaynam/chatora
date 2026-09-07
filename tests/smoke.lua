@@ -2650,6 +2650,14 @@ local ok, err = pcall(function()
     sidebar.reload()
     assert(folder_asks == 2 and lines()[1] == '▾ p1', 'a reload asks the function again, keeping what it had meanwhile: ' .. vim.inspect(lines()))
 
+    -- A row written with `name` instead of `title` is dropped, and said.
+    require('chatora').add_tab({ name = '取り違え', pages = { { name = 'x' } } })
+    sidebar.select_tab(13)
+    assert(
+      lines()[1]:find('該当なし', 1, true) and warned[#warned]:find('取り違え: pages の要素に title がありません', 1, true),
+      'a row without a title is called out: ' .. vim.inspect(warned[#warned])
+    )
+
     -- `done` called off the main loop (a vim.system callback, say) still lands.
     require('chatora').add_tab({
       name = 'later',
@@ -2662,7 +2670,7 @@ local ok, err = pcall(function()
         end)
       end,
     })
-    sidebar.select_tab(13)
+    sidebar.select_tab(14)
     assert(
       vim.wait(1000, function()
         return lines()[1] == ' x'

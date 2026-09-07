@@ -613,14 +613,21 @@ local function comes_whole(tab)
   return tab.related ~= nil or tab.pages ~= nil
 end
 
---- Only rows the renderer can draw: a title each, in the order given.
-local function as_rows(list)
+--- Only rows the renderer can draw: a title each, in the order given. A table without one
+--- is said out loud, since a row is keyed by `title` while a folder is keyed by `name`,
+--- and the one is easily written for the other.
+local function as_rows(list, label)
   local rows = {}
   for _, entry in ipairs(type(list) == 'table' and list or {}) do
     if type(entry) == 'string' then
       rows[#rows + 1] = { title = entry }
     elseif type(entry) == 'table' and entry.title then
       rows[#rows + 1] = entry
+    elseif type(entry) == 'table' then
+      vim.notify_once(
+        ('[chatora] %s: pages の要素に title がありません（行は title、フォルダーは name です）'):format(label),
+        vim.log.levels.WARN
+      )
     end
   end
   return rows
@@ -670,7 +677,7 @@ local function fetch_whole(tab, cb)
       if list == nil then
         cb(nil, why)
       else
-        cb(as_rows(list))
+        cb(as_rows(list, tab.label))
       end
     end)
     return
