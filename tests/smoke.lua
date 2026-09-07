@@ -2729,7 +2729,11 @@ local ok, err = pcall(function()
       config.options.sidebar_thumbnails, config.options.images, config.options.sidebar_tabs
     config.options.sidebar_thumbnails = true
     config.options.images = 'auto'
-    config.options.sidebar_tabs = { { name = 'a' }, { name = 'b', filter = 'x' } }
+    config.options.sidebar_tabs = {
+      { name = 'a' },
+      { name = 'b', filter = 'x' },
+      { name = 'c', folders = { { name = 'f', image = '~/f.png', pages = { { title = 'r', image = '/tmp/r.png' } } } } },
+    }
 
     local placed, closed, fetched = {}, {}, {}
     images.backend = function()
@@ -2753,6 +2757,9 @@ local ok, err = pcall(function()
       if method == 'chatora/fetchAsset' then
         fetched[#fetched + 1] = { url = params.url, thumb = params.thumb }
         cb(nil, { ok = true, path = '/tmp/' .. params.url:match('[^/]+$') })
+      elseif method == 'chatora/thumbnailFile' then
+        fetched[#fetched + 1] = { path = params.path, size = params.size }
+        cb(nil, { ok = true, path = '/tmp/cut-' .. params.path:match('[^/]+$') })
       else
         cb('no client', nil)
       end
@@ -2818,6 +2825,22 @@ local ok, err = pcall(function()
     end)
     vim.api.nvim_exec_autocmds('WinScrolled', { pattern = tostring(win) })
     assert(#placed > before_scroll, 'scrolling places the rows that came on screen: ' .. #placed)
+
+    -- A row or folder of the reader's own carries `image`, a URL or a path on this machine;
+    -- a path goes to the server as a file to cut, not a URL to fetch.
+    sidebar.select_tab(3)
+    local shown = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert(vim.deep_equal(shown, { '▾     f', '     r' }), 'a folder header leaves the same room: ' .. vim.inspect(shown))
+    local header, row = placed[#placed - 1], placed[#placed]
+    assert(
+      header.path == '/tmp/cut-f.png' and header.byte_col == #'▾ ' and header.screen_col == 1,
+      'the folder picture sits after the glyph: ' .. vim.inspect(header)
+    )
+    assert(row.path == '/tmp/cut-r.png' and row.byte_col == 1 and row.screen_col == 1, 'the row picture after the bar: ' .. vim.inspect(row))
+    assert(
+      fetched[#fetched].path == '/tmp/r.png' and fetched[#fetched].size == 64 and fetched[#fetched - 1].path == vim.fn.expand('~/f.png'),
+      'paths are expanded and cut as files: ' .. vim.inspect({ fetched[#fetched - 1], fetched[#fetched] })
+    )
 
     sidebar.close()
     assert(#closed == #placed, 'closing the sidebar takes every picture down: ' .. #closed .. ' of ' .. #placed)

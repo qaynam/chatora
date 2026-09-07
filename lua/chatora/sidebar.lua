@@ -100,6 +100,7 @@ local LIST_KEYS = {
   mine = true,
   related = true,
   pages = true,
+  image = true,
   unread = true,
   unread_only = true,
   open = true,
@@ -143,7 +144,7 @@ local function make_list(spec, where, fallback_label, prior)
   for key in pairs(spec) do
     if not LIST_KEYS[key] then
       vim.notify_once(
-        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, filter, mine, related, pages, unread, open, folders）'):format(
+        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, image, filter, mine, related, pages, unread, open, folders）'):format(
           where,
           key
         ),
@@ -182,6 +183,7 @@ local function make_list(spec, where, fallback_label, prior)
     label = label,
     where = where,
     icon = spec.icon,
+    image = type(spec.image) == 'string' and spec.image ~= '' and spec.image or nil,
     filter = spec.filter ~= 'me' and spec.filter or nil,
     mine = (spec.mine == true or spec.filter == 'me') and true or nil,
     related = (type(spec.related) == 'string' or type(spec.related) == 'table') and spec.related or nil,
@@ -481,7 +483,7 @@ local function sync_thumbs()
           return
         end
         entry.close = placement.close
-      end, { thumb = THUMB_PX, cells = THUMB_CELLS, screen_col = 1, conceal = true })
+      end, { thumb = THUMB_PX, cells = THUMB_CELLS, screen_col = wanted.screen_col, conceal = true })
     end
   end
 end
@@ -551,7 +553,8 @@ function render()
       hl_group = hl_group,
       pin_at = #bar + #pad + #indent,
       pin_width = pinned and #PIN_MARK or 0,
-      thumb = pad ~= '' and type(p.image) == 'string' and p.image ~= '' and { url = p.image, col = #bar } or nil,
+      thumb = pad ~= '' and type(p.image) == 'string' and p.image ~= '' and { url = p.image, col = #bar, screen_col = 1 }
+        or nil,
     }
     line_pages[#lines] = p
   end
@@ -561,11 +564,13 @@ function render()
   end
   local function add_folder(folder, depth)
     local indent = string.rep('  ', depth)
-    lines[#lines + 1] = indent
-      .. (folder.open and FOLDER_OPEN or FOLDER_CLOSED)
-      .. (folder.icon and (folder.icon .. ' ') or '')
-      .. folder.label
-    rows[#rows + 1] = { folder = true }
+    local glyph = folder.open and FOLDER_OPEN or FOLDER_CLOSED
+    lines[#lines + 1] = indent .. glyph .. pad .. (folder.icon and (folder.icon .. ' ') or '') .. folder.label
+    rows[#rows + 1] = {
+      folder = true,
+      thumb = pad ~= '' and folder.image and { url = folder.image, col = #indent + #glyph, screen_col = #indent + 1 }
+        or nil,
+    }
     line_folders[#lines] = folder
     if not folder.open then
       return

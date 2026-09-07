@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { Credential } from '@chatora/core'
 import { CredentialStore, HttpClient } from '@chatora/core'
 import { Effect, Layer, Option, TestClock, TestContext } from 'effect'
-import { type AssetCache, AssetCacheLive, composeAssets, fetchAsset } from './assets'
+import { type AssetCache, AssetCacheLive, composeAssets, fetchAsset, thumbnailFile } from './assets'
 import { makeSessionStateLayer, type SessionState } from './state'
 
 const ORIGIN = 'https://scrapbox.io'
@@ -277,6 +277,29 @@ describe('fetchAsset', () => {
         ])
         // ImageMagick 6 prints "false", 7 prints "False".
         expect(opaque.stdout.toString().trim().toLowerCase()).toBe('false')
+      },
+    )
+
+    test.skipIf(magickCmd === undefined)(
+      'a picture on disk is cut the same way, by its path',
+      async () => {
+        const dir = mkdtempSync(join(tmpdir(), 'chatora-thumb-'))
+        const file = join(dir, 'local.png')
+        Bun.spawnSync([magickCmd as string, '-size', '300x220', 'xc:blue', file])
+        try {
+          const result = await Effect.runPromise(thumbnailFile({ path: file, size: 64 }))
+          expect(result.ok).toBe(true)
+          if (!result.ok) return
+          expect([result.width, result.height]).toEqual([64, 64])
+          const missing = await Effect.runPromise(
+            thumbnailFile({ path: join(dir, 'none.png'), size: 64 }),
+          )
+          expect(missing.ok).toBe(false)
+          const relative = await Effect.runPromise(thumbnailFile({ path: 'local.png', size: 64 }))
+          expect(relative.ok).toBe(false)
+        } finally {
+          rmSync(dir, { recursive: true, force: true })
+        }
       },
     )
 

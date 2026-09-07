@@ -736,13 +736,19 @@ function M.place_one(bufnr, project, url, row, col, on_placed, opts)
     draw(cached)
     return
   end
-  lsp.request('chatora/fetchAsset', { project = project, url = url, thumb = opts.thumb }, function(err, result)
+  local function got(err, result)
     if err or not result or result.ok == false then
       return
     end
     path_by_key[key] = result.path
     draw(result.path)
-  end)
+  end
+  -- A path names a picture on this machine, which only the reader's own config can do.
+  if opts.thumb and (url:sub(1, 1) == '/' or url:sub(1, 1) == '~') then
+    lsp.request('chatora/thumbnailFile', { path = vim.fn.expand(url), size = opts.thumb }, got)
+    return
+  end
+  lsp.request('chatora/fetchAsset', { project = project, url = url, thumb = opts.thumb }, got)
 end
 
 --- Throw the current placements away so the next refresh draws them again. Needed when

@@ -666,6 +666,15 @@ end },
 画像の描画バックエンド（image.nvim / snacks.nvim）が無いときは何も出ません。ImageMagick が
 無いときは切らずにそのまま置きます。
 
+自分で作った行やフォルダーにも `image` を持たせられます。URL のほか、`~/notes/x.png` のような
+このマシンのファイルのパスも書けます。
+
+```lua
+{ name = 'obsidian', image = '~/Pictures/obsidian.png', pages = function()
+  return { { title = 'today.md', image = '~/notes/today.png', action = ... } }
+end },
+```
+
 ## 連携
 
 ### telescope

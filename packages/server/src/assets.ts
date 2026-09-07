@@ -3,7 +3,8 @@
 // into a network call; what happens to the bytes afterwards lives in assetStore.ts (disk),
 // imageTools.ts (ImageMagick) and assetCache.ts (what the session remembers).
 
-import { join } from 'node:path'
+import { stat } from 'node:fs/promises'
+import { isAbsolute, join } from 'node:path'
 import type { Credential, HttpClientShape } from '@chatora/core'
 import { HttpClient } from '@chatora/core'
 import { Data, Effect, Option } from 'effect'
@@ -328,6 +329,36 @@ export const fetchAsset = (params: {
     )
     const cut = yield* applyThumb(cacheDir, hash, drawable, params.thumb)
     return yield* withSize(yield* applyBorder(cacheDir, hash, cut, border))
+  })
+
+// ---------------------------------------------------------------------------
+// chatora/thumbnailFile
+// ---------------------------------------------------------------------------
+
+/**
+ * A square cut of a picture on this machine, for a row the reader's own config names with
+ * a path instead of a URL. Kept apart from `fetchAsset` so that page content, which is
+ * untrusted, never gets to name a local file: only the sidebar sends this. The cut is
+ * cached under the path and the file's modification time, so an edited picture is cut
+ * again and an unchanged one is not.
+ */
+export const thumbnailFile = (params: {
+  readonly path: string
+  readonly size: number
+}): Effect.Effect<FetchAssetResult> =>
+  Effect.gen(function* () {
+    if (!isAbsolute(params.path)) return err('error', '画像のパスは絶対パスで書いてください')
+    const info = yield* Effect.tryPromise(() => stat(params.path)).pipe(
+      Effect.orElseSucceed(() => undefined),
+    )
+    if (info === undefined || !info.isFile())
+      return err('error', `画像がありません: ${params.path}`)
+    const size = yield* measure(params.path)
+    if (size === undefined) return err('error', `画像として読めません: ${params.path}`)
+    const cacheDir = resolveCacheDir()
+    const hash = cacheKey(`file:${params.path}\0${info.mtimeMs}`)
+    const cut = yield* thumbnail(cacheDir, hash, params.path, params.size)
+    return yield* withSize({ ok: true as const, path: cut })
   })
 
 // ---------------------------------------------------------------------------

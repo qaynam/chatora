@@ -26,6 +26,7 @@ import {
   composeAssets,
   fetchAsset,
   type GalleryTile,
+  thumbnailFile,
 } from './assets'
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
@@ -368,6 +369,9 @@ connection.onRequest(
   'chatora/fetchAsset',
   (params: { project: string; url: string; border?: BorderParams; thumb?: number }) =>
     runtime.runPromise(fetchAsset(params)),
+)
+connection.onRequest('chatora/thumbnailFile', (params: { path: string; size: number }) =>
+  runtime.runPromise(thumbnailFile(params)),
 )
 connection.onRequest(
   'chatora/composeAssets',
