@@ -578,7 +578,9 @@ require('chatora').add_tab({ label = 'sakura', filter = 'sakura' })
 
 `pages` に関数を渡すと、一覧の中身を自分で決められます。関数は `{ project = 'my-project' }` と
 `done` を受け取り、タイトルの並び（文字列か `{ title = ... }` のテーブル）を返すか、あとで
-`done(list)` に渡します。サーバーに聞くときは `require('chatora.lsp').request` が使えます。
+`done(list)` に渡します。`done` は `vim.system` のコールバックの中から呼んでも構いません。
+サーバーに聞くときは `require('chatora.lsp').request` が使えます。決まった並びなら、関数の
+代わりにその並びをそのまま書けます。
 
 ```lua
 -- 決まったページを並べる
@@ -616,6 +618,25 @@ end },
 見出しの行で `<CR>` すると開閉します。初めて開いたときに取りに行き、閉じたままのフォルダーは
 取りに行きません。`open = false` で閉じた状態から始まります。フォルダーの中にさらに `folders` を
 書けば入れ子になり、深さに応じて字下げして出ます。
+
+`folders` には関数も渡せます。`pages` と同じ形で、フォルダーの並び（上と同じ書き方のテーブル）を
+返すか `done` に渡すと、それがフォルダーになります。外の API から木を組み立てるのはこれで
+できます。`R` で読み込み直すと、この関数も呼び直します。
+
+```lua
+{ name = 'kanban', folders = function(_, done)
+  vim.system({ 'curl', '-s', 'https://example.com/api/projects' }, { text = true }, function(out)
+    local folders = {}
+    for _, p in ipairs(vim.json.decode(out.stdout).projects) do
+      folders[#folders + 1] = { name = p.title, folders = {
+        { name = 'todo', pages = p.todo },   -- タイトルの並び
+        { name = 'done', pages = p.done, open = false },
+      } }
+    end
+    done(folders)
+  end)
+end },
+```
 
 ```lua
 { name = 'custom', folders = {

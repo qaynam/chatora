@@ -137,8 +137,11 @@ local function make_list(spec, where, fallback_label, prior)
       )
     end
   end
-  if spec.pages ~= nil and type(spec.pages) ~= 'function' then
-    vim.notify_once(('[chatora] %sの pages は関数にしてください'):format(where), vim.log.levels.WARN)
+  if spec.pages ~= nil and type(spec.pages) ~= 'function' and type(spec.pages) ~= 'table' then
+    vim.notify_once(('[chatora] %sの pages は関数か一覧にしてください'):format(where), vim.log.levels.WARN)
+  end
+  if spec.folders ~= nil and type(spec.folders) ~= 'function' and type(spec.folders) ~= 'table' then
+    vim.notify_once(('[chatora] %sの folders は関数か一覧にしてください'):format(where), vim.log.levels.WARN)
   end
   if spec.related ~= nil and type(spec.related) ~= 'string' and type(spec.related) ~= 'table' then
     vim.notify_once(
@@ -148,21 +151,89 @@ local function make_list(spec, where, fallback_label, prior)
   end
   local label = spec.label or spec.name or fallback_label
   local carried = prior ~= nil and prior.label == label and prior or nil
+  local pages = spec.pages
+  if type(pages) == 'table' then
+    local fixed = pages
+    pages = function()
+      return fixed
+    end
+  end
   return {
     label = label,
+    where = where,
     icon = spec.icon,
     filter = spec.filter,
     related = (type(spec.related) == 'string' or type(spec.related) == 'table') and spec.related or nil,
-    pages = type(spec.pages) == 'function' and spec.pages or nil,
+    pages = type(pages) == 'function' and pages or nil,
     unread_only = (spec.unread_only or spec.unread) and true or nil,
     state = carried and carried.state or new_state(),
     carried = carried,
   }
 end
 
+--- Run `fn(ctx, done)`, the reader's own source of rows or folders. It may return the
+--- result, or hand it to `done` later, from wherever it likes: a `done` called off the main
+--- loop (a vim.system callback, say) is brought back onto it. `cb` runs once, with the
+--- result or with nil and why, and never inside `fn` itself, so what is done with the
+--- result cannot be mistaken for the function's own error.
+local function call_source(fn, what, cb)
+  local finished, returned, held = false, false, nil
+  local function settle(value, why)
+    if value == nil then
+      cb(nil, why or (what .. ' が結果を返しませんでした'))
+    else
+      cb(value)
+    end
+  end
+  local function done(value, why)
+    if finished then
+      return
+    end
+    finished = true
+    if vim.in_fast_event() then
+      vim.schedule(function()
+        settle(value, why)
+      end)
+    elseif returned then
+      settle(value, why)
+    else
+      held = { value, why }
+    end
+  end
+  local ok, ret = xpcall(function()
+    return fn({ project = project }, done)
+  end, function(e)
+    -- Where it broke, since an error out of a C function (table.sort, say) names no line.
+    return debug.traceback(tostring(e), 2)
+  end)
+  returned = true
+  if not ok then
+    done(nil, what .. ': ' .. tostring(ret))
+  elseif ret ~= nil then
+    done(ret)
+  end
+  if held then
+    settle(held[1], held[2])
+  end
+end
+
 --- The folders of `spec`, at any depth, hung on `list`. A folder that holds folders is
---- only a heading: its own state is never fetched.
+--- only a heading: its own state is never fetched. A `folders` function is kept to be
+--- asked when the list is first shown (resolve_folders); until then the list is an empty
+--- heading, unless the rebuild it is part of can carry the tree the same function gave
+--- last time.
 local function attach_folders(list, spec, where, prior)
+  if type(spec.folders) == 'function' then
+    list.folders_fn = spec.folders
+    if prior and prior.folders_fn == spec.folders and prior.folders then
+      list.folders = prior.folders
+      list.folders_resolved = prior.folders_resolved
+    else
+      list.folders = {}
+      list.folders_resolved = false
+    end
+    return
+  end
   if type(spec.folders) ~= 'table' then
     return
   end
@@ -225,6 +296,22 @@ end
 --- The lists a tab draws.
 local function visible_lists(tab)
   return collect_lists(tab, true, {})
+end
+
+--- Every node on screen under `list`, headings included: `fn(node)` for the list itself,
+--- then for each open folder's subtree.
+local function each_visible(list, fn)
+  fn(list)
+  for _, folder in ipairs(list.folders or {}) do
+    if folder.open then
+      each_visible(folder, fn)
+    end
+  end
+end
+
+--- A heading whose folders are still to be asked for.
+local function folders_pending(node)
+  return node.folders_fn ~= nil and not node.folders_resolved
 end
 
 --- Every list a tab holds, open or not.
@@ -324,10 +411,14 @@ end
 local function sync_spinner()
   local tab = tabs[active]
   local waiting = false
-  for _, list in ipairs(tab and is_open() and visible_lists(tab) or {}) do
-    if not list.state.fetched and #list.state.pages == 0 then
-      waiting = true
-    end
+  if tab and is_open() then
+    each_visible(tab, function(node)
+      if node.folders then
+        waiting = waiting or folders_pending(node)
+      elseif not node.state.fetched and #node.state.pages == 0 then
+        waiting = true
+      end
+    end)
   end
   if waiting then
     spinner.subscribe('sidebar', function()
@@ -386,6 +477,9 @@ function render()
       for _, child in ipairs(folder.folders) do
         add_folder(child, depth + 1)
       end
+      if #folder.folders == 0 then
+        add_note({ fetched = not folders_pending(folder) }, indent .. '  ')
+      end
       return
     end
     for _, p in ipairs(folder.state.pages) do
@@ -400,7 +494,7 @@ function render()
       add_folder(folder, 0)
     end
     if #lines == 0 then
-      lines = { ' (フォルダーがありません)' }
+      add_note({ fetched = not folders_pending(tab) }, ' ')
     end
   else
     local state = tab and tab.state or new_state()
@@ -547,43 +641,13 @@ end
 --- a title come newest first, as the other tabs are.
 local function fetch_whole(tab, cb)
   if tab.pages then
-    local function settle(list, why)
+    call_source(tab.pages, 'pages', function(list, why)
       if list == nil then
-        cb(nil, why or 'pages が一覧を返しませんでした')
+        cb(nil, why)
       else
         cb(as_rows(list))
       end
-    end
-    -- A list handed to `done` from inside the function waits until the function has
-    -- returned: what happens to the list (drawing it) must not be caught as the function's
-    -- own error, and a second `done` must not count.
-    local finished, returned, held = false, false, nil
-    local function done(list, why)
-      if finished then
-        return
-      end
-      finished = true
-      if returned then
-        settle(list, why)
-      else
-        held = { list, why }
-      end
-    end
-    local ok, ret = xpcall(function()
-      return tab.pages({ project = project }, done)
-    end, function(e)
-      -- Where it broke, since an error out of a C function (table.sort, say) names no line.
-      return debug.traceback(tostring(e), 2)
     end)
-    returned = true
-    if not ok then
-      done(nil, 'pages: ' .. tostring(ret))
-    elseif ret ~= nil then
-      done(ret)
-    end
-    if held then
-      settle(held[1], held[2])
-    end
     return
   end
   fetch_linked(type(tab.related) == 'table' and tab.related or { tab.related }, cb)
@@ -652,12 +716,40 @@ end
 --- Fetch what the active tab is missing (infinite scroll): every list on screen still
 --- without its first batch; once they all have one, the scroll reaching the bottom extends
 --- the last of them, which is what the bottom belongs to.
+--- Ask a heading's `folders` function for its folders and hang them on it, carrying over
+--- what a folder of the same label held before, then draw and fetch what came.
+local function resolve_folders(node, index)
+  if node.folders_loading then
+    return
+  end
+  node.folders_loading = true
+  local previous = node.folders
+  call_source(node.folders_fn, 'folders', function(specs, why)
+    node.folders_loading = false
+    node.folders_resolved = true
+    if specs == nil then
+      vim.notify('[chatora] ' .. why, vim.log.levels.ERROR)
+      specs = {}
+    end
+    attach_folders(node, { folders = type(specs) == 'table' and specs or {} }, node.where, { folders = previous })
+    if index == active then
+      render()
+      M.load_more()
+    end
+  end)
+end
+
 function M.load_more()
   local index = active
   local tab = tabs[index]
   if not (project and tab) then
     return
   end
+  each_visible(tab, function(node)
+    if node.folders and folders_pending(node) then
+      resolve_folders(node, index)
+    end
+  end)
   local lists = visible_lists(tab)
   local pending = false
   for _, list in ipairs(lists) do
@@ -694,11 +786,17 @@ function M.reload()
   if not project then
     return
   end
-  for _, tab in ipairs(tabs) do
-    for _, list in ipairs(all_lists(tab)) do
-      list.state = new_state()
+  local function reset(node)
+    node.state = new_state()
+    if node.folders_fn then
+      node.folders_resolved = false
     end
-    tab.state = new_state()
+    for _, folder in ipairs(node.folders or {}) do
+      reset(folder)
+    end
+  end
+  for _, tab in ipairs(tabs) do
+    reset(tab)
   end
   render()
   M.load_more()

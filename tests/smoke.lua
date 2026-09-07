@@ -2630,6 +2630,45 @@ local ok, err = pcall(function()
     sidebar.select_tab(11)
     assert(lines()[1] == '▸ 📅 daily', 'a folder the reader closed stays closed when the sidebar reopens: ' .. vim.inspect(lines()))
 
+    -- The folders themselves may come from a function, handed over later, each holding
+    -- what a folder spec holds; `pages` may then be a plain list. A reload asks again.
+    local deliver_folders, folder_asks = nil, 0
+    require('chatora').add_tab({
+      name = 'dyn',
+      folders = function(_, done)
+        folder_asks = folder_asks + 1
+        deliver_folders = done
+      end,
+    })
+    sidebar.select_tab(12)
+    assert(lines()[1]:find('読み込み中', 1, true), 'a heading waits for its folders: ' .. vim.inspect(lines()))
+    deliver_folders({ { name = 'p1', folders = { { name = 'todo', pages = { 'a', 'b' } } } } })
+    assert(
+      vim.deep_equal(lines(), { '▾ p1', '  ▾ todo', '   a', '   b' }),
+      'the folders a function hands over are drawn like written ones: ' .. vim.inspect(lines())
+    )
+    sidebar.reload()
+    assert(folder_asks == 2 and lines()[1] == '▾ p1', 'a reload asks the function again, keeping what it had meanwhile: ' .. vim.inspect(lines()))
+
+    -- `done` called off the main loop (a vim.system callback, say) still lands.
+    require('chatora').add_tab({
+      name = 'later',
+      pages = function(_, done)
+        local timer = vim.uv.new_timer()
+        timer:start(0, 0, function()
+          timer:close()
+          done({ 'x' })
+        end)
+      end,
+    })
+    sidebar.select_tab(13)
+    assert(
+      vim.wait(1000, function()
+        return lines()[1] == ' x'
+      end),
+      'a done from a fast callback is brought back onto the main loop: ' .. vim.inspect(lines())
+    )
+
     sidebar.close()
     config.options.sidebar_tabs = orig_tabs
     vim.notify = orig_notify
