@@ -171,12 +171,36 @@ local function make_list(spec, where, fallback_label, prior)
   }
 end
 
+--- What the reader's functions get to say. Safe from any callback: a notify off the main
+--- loop would fail, and the failure would vanish into the callback. Shown in :messages and
+--- written next to the server's lines, so `:Chatora log` has both.
+local function make_logger(label)
+  return function(...)
+    local parts = {}
+    for i = 1, select('#', ...) do
+      local value = select(i, ...)
+      -- One line per call: a record in the log file is a line, and a table would spill over.
+      parts[#parts + 1] = type(value) == 'string' and value or vim.inspect(value, { newline = ' ', indent = '' })
+    end
+    local message = label .. ': ' .. table.concat(parts, ' ')
+    local function emit()
+      vim.notify('[chatora] ' .. message, vim.log.levels.INFO)
+      lsp.notify('chatora/log', { message = message })
+    end
+    if vim.in_fast_event() then
+      vim.schedule(emit)
+    else
+      emit()
+    end
+  end
+end
+
 --- Run `fn(ctx, done)`, the reader's own source of rows or folders. It may return the
 --- result, or hand it to `done` later, from wherever it likes: a `done` called off the main
 --- loop (a vim.system callback, say) is brought back onto it. `cb` runs once, with the
 --- result or with nil and why, and never inside `fn` itself, so what is done with the
 --- result cannot be mistaken for the function's own error.
-local function call_source(fn, what, cb)
+local function call_source(fn, what, label, cb)
   local finished, returned, held = false, false, nil
   local function settle(value, why)
     if value == nil then
@@ -201,7 +225,7 @@ local function call_source(fn, what, cb)
     end
   end
   local ok, ret = xpcall(function()
-    return fn({ project = project }, done)
+    return fn({ project = project, log = make_logger(label) }, done)
   end, function(e)
     -- Where it broke, since an error out of a C function (table.sort, say) names no line.
     return debug.traceback(tostring(e), 2)
@@ -641,7 +665,7 @@ end
 --- a title come newest first, as the other tabs are.
 local function fetch_whole(tab, cb)
   if tab.pages then
-    call_source(tab.pages, 'pages', function(list, why)
+    call_source(tab.pages, 'pages', tab.label, function(list, why)
       if list == nil then
         cb(nil, why)
       else
@@ -724,7 +748,7 @@ local function resolve_folders(node, index)
   end
   node.folders_loading = true
   local previous = node.folders
-  call_source(node.folders_fn, 'folders', function(specs, why)
+  call_source(node.folders_fn, 'folders', node.label, function(specs, why)
     node.folders_loading = false
     node.folders_resolved = true
     if specs == nil then

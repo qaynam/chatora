@@ -2653,10 +2653,11 @@ local ok, err = pcall(function()
     -- `done` called off the main loop (a vim.system callback, say) still lands.
     require('chatora').add_tab({
       name = 'later',
-      pages = function(_, done)
+      pages = function(ctx, done)
         local timer = vim.uv.new_timer()
         timer:start(0, 0, function()
           timer:close()
+          ctx.log('got', { n = 1 })
           done({ 'x' })
         end)
       end,
@@ -2667,6 +2668,12 @@ local ok, err = pcall(function()
         return lines()[1] == ' x'
       end),
       'a done from a fast callback is brought back onto the main loop: ' .. vim.inspect(lines())
+    )
+    assert(
+      vim.wait(1000, function()
+        return warned[#warned] == '[chatora] later: got { n = 1 }'
+      end),
+      'ctx.log from a fast callback still reaches vim.notify, with the tab named: ' .. vim.inspect(warned[#warned])
     )
 
     sidebar.close()

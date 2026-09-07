@@ -582,6 +582,10 @@ require('chatora').add_tab({ label = 'sakura', filter = 'sakura' })
 サーバーに聞くときは `require('chatora.lsp').request` が使えます。決まった並びなら、関数の
 代わりにその並びをそのまま書けます。
 
+書いている途中の様子は `ctx.log(...)` で見られます。どこから呼んでも安全で、`:messages` に出て、
+`:Chatora log`（`log = true` のとき）にもサーバーの記録と並んで残ります。`vim.system` の
+コールバックの中で `vim.notify` を呼ぶと、メインループの外なので失敗して何も出ません。
+
 ```lua
 -- 決まったページを並べる
 { label = 'よく見る', pages = function()
