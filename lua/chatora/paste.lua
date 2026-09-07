@@ -26,8 +26,8 @@ end
 
 --- What every pasted line after the first gets in front of it, and whether that is a quote
 --- marker; nil when the paste goes in as it is. On a blank line it is the whitespace up to
---- `insert_at` (a byte offset), which is what keeps a paste inside a code block: one line
---- indented less than the marker ends the block.
+--- `insert_at` (a byte offset); on any line of a code or table block it is the line's own
+--- indent, since one line indented less than the marker ends the block.
 function M.line_prefix(line, insert_at, in_block)
   local before = line:sub(1, insert_at)
   if not in_block then
@@ -38,6 +38,9 @@ function M.line_prefix(line, insert_at, in_block)
   end
   if line:match('^%s*$') then
     return before, false
+  end
+  if in_block then
+    return line:match('^%s*'), false
   end
   return nil
 end
@@ -64,6 +67,58 @@ local function insert_offset(mode, line, col)
   end
   -- str_utf_end takes a 1-based index; the cursor column is 0-based.
   return col + vim.str_utf_end(line, col + 1) + 1
+end
+
+--- `p` / `P` with a register of several lines, given the same room a bracketed paste gets.
+--- A linewise register inside a block takes the block's indent on every line; anything
+--- Vim's own put would do differently (one line, blockwise) is left to it.
+function M.put(after, register)
+  register = (register == nil or register == '') and '"' or register
+  local count = vim.v.count1
+  local function vims_own()
+    vim.cmd(('normal! %d"%s%s'):format(count, register, after and 'p' or 'P'))
+  end
+  local info = vim.fn.getreginfo(register)
+  local lines = info.regcontents or {}
+  local regtype = (info.regtype or 'v'):sub(1, 1)
+  if #lines < 2 or regtype == '\22' then
+    return vims_own()
+  end
+  local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+  local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+  local line = buf_lines[row] or ''
+  local block = in_block(buf_lines, row)
+  if regtype == 'V' then
+    if not block then
+      return vims_own()
+    end
+    local indent = line:match('^%s*')
+    local out = {}
+    for i, l in ipairs(lines) do
+      out[i] = indent .. l
+    end
+    vim.api.nvim_put(out, 'l', after, true)
+    return
+  end
+  local insert_at = after and insert_offset('n', line, col) or col
+  local prefix, quote = M.line_prefix(line, insert_at, block)
+  if not prefix then
+    return vims_own()
+  end
+  vim.api.nvim_put(M.prefixed(lines, prefix, quote), 'c', after, true)
+end
+
+--- Map `p` and `P` in a page buffer to M.put. A read-only page keeps the mapping that
+--- explains why it cannot be edited.
+function M.attach(bufnr)
+  if vim.b[bufnr].chatora_read_only then
+    return
+  end
+  for key, after in pairs({ p = true, P = false }) do
+    vim.keymap.set('n', key, function()
+      M.put(after, vim.v.register)
+    end, { buffer = bufnr, silent = true, desc = 'chatora: 貼り付け（ブロックの中では字下げを揃える）' })
+  end
 end
 
 -- Kept out of a local so that :Chatora reload wraps the original again, not our own wrapper.

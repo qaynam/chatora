@@ -2077,8 +2077,9 @@ local ok, err = pcall(function()
     assert(paste.line_prefix('\t\t', 2, true) == '\t\t', 'tabs stay tabs')
     assert(paste.line_prefix('    ', 2, false) == '  ', 'up to the cursor, not the whole indent')
     assert(paste.line_prefix('  text', 6, false) == nil, 'a line with text is left alone')
+    assert(paste.line_prefix(' code', 5, true) == ' ', 'a line of a block keeps what follows in the block')
     assert(paste.line_prefix(' > 引用', 4, false) == ' > ', 'a quote takes the marker')
-    assert(paste.line_prefix(' > code', 4, true) == nil, 'but not inside a code block')
+    assert(paste.line_prefix(' > code', 4, true) == ' ', 'inside a code block it is the block indent, not a quote')
     assert(
       vim.deep_equal(paste.prefixed({ 'a', '', 'b' }, '> ', true), { 'a', '> b' }),
       'a quote loses its blank lines'
@@ -2096,6 +2097,38 @@ local ok, err = pcall(function()
       vim.deep_equal(got, { 'タイトル', 'code:sample.py', ' def f():', '     return 1', ' ' }),
       'a paste on a blank line inside a code block stays inside it: ' .. vim.inspect(got)
     )
+
+    -- Pasting after text inside a block still keeps the rest of the paste in the block,
+    -- blank lines included: on the web those lines would fall out and end it.
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:x', ' first' })
+    vim.api.nvim_win_set_cursor(0, { 3, 5 })
+    vim.paste({ ' tail', '', 'more', '' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'code:x', ' first tail', ' ', ' more', ' ' }),
+      'a paste after text in a block stays in the block: ' .. vim.inspect(got)
+    )
+
+    -- `p` from a register gets the same treatment: charwise continues the line, linewise
+    -- takes the block's indent on every line, a single line is Vim's own put.
+    vim.fn.setreg('a', { 'x', '', 'y' }, 'v')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:x', ' first' })
+    vim.api.nvim_win_set_cursor(0, { 3, 5 })
+    paste.put(true, 'a')
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', 'code:x', ' firstx', ' ', ' y' }), 'charwise p in a block: ' .. vim.inspect(got))
+    vim.fn.setreg('a', { 'x', '', 'y' }, 'V')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:x', '  first' })
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    paste.put(true, 'a')
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', 'code:x', '  first', '  x', '  ', '  y' }), 'linewise p in a block: ' .. vim.inspect(got))
+    vim.fn.setreg('a', { 'one' }, 'v')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', ' ab' })
+    vim.api.nvim_win_set_cursor(0, { 2, 1 })
+    paste.put(true, 'a')
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', ' aoneb' }), "a single line is Vim's own p: " .. vim.inspect(got))
 
     -- A line with text: the paste goes in as it is, after the character under the cursor.
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', ' 本文' })
