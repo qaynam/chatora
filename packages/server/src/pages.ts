@@ -45,6 +45,7 @@ const err = (code: ErrCode, message: string): ErrEnvelope => ({ ok: false, code,
 const noCredential = (): ErrEnvelope => err('unauthorized', 'not logged in')
 
 const UNAUTHORIZED_STATUSES: ReadonlySet<number> = new Set([401, 403])
+const TOO_MANY_REQUESTS = 429
 
 /**
  * Maps a CosenseApiError to the `chatora/*` wire error contract (main.ts):
@@ -54,6 +55,9 @@ const UNAUTHORIZED_STATUSES: ReadonlySet<number> = new Set([401, 403])
  */
 const fromCosenseApiError = (error: CosenseApiError): ErrEnvelope => {
   if (UNAUTHORIZED_STATUSES.has(error.status)) return err('unauthorized', 'authentication failed')
+  if (error.status === TOO_MANY_REQUESTS) {
+    return err('error', 'Cosense がリクエストの多さを断りました。少し待ってからやり直してください')
+  }
   if (error.code === 'NotFastForward') {
     return err('notFastForward', 'remote page has changed; reload and try again')
   }

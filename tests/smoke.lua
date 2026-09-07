@@ -2690,6 +2690,32 @@ local ok, err = pcall(function()
     lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
   end
 
+  -- An unread list thinned to nothing keeps pulling batches, but only so far on its own:
+  -- the rest waits for the reader to scroll, so one open cannot fire a hundred requests.
+  do
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_ok, orig_start, orig_tabs = lsp.request_ok, lsp.ensure_start, config.options.sidebar_tabs
+    config.options.sidebar_tabs = { { name = '未読', unread = true } }
+    local batches = 0
+    lsp.ensure_start = function() end
+    lsp.request_ok = function(method, _, cb)
+      if method == 'chatora/listPages' then
+        batches = batches + 1
+        cb({ ok = true, count = 10000, scanned = 100, pages = {} })
+      end
+    end
+    sidebar.close()
+    sidebar.open('proj')
+    assert(batches == 5, 'the automatic scan stops at 500 pages, got ' .. batches .. ' batches')
+    sidebar.load_more()
+    assert(batches == 6, 'a scroll pulls one more batch, got ' .. batches)
+    sidebar.close()
+    config.options.sidebar_tabs = orig_tabs
+    lsp.request_ok, lsp.ensure_start = orig_ok, orig_start
+  end
+
   -- sidebar polling: a refetched first batch replaces the head and pulls an
   -- edited page up out of the tail, without duplicating it or dropping the
   -- rest of what infinite scroll already loaded.

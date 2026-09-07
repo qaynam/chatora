@@ -590,6 +590,10 @@ local PAGE_SIZE = 100
 -- plenty of unread pages remain further down. Keep pulling until the tab has
 -- something worth showing (or the project runs out).
 local MIN_ROWS = 20
+-- But not through the whole project in one go: batches go out back to back, and a
+-- thousand pages of them within a second is what Cosense answers with 429, after which
+-- even the credential check fails. Past this many, the rest comes as the reader scrolls.
+local AUTO_SCAN_LIMIT = 500
 
 --- Request params for one batch of `tab`, or nil when it cannot query yet.
 local function batch_params(tab, skip)
@@ -738,7 +742,7 @@ local function load_list(list, index)
     end
     if index == active then
       render()
-      if not state.exhausted and #state.pages < MIN_ROWS then
+      if not state.exhausted and #state.pages < MIN_ROWS and state.scanned < AUTO_SCAN_LIMIT then
         load_list(list, index)
       end
     end
