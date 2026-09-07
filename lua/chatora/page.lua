@@ -562,6 +562,19 @@ vim.api.nvim_create_autocmd('BufWriteCmd', {
   end,
 })
 
+--- Whether :q in the current window ends up quitting Neovim: nothing but chatora's own
+--- panels would be left, and they go with the last page window (see the QuitPre below).
+function M.quit_would_exit()
+  local here = vim.api.nvim_get_current_win()
+  for _, w in ipairs(vim.api.nvim_list_wins()) do
+    local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
+    if w ~= here and not name:match('^chatora://') then
+      return false
+    end
+  end
+  return #vim.api.nvim_list_tabpages() == 1
+end
+
 -- Under 'hidden', :q on an unsaved page closes the window and leaves the buffer
 -- modified in the background, with no prompt of any kind — so ask here. An
 -- error thrown from QuitPre aborts the quit, which is what makes "cancel" work.
@@ -572,12 +585,11 @@ vim.api.nvim_create_autocmd('QuitPre', {
     if not vim.bo[ev.buf].modified or vim.v.exiting ~= vim.NIL then
       return
     end
-    -- Neovim asks on its own when the buffer would be abandoned: this :q exits (no other
-    -- window anywhere) or 'hidden' is off. Only a window closing over a buffer that stays
-    -- hidden, and modified, gets no question from it. That case is asked here, in Neovim's
-    -- own words, and "Yes" is the same :write as :w, questions included.
-    local exits = #vim.api.nvim_list_wins() == 1 and #vim.api.nvim_list_tabpages() == 1
-    if exits or not vim.o.hidden then
+    -- Neovim asks on its own when the buffer would be abandoned: this :q quits Neovim, or
+    -- 'hidden' is off. Only a window closing over a buffer that stays hidden, and
+    -- modified, gets no question from it. That case is asked here, in Neovim's own words,
+    -- and "Yes" is the same :write as :w, questions included.
+    if M.quit_would_exit() or not vim.o.hidden then
       return
     end
     local choice = vim.fn.confirm(

@@ -1792,6 +1792,37 @@ local ok, err = pcall(function()
     end)
     assert(synced == false and #asked == 0, 'an untitled page is not synced')
 
+    -- :q here would quit Neovim once the sidebar goes with the last page window, and that
+    -- is Neovim's own question to ask; a window that stays open makes it chatora's.
+    do
+      local scratch = vim.api.nvim_create_buf(false, true)
+      local side = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_name(side, 'chatora://sidebar-stand-in')
+      local wins_before = #vim.api.nvim_list_wins()
+      vim.cmd('vsplit')
+      vim.api.nvim_win_set_buf(0, side)
+      vim.cmd('wincmd p')
+      local other_pages = 0
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
+        if w ~= vim.api.nvim_get_current_win() and not name:match('^chatora://') then
+          other_pages = other_pages + 1
+        end
+      end
+      assert(page.quit_would_exit() == (other_pages == 0), 'panels alone do not keep Neovim open')
+      vim.cmd('vsplit')
+      vim.api.nvim_win_set_buf(0, scratch)
+      vim.cmd('wincmd p')
+      assert(page.quit_would_exit() == false, 'another window keeps Neovim open')
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        local b = vim.api.nvim_win_get_buf(w)
+        if b == scratch or b == side then
+          vim.api.nvim_win_close(w, true)
+        end
+      end
+      assert(#vim.api.nvim_list_wins() == wins_before, 'the probe windows are gone again')
+    end
+
     -- Once the cursor leaves the first line, the buffer is named by it while still
     -- untitled, and nothing is asked of the server for that.
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '新しいページ', '本文' })
