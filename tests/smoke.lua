@@ -1792,35 +1792,43 @@ local ok, err = pcall(function()
     end)
     assert(synced == false and #asked == 0, 'an untitled page is not synced')
 
-    -- :q here would quit Neovim once the sidebar goes with the last page window, and that
-    -- is Neovim's own question to ask; a window that stays open makes it chatora's.
+    -- :q on an unsaved page asks in Neovim's words. Cancel keeps the window and the text;
+    -- a save that was declined keeps them too; No throws the edits away with the buffer.
     do
-      local scratch = vim.api.nvim_create_buf(false, true)
-      local side = vim.api.nvim_create_buf(false, true)
-      vim.api.nvim_buf_set_name(side, 'chatora://sidebar-stand-in')
       local wins_before = #vim.api.nvim_list_wins()
-      vim.cmd('vsplit')
-      vim.api.nvim_win_set_buf(0, side)
-      vim.cmd('wincmd p')
-      local other_pages = 0
-      for _, w in ipairs(vim.api.nvim_list_wins()) do
-        local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
-        if w ~= vim.api.nvim_get_current_win() and not name:match('^chatora://') then
-          other_pages = other_pages + 1
-        end
-      end
-      assert(page.quit_would_exit() == (other_pages == 0), 'panels alone do not keep Neovim open')
+      local scratch = vim.api.nvim_create_buf(false, true)
       vim.cmd('vsplit')
       vim.api.nvim_win_set_buf(0, scratch)
       vim.cmd('wincmd p')
-      assert(page.quit_would_exit() == false, 'another window keeps Neovim open')
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '', '消えては困る' })
+      answers = { 3 }
+      local closed = pcall(vim.cmd, 'q')
+      assert(not closed and #vim.api.nvim_list_wins() == wins_before + 1, 'Cancel keeps the window')
+      assert(prompts[#prompts]:find('^Save changes to "cosense://proj/'), 'asked as Neovim asks: ' .. vim.inspect(prompts[#prompts]))
+      answers = { 1 }
+      closed = pcall(vim.cmd, 'q')
+      assert(
+        not closed and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] == '消えては困る',
+        'Yes on a page that cannot be saved yet keeps everything'
+      )
+      answers = { 2 }
+      closed = pcall(vim.cmd, 'q')
+      vim.wait(200, function()
+        return not vim.api.nvim_buf_is_valid(buf)
+      end)
+      assert(closed and not vim.api.nvim_buf_is_valid(buf), 'No closes the window and drops the edits with the buffer')
+      assert(#vim.api.nvim_list_wins() == wins_before, 'and the window is gone')
       for _, w in ipairs(vim.api.nvim_list_wins()) do
-        local b = vim.api.nvim_win_get_buf(w)
-        if b == scratch or b == side then
+        if vim.api.nvim_win_get_buf(w) == scratch then
           vim.api.nvim_win_close(w, true)
         end
       end
-      assert(#vim.api.nvim_list_wins() == wins_before, 'the probe windows are gone again')
+      -- The rest of this block works on a fresh untitled page.
+      vim.cmd('new')
+      vim.wo.winfixbuf = false
+      page.open_untitled('proj', vim.api.nvim_get_current_win())
+      buf = vim.api.nvim_get_current_buf()
+      vim.cmd('stopinsert')
     end
 
     -- Once the cursor leaves the first line, the buffer is named by it while still
@@ -1840,7 +1848,7 @@ local ok, err = pcall(function()
     vim.cmd('write')
     assert(vim.b[buf].chatora_untitled and vim.bo[buf].modified, 'declining the merge saves nothing')
     assert(vim.deep_equal(asked, { 'open 新しいページ' }), 'and nothing is saved: ' .. vim.inspect(asked))
-    assert(prompts[1]:find('「新しいページ」というページは既にあります', 1, true), vim.inspect(prompts))
+    assert(prompts[#prompts]:find('「新しいページ」というページは既にあります', 1, true), vim.inspect(prompts))
 
     exists = false
     asked = {}

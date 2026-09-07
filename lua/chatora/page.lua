@@ -562,55 +562,6 @@ vim.api.nvim_create_autocmd('BufWriteCmd', {
   end,
 })
 
---- Whether :q in the current window ends up quitting Neovim: nothing but chatora's own
---- panels would be left, and they go with the last page window (see the QuitPre below).
-function M.quit_would_exit()
-  local here = vim.api.nvim_get_current_win()
-  for _, w in ipairs(vim.api.nvim_list_wins()) do
-    local name = vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w))
-    if w ~= here and not name:match('^chatora://') then
-      return false
-    end
-  end
-  return #vim.api.nvim_list_tabpages() == 1
-end
-
--- Under 'hidden', :q on an unsaved page closes the window and leaves the buffer
--- modified in the background, with no prompt of any kind — so ask here. An
--- error thrown from QuitPre aborts the quit, which is what makes "cancel" work.
-vim.api.nvim_create_autocmd('QuitPre', {
-  group = augroup,
-  pattern = 'cosense://*',
-  callback = function(ev)
-    if not vim.bo[ev.buf].modified or vim.v.exiting ~= vim.NIL then
-      return
-    end
-    -- Neovim asks on its own when the buffer would be abandoned: this :q quits Neovim, or
-    -- 'hidden' is off. Only a window closing over a buffer that stays hidden, and
-    -- modified, gets no question from it. That case is asked here, in Neovim's own words,
-    -- and "Yes" is the same :write as :w, questions included.
-    if M.quit_would_exit() or not vim.o.hidden then
-      return
-    end
-    local choice = vim.fn.confirm(
-      ('Save changes to "%s"?'):format(vim.api.nvim_buf_get_name(ev.buf)),
-      '&Yes\n&No\n&Cancel',
-      1,
-      'Question'
-    )
-    if choice == 1 then
-      vim.api.nvim_buf_call(ev.buf, function()
-        vim.cmd('write')
-      end)
-      if vim.bo[ev.buf].modified then
-        error('chatora: 保存していないので閉じません')
-      end
-    elseif choice ~= 2 then
-      error('chatora: 閉じるのをキャンセルしました')
-    end
-  end,
-})
-
 local function page_windows()
   local wins = {}
   for _, w in ipairs(vim.api.nvim_list_wins()) do
@@ -621,13 +572,48 @@ local function page_windows()
   return wins
 end
 
--- chatora's chrome (sidebar, related panel) is only there to serve a page, so
--- closing the last page window takes it along. Without this, :q leaves the
--- panels behind and has to be repeated once per window to get out.
+-- :q on a page. Asked here, in Neovim's own words, rather than left to Neovim: under
+-- 'hidden' it asks nothing and keeps the buffer, modified, out of sight; and chatora's
+-- panels (sidebar, related) have to go with the last page window for :q to quit rather
+-- than leave them behind, which can only be decided once the answer is known. An error
+-- thrown from QuitPre aborts the quit, which is what makes "Cancel", and a save that did
+-- not happen, keep everything as it was.
 vim.api.nvim_create_autocmd('QuitPre', {
   group = augroup,
   pattern = 'cosense://*',
-  callback = function()
+  callback = function(ev)
+    if vim.v.exiting ~= vim.NIL then
+      return
+    end
+    if vim.bo[ev.buf].modified then
+      local choice = vim.fn.confirm(
+        ('Save changes to "%s"?'):format(vim.api.nvim_buf_get_name(ev.buf)),
+        '&Yes\n&No\n&Cancel',
+        1,
+        'Question'
+      )
+      if choice == 1 then
+        -- The same save as :w, questions included: a title another page has asks whether
+        -- to merge, and declining that is a save that did not happen.
+        vim.api.nvim_buf_call(ev.buf, function()
+          vim.cmd('write')
+        end)
+        if vim.bo[ev.buf].modified then
+          error('chatora: 保存していないので閉じません')
+        end
+      elseif choice == 2 then
+        -- Discarded for real: the flag alone would leave the edits in a hidden buffer that
+        -- the next open finds and shows as if they were the page.
+        vim.bo[ev.buf].modified = false
+        vim.schedule(function()
+          if vim.api.nvim_buf_is_valid(ev.buf) then
+            pcall(vim.api.nvim_buf_delete, ev.buf, { force = true })
+          end
+        end)
+      else
+        error('chatora: 閉じるのをキャンセルしました')
+      end
+    end
     if #page_windows() > 1 then
       return
     end
