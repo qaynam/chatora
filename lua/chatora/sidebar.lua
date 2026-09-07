@@ -515,23 +515,42 @@ end
 --- a title come newest first, as the other tabs are.
 local function fetch_whole(tab, cb)
   if tab.pages then
-    local finished = false
-    local done = function(list, why)
-      if finished then
-        return
-      end
-      finished = true
+    local function settle(list, why)
       if list == nil then
         cb(nil, why or 'pages が一覧を返しませんでした')
       else
         cb(as_rows(list))
       end
     end
-    local ok, ret = pcall(tab.pages, { project = project }, done)
+    -- A list handed to `done` from inside the function waits until the function has
+    -- returned: what happens to the list (drawing it) must not be caught as the function's
+    -- own error, and a second `done` must not count.
+    local finished, returned, held = false, false, nil
+    local function done(list, why)
+      if finished then
+        return
+      end
+      finished = true
+      if returned then
+        settle(list, why)
+      else
+        held = { list, why }
+      end
+    end
+    local ok, ret = xpcall(function()
+      return tab.pages({ project = project }, done)
+    end, function(e)
+      -- Where it broke, since an error out of a C function (table.sort, say) names no line.
+      return debug.traceback(tostring(e), 2)
+    end)
+    returned = true
     if not ok then
       done(nil, 'pages: ' .. tostring(ret))
     elseif ret ~= nil then
       done(ret)
+    end
+    if held then
+      settle(held[1], held[2])
     end
     return
   end
