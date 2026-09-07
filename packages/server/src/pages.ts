@@ -32,7 +32,7 @@ import { computeQuoteRanges, type QuoteRange } from './quote'
 import { ReadState } from './readState'
 import { type BasePageState, SessionState } from './state'
 import { computeTokens, type RawToken } from './tokens'
-import { formatUri } from './uriScheme'
+import { formatUri, parseUri } from './uriScheme'
 
 export type ErrCode = 'unauthorized' | 'notFastForward' | 'error'
 export interface ErrEnvelope {
@@ -1247,8 +1247,21 @@ export const mergePage = (
       if (docText === undefined) return err('error', 'document not synced')
       const session = yield* SessionState
       const baseOpt = yield* session.getPage(uri)
-      if (Option.isNone(baseOpt)) return err('error', 'page state not found; reopen the page')
-      const base = baseOpt.value
+      const parsed = parseUri(uri)
+      if (Option.isNone(baseOpt) && parsed === null) {
+        return err('error', 'page state not found; reopen the page')
+      }
+      // An untitled page has no state under its stand-in name: it exists nowhere but in the
+      // buffer, so once its lines are on the other page there is nothing left to delete.
+      const base: BasePageState = Option.getOrElse(
+        baseOpt,
+        (): BasePageState => ({
+          project: parsed?.project ?? '',
+          title: parsed?.title ?? '',
+          baseLines: [],
+          exists: false,
+        }),
+      )
 
       const apiOpt = yield* session.getApi()
       if (Option.isNone(apiOpt)) return noCredential()

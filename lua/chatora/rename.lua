@@ -27,6 +27,9 @@ end
 function M.merge(bufnr, into)
   local name = vim.api.nvim_buf_get_name(bufnr)
   local project, title = uri.parse(name)
+  if vim.b[bufnr].chatora_untitled then
+    title = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or title
+  end
   local result = lsp.request_wait('chatora/mergePage', { uri = name, into = into }, REQUEST_TIMEOUT_MS)
   if not result or result.ok == false then
     vim.notify(

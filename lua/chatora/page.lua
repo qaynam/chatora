@@ -466,9 +466,26 @@ local function name_untitled(bufnr)
     vim.notify('[chatora] ページを作れませんでした: ' .. why, vim.log.levels.ERROR)
     return false
   end
-  if opened.exists or vim.fn.bufnr(new_uri) ~= -1 then
+  if opened.exists then
+    -- The web opens the existing page and offers to fold the new one into it; here the
+    -- question comes at the save, since that is when the title is known.
+    local existing = opened.title or title
+    local choice = vim.fn.confirm(
+      ('「%s」というページは既にあります。このページの内容をそこに統合しますか？'):format(existing),
+      '統合する(&Y)\nやめる(&N)',
+      2,
+      'Question'
+    )
+    if choice == 1 then
+      rename.merge(bufnr, existing)
+    else
+      vim.notify('[chatora] 保存しませんでした。タイトルを変えるか、統合してください', vim.log.levels.WARN)
+    end
+    return false
+  end
+  if vim.fn.bufnr(new_uri) ~= -1 then
     vim.notify(
-      '[chatora] 「' .. title .. '」というページは既にあります。別のタイトルにしてください',
+      '[chatora] 「' .. title .. '」はもう別のバッファで開いています。別のタイトルにしてください',
       vim.log.levels.WARN
     )
     return false
@@ -555,19 +572,21 @@ vim.api.nvim_create_autocmd('QuitPre', {
       return
     end
     local _, title = uri.parse(vim.api.nvim_buf_get_name(ev.buf))
-    local choice = vim.fn.confirm(
-      '未保存の変更があります: ' .. (title or '?'),
-      '保存して閉じる(&W)\n保存せず閉じる(&D)\nキャンセル(&C)',
-      1
-    )
+    local question = '未保存の変更があります: ' .. (title or '?')
+    if vim.b[ev.buf].chatora_untitled then
+      -- The stand-in name says nothing; the first line is what the page would be called.
+      local first = vim.trim(vim.api.nvim_buf_get_lines(ev.buf, 0, 1, false)[1] or '')
+      question = 'このページはまだ保存していません' .. (first ~= '' and (': ' .. first) or '')
+    end
+    local choice = vim.fn.confirm(question, '保存して閉じる(&W)\n保存せず閉じる(&D)\nキャンセル(&C)', 1)
     if choice == 1 then
+      -- The same save as :w, questions included: a title another page has asks whether to
+      -- merge, and declining that leaves the page unsaved and open.
       vim.api.nvim_buf_call(ev.buf, function()
         vim.cmd('write')
       end)
-      -- A failed save leaves the buffer modified; closing anyway would be the
-      -- one outcome the user did not pick.
       if vim.bo[ev.buf].modified then
-        error('chatora: 保存に失敗したため閉じません')
+        error('chatora: 保存していないので閉じません')
       end
     elseif choice ~= 2 then
       error('chatora: 閉じるのをキャンセルしました')

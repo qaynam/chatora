@@ -917,6 +917,30 @@ describe('rename: titleTaken / mergePage / replaceLinks', () => {
     expect(edits[3]?.body).toEqual({ previewId: 'pv-delete' })
   })
 
+  test('mergePage: an untitled page, with no state under its stand-in name, merges its body', async () => {
+    const { layer: httpLayer, calls } = testHttpClient((url) => {
+      if (url.endsWith('/page-edit-for-ai/preview')) {
+        return json({ previewId: 'pv1', expireAt: 'later', pagePreview: null })
+      }
+      if (url.endsWith('/page-edit-for-ai/submit')) {
+        return json({ commitId: 'c9', page: { title: 'Target' } })
+      }
+      if (url.includes('/proj/Target/'))
+        return page('pg2', 'Target', [{ id: 't1', text: 'Target' }])
+      return noPage('?')
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const result = await runOnce(
+      handlers.mergePage('cosense://proj/無題', 'Target', 'Target\nline\n'),
+      httpLayer,
+      credLayer,
+    )
+    expect(result).toEqual({ ok: true, title: 'Target', appended: 1 })
+    const previews = calls.filter((c) => c.url.endsWith('/preview'))
+    expect(previews).toHaveLength(1)
+    expect(JSON.parse(previews[0]?.init.body as string).pageId).toBe('pg2')
+  })
+
   test('mergePage: a page that does not exist yet has nothing to delete', async () => {
     const { layer: httpLayer, calls } = testHttpClient((url) => {
       if (url.endsWith('/page-edit-for-ai/preview')) {

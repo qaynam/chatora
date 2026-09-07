@@ -1751,10 +1751,18 @@ local ok, err = pcall(function()
       elseif method == 'chatora/savePage' then
         asked[#asked + 1] = 'save ' .. params.uri
         cb(nil, { ok = true })
+      elseif method == 'chatora/mergePage' then
+        asked[#asked + 1] = 'merge ' .. params.uri .. ' into ' .. params.into
+        cb(nil, { ok = true, title = params.into, appended = 1 })
       end
     end
-    local orig_notify = vim.notify
+    local orig_notify, orig_confirm = vim.notify, vim.fn.confirm
     vim.notify = function() end
+    local answers, prompts = {}, {}
+    vim.fn.confirm = function(msg, _, default)
+      prompts[#prompts + 1] = msg
+      return table.remove(answers, 1) or default
+    end
     -- Opening a page can open the related panel beside it, a window later tests would
     -- land in; this test is about the page alone.
     local config = require('chatora.config')
@@ -1784,11 +1792,15 @@ local ok, err = pcall(function()
     end)
     assert(synced == false and #asked == 0, 'an untitled page is not synced')
 
+    -- A title a page already has asks whether to fold this page into it; declining saves
+    -- nothing and leaves the page as it was.
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '新しいページ', '本文' })
     exists = true
+    answers = { 2 }
     vim.cmd('write')
-    assert(vim.b[buf].chatora_untitled, 'a title a page already has is refused')
+    assert(vim.b[buf].chatora_untitled and vim.bo[buf].modified, 'declining the merge saves nothing')
     assert(vim.deep_equal(asked, { 'open 新しいページ' }), 'and nothing is saved: ' .. vim.inspect(asked))
+    assert(prompts[1]:find('「新しいページ」というページは既にあります', 1, true), vim.inspect(prompts))
 
     exists = false
     asked = {}
@@ -1806,6 +1818,28 @@ local ok, err = pcall(function()
       'the LSP client is attached again under the new name, got ' .. vim.inspect(attached)
     )
 
+    -- Accepting the merge sends this page's lines to the existing one, by the stand-in
+    -- name, and the buffer is done with: :q after it has nothing left to ask.
+    asked = {}
+    page.open_untitled('proj', vim.api.nvim_get_current_win())
+    local second = vim.api.nvim_get_current_buf()
+    vim.cmd('stopinsert')
+    vim.api.nvim_buf_set_lines(second, 0, -1, false, { '新しいページ', '足す本文' })
+    exists = true
+    answers = { 1 }
+    vim.cmd('write')
+    assert(
+      asked[1] == 'open 新しいページ' and #asked == 2 and asked[2]:match('^merge cosense://proj/無題.* into 新しいページ$'),
+      'accepting merges by the stand-in name: ' .. vim.inspect(asked)
+    )
+    assert(not vim.bo[second].modified, 'and the buffer is no longer unsaved')
+    vim.wait(500, function()
+      return not vim.api.nvim_buf_is_valid(second)
+    end)
+    assert(not vim.api.nvim_buf_is_valid(second), 'the merged page is gone')
+    buf = vim.api.nvim_get_current_buf()
+
+    vim.fn.confirm = orig_confirm
     vim.notify = orig_notify
     config.options.related_auto_open = orig_related
     lsp.request, lsp.request_ok, lsp.ensure_start = orig_request, orig_ok, orig_start
