@@ -2445,14 +2445,14 @@ local ok, err = pcall(function()
       warned[#warned + 1] = msg
     end
     lsp.ensure_start = function() end
-    lsp.request = function(method, _, cb)
+    lsp.request = function(method, params, cb)
       if method == 'chatora/relatedPages' then
-        listed[#listed + 1] = 'related'
-        cb(nil, {
-          ok = true,
-          links1hop = { { id = 'a', title = '古い方', updated = 1 }, { id = 'b', title = '新しい方', updated = 9 } },
-          links2hop = {},
-        })
+        listed[#listed + 1] = 'related ' .. params.title
+        local links = { { id = 'a', title = '古い方', updated = 1 }, { id = 'b', title = '新しい方', updated = 9 } }
+        if params.title == 'memo' then
+          links = { { id = 'b', title = '新しい方', updated = 9 }, { id = 'c', title = 'もう一つ', updated = 5 } }
+        end
+        cb(nil, { ok = true, links1hop = links, links2hop = {} })
       else
         cb('no client', nil)
       end
@@ -2485,15 +2485,26 @@ local ok, err = pcall(function()
     assert(vim.deep_equal(listed, { '-=-', 'icon=sakura' }), 'a bare filter string is an icon filter: ' .. vim.inspect(listed))
 
     sidebar.select_tab(3)
-    assert(listed[3] == 'related', 'a link tab asks for the related pages: ' .. vim.inspect(listed))
+    assert(listed[3] == 'related ロードマップ', 'a link tab asks for the related pages: ' .. vim.inspect(listed))
     local rows = vim.tbl_map(function(l)
       return l:sub(2)
     end, vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false))
     assert(vim.deep_equal(rows, { '新しい方', '古い方' }), 'newest first: ' .. vim.inspect(rows))
 
+    -- Several titles make one list, a page linked from two of them appearing once.
+    require('chatora').add_tab({ name = '合わせて', link = { 'ロードマップ', 'memo' } })
+    sidebar.select_tab(5)
+    rows = vim.tbl_map(function(l)
+      return l:sub(2)
+    end, vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false))
+    assert(
+      vim.deep_equal(rows, { '新しい方', 'もう一つ', '古い方' }) and listed[#listed] == 'related memo' and listed[#listed - 1] == 'related ロードマップ',
+      'links merge, deduped and newest first: ' .. vim.inspect(rows) .. ' ' .. vim.inspect(listed)
+    )
+
     require('chatora').add_tab({ name = '追加', filter = 'taro' })
     assert(vim.wo[win].winbar:find(' 追加 ', 1, true), 'add_tab pins a tab while the sidebar is open')
-    sidebar.select_tab(5)
+    sidebar.select_tab(6)
     assert(listed[#listed] == 'icon=taro', 'and it queries like any other: ' .. vim.inspect(listed))
 
     -- A `pages` function fills the tab itself: returning a list, or handing it to `done`
@@ -2506,7 +2517,7 @@ local ok, err = pcall(function()
         return { 'ホーム', { title = 'TODO', updated = 3 } }
       end,
     })
-    sidebar.select_tab(6)
+    sidebar.select_tab(7)
     rows = vim.tbl_map(function(l)
       return l:sub(2)
     end, vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false))
@@ -2520,7 +2531,7 @@ local ok, err = pcall(function()
         deliver = done
       end,
     })
-    sidebar.select_tab(7)
+    sidebar.select_tab(8)
     rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
     assert(rows[1]:find('読み込み中', 1, true), 'waiting on done: ' .. vim.inspect(rows))
     deliver({ 'あとから' })
@@ -2536,7 +2547,7 @@ local ok, err = pcall(function()
         error('boom')
       end,
     })
-    sidebar.select_tab(8)
+    sidebar.select_tab(9)
     rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
     assert(rows[1]:find('該当なし', 1, true) and warned[#warned]:find('boom', 1, true), 'an erroring function is reported: ' .. vim.inspect(warned))
 
@@ -2554,7 +2565,7 @@ local ok, err = pcall(function()
         end },
       },
     })
-    sidebar.select_tab(9)
+    sidebar.select_tab(10)
     local function lines()
       return vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
     end
@@ -2562,7 +2573,7 @@ local ok, err = pcall(function()
       vim.deep_equal(lines(), { '▾ 📅 daily', ' 新しい方', ' 古い方', '▸ note', '▾ fixed', ' 固定' }),
       'open folders list their pages under a header, a closed one only its header: ' .. vim.inspect(lines())
     )
-    assert(vim.deep_equal(listed, { 'related' }), 'a closed folder is not fetched: ' .. vim.inspect(listed))
+    assert(vim.deep_equal(listed, { 'related daily' }), 'a closed folder is not fetched: ' .. vim.inspect(listed))
 
     vim.api.nvim_win_set_cursor(win, { 4, 0 })
     sidebar.open_current()
@@ -2575,7 +2586,7 @@ local ok, err = pcall(function()
     sidebar.open_current()
     sidebar.close()
     sidebar.open('proj')
-    sidebar.select_tab(9)
+    sidebar.select_tab(10)
     assert(lines()[1] == '▸ 📅 daily', 'a folder the reader closed stays closed when the sidebar reopens: ' .. vim.inspect(lines()))
 
     sidebar.close()

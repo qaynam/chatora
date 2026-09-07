@@ -141,13 +141,16 @@ local function make_list(spec, keys, where, fallback_label, prior)
   if spec.pages ~= nil and type(spec.pages) ~= 'function' then
     vim.notify_once(('[chatora] %sの pages は関数にしてください'):format(where), vim.log.levels.WARN)
   end
+  if spec.link ~= nil and type(spec.link) ~= 'string' and type(spec.link) ~= 'table' then
+    vim.notify_once(('[chatora] %sの link はページのタイトルか、その並びにしてください'):format(where), vim.log.levels.WARN)
+  end
   local label = spec.label or spec.name or fallback_label
   local carried = prior ~= nil and prior.label == label and prior or nil
   return {
     label = label,
     icon = spec.icon,
     filter = spec.filter,
-    link = spec.link,
+    link = (type(spec.link) == 'string' or type(spec.link) == 'table') and spec.link or nil,
     pages = type(spec.pages) == 'function' and spec.pages or nil,
     unread_only = (spec.unread_only or spec.unread) and true or nil,
     state = carried and carried.state or new_state(),
@@ -469,6 +472,41 @@ local function as_rows(list)
   return rows
 end
 
+--- The pages around every title in `titles`, as one list: a page linked from two of them
+--- appears once. Nil with a message when any of the requests failed, since a list missing
+--- one title's pages would read as those pages not existing.
+local function fetch_linked(titles, cb)
+  local pages, seen, failed = {}, {}, nil
+  local remaining = #titles
+  for _, title in ipairs(titles) do
+    lsp.request('chatora/relatedPages', { project = project, title = title }, function(err, result)
+      if err or not result or result.ok == false then
+        failed = failed or (result and result.message) or (err and tostring(err)) or 'request failed'
+      else
+        for _, p in ipairs(result.links1hop or {}) do
+          local key = p.id or p.title
+          if not seen[key] then
+            seen[key] = true
+            pages[#pages + 1] = p
+          end
+        end
+      end
+      remaining = remaining - 1
+      if remaining > 0 then
+        return
+      end
+      if failed then
+        cb(nil, failed)
+        return
+      end
+      table.sort(pages, function(a, b)
+        return (a.updated or 0) > (b.updated or 0)
+      end)
+      cb(pages)
+    end)
+  end
+end
+
 --- The whole list of `tab`, or nil with a message. A `pages` function may return the
 --- list or hand it to `done` later, whichever suits what it asks; the related list of
 --- `link` is sorted newest first, as the other tabs are.
@@ -494,17 +532,7 @@ local function fetch_whole(tab, cb)
     end
     return
   end
-  lsp.request('chatora/relatedPages', { project = project, title = tab.link }, function(err, result)
-    if err or not result or result.ok == false then
-      cb(nil, (result and result.message) or (err and tostring(err)) or 'request failed')
-      return
-    end
-    local pages = vim.list_slice(result.links1hop or {})
-    table.sort(pages, function(a, b)
-      return (a.updated or 0) > (b.updated or 0)
-    end)
-    cb(pages)
-  end)
+  fetch_linked(type(tab.link) == 'table' and tab.link or { tab.link }, cb)
 end
 
 --- Fetch the next batch of `list`, which belongs to tab `index`, and draw it if that tab is
