@@ -74,7 +74,7 @@ end
 
 local DEFAULT_TABS = {
   { label = 'すべて' },
-  { label = '未読', filter = 'me', unread_only = true },
+  { label = '未読', mine = true, unread_only = true },
 }
 
 -- What a `sidebar_tabs` entry, or a folder at any depth in one, may say. A key outside
@@ -84,6 +84,7 @@ local LIST_KEYS = {
   name = true,
   icon = true,
   filter = true,
+  mine = true,
   related = true,
   pages = true,
   unread = true,
@@ -104,7 +105,7 @@ local active = 1
 --- date anyway.
 local sessions = {}
 
--- Fetched once per session; a `filter = 'me'` tab cannot query until it lands.
+-- Fetched once per session; a `mine` tab cannot query until it lands.
 local me = nil
 
 local function new_state()
@@ -129,7 +130,7 @@ local function make_list(spec, where, fallback_label, prior)
   for key in pairs(spec) do
     if not LIST_KEYS[key] then
       vim.notify_once(
-        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, filter, related, pages, unread, open, folders）'):format(
+        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, filter, mine, related, pages, unread, open, folders）'):format(
           where,
           key
         ),
@@ -149,6 +150,12 @@ local function make_list(spec, where, fallback_label, prior)
       vim.log.levels.WARN
     )
   end
+  if spec.filter == 'me' then
+    vim.notify_once(
+      ('[chatora] %sの `filter = \'me\'` は `mine = true` になりました。filter にはページのタイトルを書きます'):format(where),
+      vim.log.levels.WARN
+    )
+  end
   local label = spec.label or spec.name or fallback_label
   local carried = prior ~= nil and prior.label == label and prior or nil
   local pages = spec.pages
@@ -162,7 +169,8 @@ local function make_list(spec, where, fallback_label, prior)
     label = label,
     where = where,
     icon = spec.icon,
-    filter = spec.filter,
+    filter = spec.filter ~= 'me' and spec.filter or nil,
+    mine = (spec.mine == true or spec.filter == 'me') and true or nil,
     related = (type(spec.related) == 'string' or type(spec.related) == 'table') and spec.related or nil,
     pages = type(pages) == 'function' and pages or nil,
     unread_only = (spec.unread_only or spec.unread) and true or nil,
@@ -344,13 +352,11 @@ local function all_lists(tab)
   return collect_lists(tab, false, {})
 end
 
---- The `filterType`/`filterValue` pair for a tab, or nil for "no filter".
+--- The `filterType`/`filterValue` pair for a tab, or nil for "no filter". A `mine` tab is
+--- the web's filter for the reader's own name: their saved filter when they have one,
+--- else the icon of their name.
 local function filter_of(tab)
-  local filter = tab.filter
-  if filter == nil or filter == false then
-    return nil
-  end
-  if filter == 'me' then
+  if tab.mine then
     if not me then
       return nil
     end
@@ -361,6 +367,10 @@ local function filter_of(tab)
     if me.name and me.name ~= '' then
       return 'icon', me.name
     end
+    return nil
+  end
+  local filter = tab.filter
+  if filter == nil or filter == false then
     return nil
   end
   -- The web's page filter takes a title and filters by its `.icon` notation; a bare
@@ -598,7 +608,7 @@ local AUTO_SCAN_LIMIT = 500
 --- Request params for one batch of `tab`, or nil when it cannot query yet.
 local function batch_params(tab, skip)
   local filter_type, filter_value = filter_of(tab)
-  if tab.filter == 'me' and not filter_type then
+  if tab.mine and not filter_type then
     return nil
   end
   return {
@@ -1207,7 +1217,7 @@ function M.open(proj, opts)
       -- rather than leaving a spinner running for a request that will not arrive.
       for _, tab in ipairs(tabs) do
         for _, list in ipairs(all_lists(tab)) do
-          if list.filter == 'me' then
+          if list.mine then
             list.state.fetched = true
           end
         end

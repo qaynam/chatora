@@ -11,7 +11,7 @@ local defaults = {
   sidebar_width = 32,
   sidebar_tabs = {
     { label = 'すべて' },
-    { label = '未読', filter = 'me', unread_only = true },
+    { label = '未読', mine = true, unread_only = true },
   },
   -- true derives the underline's color from the theme; a color string sets it outright.
   sidebar_separator = true,
