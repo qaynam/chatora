@@ -1,7 +1,9 @@
--- Cosense's own insert-mode editing shortcuts, reproduced in page buffers:
--- timestamp insertion, self-icon insertion, tab-separated table cells, and
--- bracket auto-pairing. Plus the <leader>c namespace, which is every chatora
--- mapping that lives outside a page buffer.
+-- Every key chatora maps, in one table: the <prefix> namespace, and the normal- and
+-- insert-mode keys of a page buffer. Each stands for an action of `chatora.actions`, which
+-- a `<Plug>(chatora-…)` mapping reaches as well, so a reader who maps their own keys needs
+-- nothing from here. Cosense's insert-mode habits reproduced in page buffers — tab-separated
+-- table cells, bracket auto-pairing — are behaviours (`edit`), not keys, and live here only
+-- because a mapping is how they are done.
 local M = {}
 
 local config = require('chatora.config')
@@ -11,51 +13,50 @@ local function as_list(value)
   return type(value) == 'table' and value or { value }
 end
 
-local DEFAULTS = {
-  insert_date = '<C-t>',
-  -- <C-i> is Cosense's own shortcut, but a terminal only sends it as a distinct key when
-  -- it speaks the kitty keyboard protocol (kitty/Ghostty natively; tmux needs
-  -- `set -g extended-keys on`). Everywhere else it arrives as <Tab>, which the completion
-  -- plugin owns — hence the <M-i> alternative, which nothing contends for.
-  insert_icon = { '<C-i>', '<M-i>' },
-  date_format = '%Y-%m-%d %H:%M:%S',
-  autopair = true,
-  table_tab = true,
-  prefix = '<leader>c',
+local DEFAULT_PREFIX = '<leader>c'
+
+--- Every action, in the order the help sheet lists them. A default written `<prefix>x`
+--- hangs off `keymaps.prefix`; `page` and `insert` actions are mapped per page buffer.
+---@type { name: string, keys: string|string[], desc: string, scope: 'global'|'page'|'insert' }[]
+local ACTIONS = {
+  { name = 'sidebar', keys = '<prefix>t', desc = 'サイドバーを開閉', scope = 'global' },
+  { name = 'search', keys = '<prefix>s', desc = 'ページを検索', scope = 'global' },
+  { name = 'new', keys = '<prefix>n', desc = '新規ページ', scope = 'global' },
+  { name = 'project', keys = '<prefix>p', desc = 'プロジェクト切り替え', scope = 'global' },
+  { name = 'account', keys = '<prefix>a', desc = 'アカウント切り替え', scope = 'global' },
+  { name = 'help', keys = '<prefix>?', desc = 'ヘルプ', scope = 'global' },
+  { name = 'follow', keys = 'gd', desc = 'リンク先へジャンプ（外部 URL はブラウザで開く）', scope = 'page' },
+  { name = 'related', keys = { '<prefix>r', 'gR' }, desc = '関連ページパネルを開閉', scope = 'page' },
+  { name = 'related_side', keys = '<prefix>R', desc = '関連ページパネルを下／右に切り替え', scope = 'page' },
+  { name = 'info', keys = '<prefix>i', desc = 'ページ情報（作成者・更新者・被リンクなど）', scope = 'page' },
+  { name = 'pull', keys = '<prefix>f', desc = 'サーバーの変更を取り込む（マージ）', scope = 'page' },
+  { name = 'next_conflict', keys = { '<prefix>c', ']c' }, desc = '次の競合へ', scope = 'page' },
+  { name = 'next_updated', keys = ']u', desc = '次の更新行へ', scope = 'page' },
+  { name = 'prev_updated', keys = '[u', desc = '前の更新行へ', scope = 'page' },
+  { name = 'paste_image', keys = '<prefix>v', desc = 'クリップボードの画像を貼り付け', scope = 'page' },
+  { name = 'delete', keys = '<prefix>d', desc = 'ページを削除（確認あり）', scope = 'page' },
+  { name = 'normalize_indent', keys = '<prefix>I', desc = 'インデントを半角スペースに揃える', scope = 'page' },
+  { name = 'copy_url', keys = '<prefix>y', desc = 'ページ URL をコピー', scope = 'page' },
+  { name = 'copy_link', keys = '<prefix>Y', desc = 'リンク記法をコピー', scope = 'page' },
+  { name = 'open_in_browser', keys = '<prefix>o', desc = 'ブラウザで開く', scope = 'page' },
+  { name = 'insert_date', keys = '<C-t>', desc = '日時を挿入', scope = 'insert' },
+  {
+    name = 'insert_icon',
+    keys = { '<C-i>', '<M-i>' },
+    desc = 'アイコンを挿入（リンク補完中はその候補のアイコン）',
+    scope = 'insert',
+  },
 }
 
--- The <leader>c namespace, as suffix -> { action, description }. `prefix = false`
--- installs none of them; a suffix set to `false` drops just that one.
-local GLOBAL_ACTIONS = {
-  t = { 'toggle', 'サイドバーを開閉' },
-  s = { 'search', 'ページを検索' },
-  n = { 'new', '新規ページ' },
-  r = { 'related', '関連ページを開閉' },
-  R = { 'related_side', '関連ページを下／右に切り替え' },
-  i = { 'info', 'ページ情報（作成者・更新者・被リンクなど）' },
-  f = { 'pull', 'サーバーの変更を取り込む（マージ）' },
-  c = { 'next_conflict', '次の競合へ' },
-  v = { 'paste_image', 'クリップボードの画像を貼り付け' },
-  d = { 'delete', 'ページを削除（確認あり）' },
-  I = { 'normalize_indent', 'インデントを半角スペースに揃える' },
-  y = { 'copy_url', 'ページ URL をコピー' },
-  Y = { 'copy_link', 'リンク記法をコピー' },
-  o = { 'open_in_browser', 'ブラウザで開く' },
-  a = { 'account', 'アカウント切り替え' },
-  p = { 'project', 'プロジェクト切り替え' },
-  ['?'] = { 'help', 'ヘルプ' },
-}
-
-local function run(action)
-  local actions = require('chatora.actions')
-  if actions[action] then
-    actions[action]()
-  else
-    require('chatora').dispatch(action, '')
-  end
+local KNOWN_KEYS = { prefix = true }
+for _, action in ipairs(ACTIONS) do
+  KNOWN_KEYS[action.name] = true
 end
 
-local function settings()
+--- Each action's keys as configured, or nil for `keymaps = false`. An action set to
+--- `false` has none. A name not in the table is called out once: misspelled, it would
+--- leave the default in place without a word.
+local function resolve()
   local raw = config.options.keymaps
   if raw == false then
     return nil
@@ -63,12 +64,47 @@ local function settings()
   if type(raw) ~= 'table' then
     raw = {}
   end
+  for key in pairs(raw) do
+    if not KNOWN_KEYS[key] then
+      vim.notify_once(('[chatora] keymaps に知らないキー `%s` があります'):format(key), vim.log.levels.WARN)
+    end
+  end
+  local prefix = raw.prefix
+  if prefix == nil then
+    prefix = DEFAULT_PREFIX
+  end
   local out = {}
-  for key, fallback in pairs(DEFAULTS) do
-    -- `false` disables one mapping; only a missing key falls back to the default.
-    out[key] = raw[key] == nil and fallback or raw[key]
+  for _, action in ipairs(ACTIONS) do
+    local given = raw[action.name]
+    local keys = {}
+    if given == nil then
+      keys = as_list(action.keys)
+    elseif given ~= false then
+      keys = as_list(given)
+    end
+    local expanded = {}
+    for _, key in ipairs(keys) do
+      if key:find('<prefix>', 1, true) then
+        if prefix then
+          expanded[#expanded + 1] = (key:gsub('<prefix>', (prefix:gsub('%%', '%%%%'))))
+        end
+      else
+        expanded[#expanded + 1] = key
+      end
+    end
+    out[action.name] = expanded
   end
   return out
+end
+
+local function run(name)
+  require('chatora.actions')[name]()
+end
+
+--- The `<Plug>` mapping standing for `name`: underscores become hyphens, as `<Plug>` names
+--- customarily do.
+function M.plug(name)
+  return '<Plug>(chatora-' .. name:gsub('_', '-') .. ')'
 end
 
 -- Resolved once per session from chatora/authStatus; the icon notation needs
@@ -111,11 +147,17 @@ local function insert_at_cursor(bufnr, text)
   vim.api.nvim_win_set_cursor(0, { row, col + #text })
 end
 
+--- Insert the date and time, in `edit.date_format`, at the cursor.
+function M.insert_date()
+  insert_at_cursor(vim.api.nvim_get_current_buf(), os.date(config.options.edit.date_format))
+end
+
 --- Insert an icon notation. Which icon depends on what is on screen: with a link
 --- completion open and an entry highlighted it is *that page's* icon, replacing the
 --- half-typed `[...]` outright — the same thing the web editor does when the key is pressed
 --- with a suggestion focused. With no menu it falls back to the user's own icon.
-local function insert_icon(bufnr)
+function M.insert_icon()
+  local bufnr = vim.api.nvim_get_current_buf()
   local completion = require('chatora.completion')
   local title = completion.selected_title()
   if title then
@@ -194,10 +236,7 @@ end
 --- use expandtab, so a plain Tab would type a space and the row would parse as one cell.
 --- Every other keystroke goes back to the mapping chatora displaced — `<Tab>` belongs to
 --- the completion plugin, and taking it outright is what made <C-i> stop working.
-local function tab_map(bufnr, opts)
-  if not opts.table_tab then
-    return
-  end
+local function tab_map(bufnr)
   local displaced = foreign_tab_map()
   vim.keymap.set('i', '<Tab>', function()
     local row = vim.api.nvim_win_get_cursor(0)[1]
@@ -248,92 +287,99 @@ local function autopair_maps(bufnr)
   end, opts('chatora: 空の [] をまとめて削除'))
 end
 
---- Install the insert-mode shortcuts on a cosense page buffer.
+--- Map the page and insert actions in a page buffer, and install the `edit` behaviours
+--- that are done with a mapping.
 function M.attach(bufnr)
-  local opts = settings()
-  if not opts then
-    return
-  end
-
-  if opts.insert_date then
-    vim.keymap.set('i', opts.insert_date, function()
-      insert_at_cursor(bufnr, os.date(opts.date_format))
-    end, { buffer = bufnr, silent = true, desc = 'chatora: 日時を挿入' })
-  end
-
-  if opts.insert_icon then
-    -- Warm the cache so the first press inserts immediately instead of after a
-    -- round-trip.
-    with_own_name(function() end, { silent = true })
-    for _, key in ipairs(as_list(opts.insert_icon)) do
-      vim.keymap.set('i', key, function()
-        insert_icon(bufnr)
-      end, {
-        buffer = bufnr,
-        silent = true,
-        desc = 'chatora: アイコンを挿入（リンク補完中はその候補のアイコン）',
-      })
+  local keys = resolve()
+  if keys then
+    for _, action in ipairs(ACTIONS) do
+      if action.scope ~= 'global' then
+        local mode = action.scope == 'insert' and 'i' or 'n'
+        for _, key in ipairs(keys[action.name]) do
+          vim.keymap.set(mode, key, function()
+            run(action.name)
+          end, { buffer = bufnr, nowait = mode == 'n', silent = true, desc = 'chatora: ' .. action.desc })
+        end
+      end
+    end
+    if #keys.insert_icon > 0 then
+      -- Warm the cache so the first press inserts immediately instead of after a
+      -- round-trip.
+      with_own_name(function() end, { silent = true })
     end
   end
 
-  -- Also on InsertEnter: completion plugins map <Tab> per buffer when insert mode starts,
-  -- so a mapping set at buffer-load time is already displaced by the first keystroke.
-  tab_map(bufnr, opts)
-  vim.api.nvim_create_autocmd('InsertEnter', {
-    buffer = bufnr,
-    group = vim.api.nvim_create_augroup('ChatoraKeymaps' .. bufnr, { clear = true }),
-    callback = function()
-      tab_map(bufnr, opts)
-    end,
-  })
-
-  if opts.autopair then
+  local edit = config.options.edit
+  if edit.table_tab then
+    -- Also on InsertEnter: completion plugins map <Tab> per buffer when insert mode starts,
+    -- so a mapping set at buffer-load time is already displaced by the first keystroke.
+    tab_map(bufnr)
+    vim.api.nvim_create_autocmd('InsertEnter', {
+      buffer = bufnr,
+      group = vim.api.nvim_create_augroup('ChatoraKeymaps' .. bufnr, { clear = true }),
+      callback = function()
+        tab_map(bufnr)
+      end,
+    })
+  end
+  if edit.autopair then
     autopair_maps(bufnr)
   end
 end
 
---- Install the global <prefix> namespace. These are the only mappings chatora sets
---- outside a page buffer.
+--- Define a `<Plug>` mapping for every action, and map the global ones. These are the
+--- only mappings chatora sets outside a page buffer. Whatever an earlier setup() mapped
+--- goes first, so a reload with other keys leaves no stale ones behind.
 function M.setup_global()
-  local opts = settings()
-  if not (opts and opts.prefix) then
+  for _, mode in ipairs({ 'n', 'i' }) do
+    for _, map in ipairs(vim.api.nvim_get_keymap(mode)) do
+      if map.desc and map.desc:find('^chatora: ') then
+        pcall(vim.keymap.del, mode, map.lhs)
+      end
+    end
+  end
+  for _, action in ipairs(ACTIONS) do
+    vim.keymap.set(action.scope == 'insert' and 'i' or 'n', M.plug(action.name), function()
+      run(action.name)
+    end, { desc = 'chatora: ' .. action.desc })
+  end
+  local keys = resolve()
+  if not keys then
     return
   end
-  local overrides = type(config.options.keymaps) == 'table' and config.options.keymaps or {}
-  for suffix, spec in pairs(GLOBAL_ACTIONS) do
-    local key = overrides[spec[1]]
-    if key == nil then
-      key = opts.prefix .. suffix
-    end
-    if key then
-      vim.keymap.set('n', key, function()
-        run(spec[1])
-      end, { silent = true, desc = 'chatora: ' .. spec[2] })
+  for _, action in ipairs(ACTIONS) do
+    if action.scope == 'global' then
+      for _, key in ipairs(keys[action.name]) do
+        vim.keymap.set('n', key, function()
+          run(action.name)
+        end, { silent = true, desc = 'chatora: ' .. action.desc })
+      end
     end
   end
 end
 
---- The global namespace as { key, description } rows, for the help sheet.
-function M.global_rows()
-  local opts = settings()
-  if not (opts and opts.prefix) then
-    return {}
-  end
-  local overrides = type(config.options.keymaps) == 'table' and config.options.keymaps or {}
+--- The configured keys of one scope as { keys, description } rows, in the table's order,
+--- for the help sheet. Only actions with a key are listed.
+---@param scope 'global'|'page'|'insert'
+function M.rows(scope)
+  local keys = resolve()
   local rows = {}
-  for suffix, spec in pairs(GLOBAL_ACTIONS) do
-    local key = overrides[spec[1]]
-    if key == nil then
-      key = opts.prefix .. suffix
-    end
-    if key then
-      rows[#rows + 1] = { key, spec[2] }
+  if not keys then
+    return rows
+  end
+  for _, action in ipairs(ACTIONS) do
+    if action.scope == scope and #keys[action.name] > 0 then
+      rows[#rows + 1] = { table.concat(keys[action.name], ' / '), action.desc }
     end
   end
-  table.sort(rows, function(a, b)
-    return a[1] < b[1]
-  end)
   return rows
+end
+
+--- The action names, in the help sheet's order.
+function M.action_names()
+  return vim.tbl_map(function(action)
+    return action.name
+  end, ACTIONS)
 end
 
 return M

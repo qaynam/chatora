@@ -22,7 +22,7 @@ local DEFAULT_BAR = '▌'
 local WRAP_SHIFT = 1
 
 local function options()
-  local opts = config.options.quote
+  local opts = config.options.view.quote
   if opts == false then
     return nil
   end

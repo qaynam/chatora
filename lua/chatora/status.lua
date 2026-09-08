@@ -40,7 +40,7 @@ local function ensure_hl()
 end
 
 local function settings()
-  local raw = config.options.status
+  local raw = config.options.edit.save_status
   if raw == false then
     return { enabled = false, icons = DEFAULT_ICONS, echo = false }
   end

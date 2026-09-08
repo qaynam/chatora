@@ -108,10 +108,10 @@ function M.put(after, register)
   vim.api.nvim_put(M.prefixed(lines, prefix, quote), 'c', after, true)
 end
 
---- Map `p` and `P` in a page buffer to M.put. A read-only page keeps the mapping that
---- explains why it cannot be edited.
+--- Map `p` and `P` in a page buffer to M.put, unless `edit.paste_indent` is off. A
+--- read-only page keeps the mapping that explains why it cannot be edited.
 function M.attach(bufnr)
-  if vim.b[bufnr].chatora_read_only then
+  if vim.b[bufnr].chatora_read_only or not require('chatora.config').options.edit.paste_indent then
     return
   end
   for key, after in pairs({ p = true, P = false }) do

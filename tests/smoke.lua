@@ -274,12 +274,12 @@ local ok, err = pcall(function()
     end
     assert(vim.deep_equal(numbers, { '1 ', '2 ' }), 'unexpected line numbers: ' .. vim.inspect(numbers))
 
-    require('chatora.config').options.codeblock_numbers = false
+    require('chatora.config').options.view.codeblock_numbers = false
     codeblock.refresh(buf)
     for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, codeblock.ns, 0, -1, { details = true })) do
       assert(m[4].virt_text_pos ~= 'inline', 'expected no numbers when codeblock_numbers = false')
     end
-    require('chatora.config').options.codeblock_numbers = true
+    require('chatora.config').options.view.codeblock_numbers = true
     codeblock.refresh(buf)
 
     -- Re-attaching must not double-attach (guard flag) or error.
@@ -410,11 +410,11 @@ local ok, err = pcall(function()
       assert(bullet_rows[row] == nil, 'expected no bullet on row ' .. row)
     end
 
-    require('chatora.config').options.pads = false
+    require('chatora.config').options.view.pads = false
     pads.render(buf)
     marks = vim.api.nvim_buf_get_extmarks(buf, pads.ns, 0, -1, {})
     assert(#marks == 0, 'expected no pad extmarks when pads=false')
-    require('chatora.config').options.pads = true
+    require('chatora.config').options.view.pads = true
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
@@ -684,11 +684,11 @@ local ok, err = pcall(function()
     assert(#wins == 1, 'flipping must not leave the old panel behind, got ' .. #wins)
     local opts = require('chatora.config').options
     assert(
-      vim.api.nvim_win_get_width(wins[1]) == opts.related_width,
-      'a right-hand panel takes related_width'
+      vim.api.nvim_win_get_width(wins[1]) == opts.related.width,
+      'a right-hand panel takes related.width'
     )
     assert(
-      vim.api.nvim_win_get_height(wins[1]) > opts.related_height,
+      vim.api.nvim_win_get_height(wins[1]) > opts.related.height,
       'a right-hand panel is a column, not the bottom strip'
     )
 
@@ -761,9 +761,9 @@ local ok, err = pcall(function()
       pads.extra_cells('  1. foo', 1) == pads.extra_cells('  foo', 1) - 1,
       'a numbered item gains everything but the bullet'
     )
-    config.options.pads = false
+    config.options.view.pads = false
     assert(pads.extra_cells('   a', 1) == 0, 'no shift when pads are disabled')
-    config.options.pads = true
+    config.options.view.pads = true
   end
 
   -- table.find_blocks: pure Cosense table-block detection.
@@ -857,11 +857,11 @@ local ok, err = pcall(function()
     assert(virt_lines_n == 3, 'expected 3 border lines (top/mid/bottom), got ' .. virt_lines_n)
     assert(header_n == 1, 'expected exactly one header highlight, got ' .. header_n)
 
-    require('chatora.config').options.tables = false
+    require('chatora.config').options.view.tables = false
     ctable.render(buf)
     marks = vim.api.nvim_buf_get_extmarks(buf, ctable.ns, 0, -1, {})
     assert(#marks == 0, 'expected no table extmarks when tables=false')
-    require('chatora.config').options.tables = true
+    require('chatora.config').options.view.tables = true
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end
@@ -969,7 +969,7 @@ local ok, err = pcall(function()
     local config = require('chatora.config')
     local lsp = require('chatora.lsp')
     local orig_request, orig_system = lsp.request, vim.system
-    local orig_video, orig_external = config.options.video, config.options.external_link
+    local orig_video, orig_external = config.options.open_video, config.options.open_external_link
 
     local url = 'https://gyazo.com/0204f06d4ed4af1554dc3c2a87a806b2'
     local mp4 = 'https://i.gyazo.com/0204f06d4ed4af1554dc3c2a87a806b2.mp4'
@@ -986,7 +986,7 @@ local ok, err = pcall(function()
     end
 
     local played = nil
-    config.options.video = function(given)
+    config.options.open_video = function(given)
       played = given
       return true
     end
@@ -998,25 +998,25 @@ local ok, err = pcall(function()
       ran = table.concat(cmd, ' ')
       return { wait = function() end }
     end
-    config.options.video = { 'mpv', '--loop', '{url}' }
+    config.options.open_video = { 'mpv', '--loop', '{url}' }
     links.goto_definition()
     assert(ran == 'mpv --loop ' .. mp4, 'a command gets {url} filled in, got ' .. tostring(ran))
 
     ran = nil
-    config.options.video = 'open'
+    config.options.open_video = 'open'
     links.goto_definition()
     assert(ran == 'open ' .. mp4, 'a bare command name takes the URL as its argument')
 
-    -- Nothing configured: the browser path decides, and `external_link = 'ignore'` means
-    -- nothing happens at all.
+    -- Nothing configured: the browser path decides, and `open_external_link = 'never'`
+    -- means nothing happens at all.
     ran, played = nil, nil
-    config.options.video = false
-    config.options.external_link = 'ignore'
+    config.options.open_video = 'browser'
+    config.options.open_external_link = 'never'
     links.goto_definition()
-    assert(ran == nil and played == nil, 'video = false leaves the link to the browser')
+    assert(ran == nil and played == nil, "open_video = 'browser' leaves the link to the browser")
 
     lsp.request, vim.system = orig_request, orig_system
-    config.options.video, config.options.external_link = orig_video, orig_external
+    config.options.open_video, config.options.open_external_link = orig_video, orig_external
     vim.cmd('close')
     vim.api.nvim_buf_delete(buf, { force = true })
   end
@@ -1105,6 +1105,132 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- Every key is in one table, by action: a key can be changed, given twice, or taken
+  -- away, and `keymaps = false` leaves no key at all — while the edit behaviours done with
+  -- a mapping (autopair) answer to `edit`, not to `keymaps`. A `<Plug>` stands for each
+  -- action, and the page-only actions are mapped in page buffers alone.
+  do
+    local config = require('chatora.config')
+    local keymaps = require('chatora.keymaps')
+    local orig_notify = vim.notify
+    local warned = {}
+    vim.notify = function(msg)
+      warned[#warned + 1] = msg
+    end
+    local function buf_lhs(buf, mode)
+      local lhs = {}
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, mode)) do
+        lhs[map.lhs] = map.desc or true
+      end
+      return lhs
+    end
+    local function global_lhs(mode)
+      local lhs = {}
+      for _, map in ipairs(vim.api.nvim_get_keymap(mode)) do
+        if map.desc and map.desc:find('chatora') then
+          lhs[map.lhs] = true
+        end
+      end
+      return lhs
+    end
+
+    chatora.setup({})
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    keymaps.attach(buf)
+    local n, i, g = buf_lhs(buf, 'n'), buf_lhs(buf, 'i'), global_lhs('n')
+    assert(n['gd'] and n['gR'] and n[']c'] and n[']u'] and n['[u'], 'the page keys are on the buffer: ' .. vim.inspect(n))
+    assert(n['\\cr'] and n['\\ci'] and n['\\cf'], 'the page-only <leader>c keys are on the buffer too')
+    assert(not g['\\ci'] and not g['\\cr'], 'and not global: ' .. vim.inspect(g))
+    assert(g['\\ct'] and g['\\cs'] and g['\\cn'] and g['\\c?'], 'the global ones are global: ' .. vim.inspect(g))
+    assert(i['<C-T>'] and i['<C-I>'] and i['<M-i>'], 'the insert keys are on the buffer: ' .. vim.inspect(i))
+    assert(global_lhs('n')['<Plug>(chatora-follow)'] and global_lhs('i')['<Plug>(chatora-insert-date)'], 'a <Plug> stands for each action')
+    assert(keymaps.plug('next_conflict') == '<Plug>(chatora-next-conflict)', 'underscores become hyphens in a <Plug> name')
+    vim.api.nvim_buf_delete(buf, { force = true })
+
+    chatora.setup({
+      keymaps = { sidebar = 'gk', follow = { 'gd', '<CR>' }, related = false, insert_date = false, typo = 'x' },
+    })
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    keymaps.attach(buf)
+    n, i, g = buf_lhs(buf, 'n'), buf_lhs(buf, 'i'), global_lhs('n')
+    assert(g['gk'] and not g['\\ct'], 'an action takes the key it is given: ' .. vim.inspect(g))
+    assert(n['gd'] and n['<CR>'], 'a list maps every key in it')
+    assert(not n['gR'] and not n['\\cr'], 'false takes every key of the action away')
+    assert(not i['<C-T>'] and i['<C-I>'], 'an insert key can be taken away on its own')
+    assert(warned[#warned]:find('知らないキー `typo`', 1, true), 'a misspelled action is called out: ' .. tostring(warned[#warned]))
+    local rows = keymaps.rows('page')
+    assert(rows[1][1] == 'gd / <CR>', 'the help sheet shows the configured keys: ' .. vim.inspect(rows[1]))
+    vim.api.nvim_buf_delete(buf, { force = true })
+
+    chatora.setup({ keymaps = { prefix = false } })
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    keymaps.attach(buf)
+    n, g = buf_lhs(buf, 'n'), global_lhs('n')
+    assert(not g['\\ct'] and not n['\\cr'], 'prefix = false drops the <leader>c keys')
+    assert(n['gd'] and n['gR'] and n[']c'], 'and keeps the others')
+    vim.api.nvim_buf_delete(buf, { force = true })
+
+    chatora.setup({ keymaps = false })
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    keymaps.attach(buf)
+    n, i, g = buf_lhs(buf, 'n'), buf_lhs(buf, 'i'), global_lhs('n')
+    assert(next(n) == nil, 'keymaps = false maps no normal key on the page: ' .. vim.inspect(n))
+    assert(not i['<C-T>'] and not i['<C-I>'], 'nor an insert key')
+    assert(i['['] and i['<Tab>'], 'autopair and the table tab are edit behaviours, still on: ' .. vim.inspect(i))
+    assert(not g['\\ct'] and g['<Plug>(chatora-sidebar)'], 'no global key either, but the <Plug> stays')
+    vim.api.nvim_buf_delete(buf, { force = true })
+
+    chatora.setup({ edit = { autopair = false, table_tab = false } })
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    keymaps.attach(buf)
+    i = buf_lhs(buf, 'i')
+    assert(not i['['] and not i['<Tab>'] and i['<C-T>'], 'edit turns the behaviours off, leaving the keys: ' .. vim.inspect(i))
+    vim.api.nvim_buf_delete(buf, { force = true })
+
+    chatora.setup({})
+    vim.notify = orig_notify
+  end
+
+  -- A key setup() does not know is called out once and does nothing — at the top, inside
+  -- a group, and in keymaps — so a misspelled one is not quietly lost.
+  do
+    local config = require('chatora.config')
+    local orig_notify = vim.notify
+    local warned = {}
+    vim.notify = function(msg)
+      warned[#warned + 1] = msg
+    end
+    chatora.setup({
+      sidebar_width = 10,
+      colour = 'red',
+      sidebar = { widht = 10 },
+      keymaps = { toggle = 'gk', autopair = false },
+      edit = { autosave = 3 },
+    })
+    local o = config.options
+    assert(o.sidebar.width == 32 and o.edit.autosave == 3, 'an unknown key is not applied, a known one is')
+    assert(o.edit.autopair == true and o.keymaps.sidebar == nil, 'nor is an old keymaps key')
+    local joined = table.concat(warned, '\n')
+    for _, line in ipairs({
+      '知らないキー `sidebar_width` があります',
+      '知らないキー `colour` があります',
+      '知らないキー `sidebar.widht` があります',
+    }) do
+      assert(joined:find(line, 1, true), 'expected: ' .. line .. '\nin: ' .. joined)
+    end
+    require('chatora.keymaps').attach(vim.api.nvim_create_buf(false, true))
+    joined = table.concat(warned, '\n')
+    assert(joined:find('keymaps に知らないキー `toggle` があります', 1, true), 'an old keymaps key is unknown too: ' .. joined)
+    assert(joined:find('keymaps に知らないキー `autopair` があります', 1, true), 'so is a behaviour that moved to edit: ' .. joined)
+    chatora.setup({})
+    vim.notify = orig_notify
+  end
+
   -- spacing: off by default (line=0, code=0); enabling adds virt_lines
   -- between body lines but not after the last line.
   do
@@ -1115,13 +1241,13 @@ local ok, err = pcall(function()
     spacing.render(buf)
     local marks = vim.api.nvim_buf_get_extmarks(buf, spacing.ns, 0, -1, {})
     assert(#marks == 0, 'spacing disabled by default')
-    config.options.spacing = { line = 1, code = 0 }
+    config.options.view.spacing = { line = 1, code = 0 }
     spacing.render(buf)
     marks = vim.api.nvim_buf_get_extmarks(buf, spacing.ns, 0, -1, {})
     -- Gaps below 'a' and 'b' only: the title has title_margin, the last line
     -- has nothing after it.
     assert(#marks == 2, 'expected 2 spacing extmarks, got ' .. #marks)
-    config.options.spacing = { line = 0, code = 0 }
+    config.options.view.spacing = { line = 0, code = 0 }
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
@@ -1158,13 +1284,13 @@ local ok, err = pcall(function()
       local marks = vim.api.nvim_buf_get_extmarks(buf, render.ns, { row, 0 }, { row, -1 }, { details = true })
       return marks[1] and marks[1][4].conceal
     end
-    assert(conceal_at(1) == config.options.file_icon, 'a file link is badged, got ' .. tostring(conceal_at(1)))
+    assert(conceal_at(1) == config.options.view.file_icon, 'a file link is badged, got ' .. tostring(conceal_at(1)))
     assert(conceal_at(2) == '', 'an ordinary link is not, got ' .. tostring(conceal_at(2)))
 
-    config.options.file_icon = false
+    config.options.view.file_icon = false
     render.refresh(buf)
     assert(conceal_at(1) == '', 'file_icon = false leaves the bracket simply hidden')
-    config.options.file_icon = '󰈔'
+    config.options.view.file_icon = '󰈔'
 
     lsp.request = orig_request
     vim.api.nvim_buf_delete(buf, { force = true })
@@ -1194,6 +1320,35 @@ local ok, err = pcall(function()
     assert(told and told.bufnr == buf and told.enabled == false, 'ibl must be told once it exists')
 
     vim.api.nvim_buf_delete(buf, { force = true })
+
+    -- The sidebar's rows start with blanks as well (a thumbnail's cells, a folder's
+    -- indent), and it is built anew by :Chatora reload, after the plugin has loaded.
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
+    lsp.ensure_start = function() end
+    lsp.request = function(_, _, cb)
+      cb('no client', nil)
+    end
+    lsp.request_ok = function(method, _, cb)
+      if method == 'chatora/listPages' then
+        cb({ ok = true, count = 1, scanned = 1, pages = { { id = 'p', title = 'ページ', updated = 1 } } })
+      end
+    end
+    told = nil
+    package.loaded.ibl = {
+      setup_buffer = function(bufnr, opts)
+        told = { bufnr = bufnr, enabled = opts.enabled }
+      end,
+    }
+    sidebar.close()
+    sidebar.open('proj')
+    local sbuf = vim.fn.bufnr('chatora://sidebar')
+    package.loaded.ibl = nil
+    assert(vim.b[sbuf].snacks_indent == false, 'the sidebar is kept clear of snacks.indent')
+    assert(told and told.bufnr == sbuf and told.enabled == false, 'and of indent-blankline')
+    sidebar.close()
+    lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
   end
 
   -- 'linebreak' moves a run of Japanese to the next row whole, so a page window has it off
@@ -1218,8 +1373,8 @@ local ok, err = pcall(function()
     local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
     -- Opening a page opens the related panel; this test is about the buffer, and the extra
     -- window outlives it otherwise.
-    local orig_auto = config.options.related_auto_open
-    config.options.related_auto_open = false
+    local orig_auto = config.options.related.auto_open
+    config.options.related.auto_open = false
     local lines = {}
     for i = 1, 40 do
       lines[i] = ('%02d 行目'):format(i)
@@ -1266,7 +1421,7 @@ local ok, err = pcall(function()
     assert(vim.api.nvim_win_get_cursor(0)[1] == 20, 'and the fetch must not move it')
 
     lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
-    config.options.related_auto_open = orig_auto
+    config.options.related.auto_open = orig_auto
     vim.api.nvim_buf_delete(vim.api.nvim_get_current_buf(), { force = true })
     if vim.api.nvim_win_is_valid(win) then
       vim.api.nvim_win_close(win, true)
@@ -1320,24 +1475,24 @@ local ok, err = pcall(function()
   do
     local images = require('chatora.images')
     local config = require('chatora.config')
-    local orig_backend = config.options.image_backend
+    local orig_backend = config.options.image.backend
 
     local mine = { place = function() end }
-    config.options.image_backend = mine
+    config.options.image.backend = mine
     assert(images.backend() == mine, 'a table with place() is the backend')
 
-    config.options.image_backend = function()
+    config.options.image.backend = function()
       return mine
     end
     assert(images.backend() == mine, 'a function is asked for one')
 
     -- A function may answer with a name instead, which is how a reader picks per terminal:
     -- the protocol a terminal takes is not chatora's to know.
-    config.options.image_backend = function()
+    config.options.image.backend = function()
       return 'snacks'
     end
     local named = images.backend()
-    config.options.image_backend = 'snacks'
+    config.options.image.backend = 'snacks'
     assert(
       (named == nil) == (images.backend() == nil),
       'a name from a function must resolve like the name itself'
@@ -1345,11 +1500,11 @@ local ok, err = pcall(function()
 
     -- No place() to call: chatora says so once and carries on with what it can find, which
     -- in a headless test is nothing at all.
-    config.options.image_backend = { close = function() end }
+    config.options.image.backend = { close = function() end }
     local fell_back = images.backend()
     assert(fell_back ~= mine, 'a table without place() is not used')
 
-    config.options.image_backend = orig_backend
+    config.options.image.backend = orig_backend
   end
 
   -- images: a page that changes one line keeps the pictures that did not move, redraws the
@@ -1469,7 +1624,7 @@ local ok, err = pcall(function()
     local config = require('chatora.config')
     local lsp = require('chatora.lsp')
     local orig_backend, orig_request = images.backend, lsp.request
-    local orig_gallery = config.options.image_gallery
+    local orig_gallery = config.options.image.gallery
 
     local placed = {}
     images.backend = function()
@@ -1531,7 +1686,7 @@ local ok, err = pcall(function()
     local three = { 'https://example.com/1.png', 'https://example.com/2.png', 'https://example.com/3.png' }
     show(three)
     -- A tile 8 cells wide: three fit in any window.
-    config.options.image_gallery = { rows = 4, aspect = 1 }
+    config.options.image.gallery = { rows = 4, aspect = 1 }
     images.attach(buf, 'proj')
     images.refresh(buf)
     assert(#composed == 1, 'one strip for the line, got ' .. #composed)
@@ -1553,7 +1708,7 @@ local ok, err = pcall(function()
     assert(concealed == 3, 'every notation hides behind the strip, got ' .. concealed)
 
     -- A tile as wide as the window: one per strip, so the line wraps into three strips.
-    config.options.image_gallery = { rows = 40, aspect = 1 }
+    config.options.image.gallery = { rows = 40, aspect = 1 }
     images.invalidate(buf)
     placed, composed = {}, {}
     images.refresh(buf)
@@ -1561,7 +1716,7 @@ local ok, err = pcall(function()
 
     -- No composer: each picture is placed on its own.
     compose_ok = false
-    config.options.image_gallery = { rows = 4, aspect = 1 }
+    config.options.image.gallery = { rows = 4, aspect = 1 }
     show({ 'https://example.com/4.png', 'https://example.com/5.png', 'https://example.com/6.png' })
     images.invalidate(buf)
     placed, composed = {}, {}
@@ -1569,7 +1724,7 @@ local ok, err = pcall(function()
     assert(#composed == 1, 'the strip was asked for once, got ' .. #composed)
     assert(#placed == 3, 'without a strip the pictures are placed one by one, got ' .. #placed)
 
-    config.options.image_gallery = orig_gallery
+    config.options.image.gallery = orig_gallery
     images.backend, lsp.request = orig_backend, orig_request
     vim.cmd('close')
     vim.api.nvim_buf_delete(buf, { force = true })
@@ -1580,10 +1735,10 @@ local ok, err = pcall(function()
   do
     local config = require('chatora.config')
     local quote = require('chatora.quote')
-    local orig = config.options.quote
+    local orig = config.options.view.quote
 
     -- `default = true` only fills an undefined group, so each variant starts from a cleared one.
-    config.options.quote = true
+    config.options.view.quote = true
     vim.cmd('highlight clear ChatoraQuoteText')
     quote.ensure_hl()
     local hl = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteText', link = false })
@@ -1612,13 +1767,13 @@ local ok, err = pcall(function()
     assert(vim.deep_equal(boxes[0], { 0, 1, true }) and vim.deep_equal(boxes[1], { 0, 2, true }), 'the box runs from the bar to the row end, got ' .. vim.inspect(boxes))
     vim.api.nvim_buf_delete(buf, { force = true })
 
-    config.options.quote = { dim = true }
+    config.options.view.quote = { dim = true }
     vim.cmd('highlight clear ChatoraQuoteText')
     quote.ensure_hl()
     hl = vim.api.nvim_get_hl(0, { name = 'ChatoraQuoteText' })
     assert(hl.link == 'Comment', 'dim = true links the text to Comment, got ' .. vim.inspect(hl))
 
-    config.options.quote = orig
+    config.options.view.quote = orig
     vim.cmd('highlight clear ChatoraQuoteText')
     quote.ensure_hl()
   end
@@ -1670,7 +1825,7 @@ local ok, err = pcall(function()
   do
     local images = require('chatora.images')
     local config = require('chatora.config')
-    local orig_backend_opt, orig_snacks = config.options.image_backend, package.loaded.snacks
+    local orig_backend_opt, orig_snacks = config.options.image.backend, package.loaded.snacks
     local img = {
       sent = true,
       placements = {},
@@ -1705,7 +1860,7 @@ local ok, err = pcall(function()
         },
       },
     }
-    config.options.image_backend = 'snacks'
+    config.options.image.backend = 'snacks'
     local backend = images.backend()
     assert(backend, 'the fake snacks is taken as the backend')
     local buf = vim.api.nvim_create_buf(false, true)
@@ -1718,7 +1873,7 @@ local ok, err = pcall(function()
     handle.close()
     assert(img.sent == false, 'closing the last placement unmarks the image, so the next one sends again')
     package.loaded.snacks = orig_snacks
-    config.options.image_backend = orig_backend_opt
+    config.options.image.backend = orig_backend_opt
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
@@ -1766,8 +1921,8 @@ local ok, err = pcall(function()
     -- Opening a page can open the related panel beside it, a window later tests would
     -- land in; this test is about the page alone.
     local config = require('chatora.config')
-    local orig_related = config.options.related_auto_open
-    config.options.related_auto_open = false
+    local orig_related = config.options.related.auto_open
+    config.options.related.auto_open = false
 
     vim.cmd('new')
     vim.wo.winfixbuf = false
@@ -1896,7 +2051,7 @@ local ok, err = pcall(function()
 
     vim.fn.confirm = orig_confirm
     vim.notify = orig_notify
-    config.options.related_auto_open = orig_related
+    config.options.related.auto_open = orig_related
     lsp.request, lsp.request_ok, lsp.ensure_start = orig_request, orig_ok, orig_start
     vim.cmd('close!')
     vim.api.nvim_buf_delete(buf, { force = true })
@@ -1913,8 +2068,8 @@ local ok, err = pcall(function()
     local config = require('chatora.config')
     local orig_request, orig_ok, orig_start = lsp.request, lsp.request_ok, lsp.ensure_start
     local orig_confirm, orig_notify = vim.fn.confirm, vim.notify
-    local orig_related, orig_autosave = config.options.related_auto_open, config.options.autosave
-    config.options.related_auto_open = false
+    local orig_related, orig_autosave = config.options.related.auto_open, config.options.edit.autosave
+    config.options.related.auto_open = false
     vim.notify = function() end
 
     local asked, prompts, answers, attached = {}, {}, {}, {}
@@ -1983,7 +2138,7 @@ local ok, err = pcall(function()
 
     -- The autosave goes on, with the body under the title the server has; the typed title
     -- stays in the buffer, unsaved.
-    config.options.autosave = 1
+    config.options.edit.autosave = 1
     vim.api.nvim_buf_set_lines(buf, 1, 2, false, { '本文を直した' })
     vim.wait(1400, function()
       return #asked > 0
@@ -1993,7 +2148,7 @@ local ok, err = pcall(function()
       rename.pending(buf) and vim.bo[buf].modified and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == '新しい題',
       'and the typed title stays, unsaved'
     )
-    config.options.autosave = false
+    config.options.edit.autosave = false
     asked = {}
 
     -- Leaving the line settles it: the links question comes first, then the save with the
@@ -2065,7 +2220,7 @@ local ok, err = pcall(function()
     )
 
     vim.fn.confirm, vim.notify = orig_confirm, orig_notify
-    config.options.related_auto_open, config.options.autosave = orig_related, orig_autosave
+    config.options.related.auto_open, config.options.edit.autosave = orig_related, orig_autosave
     lsp.request, lsp.request_ok, lsp.ensure_start = orig_request, orig_ok, orig_start
     vim.cmd('close!')
     pcall(vim.api.nvim_buf_delete, shown, { force = true })
@@ -2439,7 +2594,7 @@ local ok, err = pcall(function()
     local lsp = require('chatora.lsp')
     local config = require('chatora.config')
     local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
-    local orig_tabs, orig_notify = config.options.sidebar_tabs, vim.notify
+    local orig_tabs, orig_notify = config.options.sidebar.tabs, vim.notify
     local warned, listed = {}, {}
     vim.notify = function(msg)
       warned[#warned + 1] = msg
@@ -2464,7 +2619,7 @@ local ok, err = pcall(function()
       end
     end
     sidebar.close()
-    config.options.sidebar_tabs = {
+    config.options.sidebar.tabs = {
       { name = 'All', icon = '📖' },
       { name = 'sakura', filter = 'sakura' },
       { name = 'リンク', related = 'ロードマップ' },
@@ -2685,20 +2840,20 @@ local ok, err = pcall(function()
     )
 
     sidebar.close()
-    config.options.sidebar_tabs = orig_tabs
+    config.options.sidebar.tabs = orig_tabs
     vim.notify = orig_notify
     lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
   end
 
-  -- The key names v0.1 shipped with still work, each saying once what it is now. Two keys
-  -- that decide a list's contents in one spec are called out: only one of them can win.
+  -- Two keys that decide a list's contents in one spec are called out: only one of them
+  -- can win. A key a tab does not have (v0.1's `label`, say) is an unknown key like any.
   do
     local sidebar = require('chatora.sidebar')
     local lsp = require('chatora.lsp')
     local config = require('chatora.config')
     local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
-    local orig_tabs, orig_notify = config.options.sidebar_tabs, vim.notify
-    local warned, params = {}, {}
+    local orig_tabs, orig_notify = config.options.sidebar.tabs, vim.notify
+    local warned = {}
     vim.notify = function(msg)
       warned[#warned + 1] = msg
     end
@@ -2706,30 +2861,27 @@ local ok, err = pcall(function()
     lsp.request = function(_, _, cb)
       cb('no client', nil)
     end
-    lsp.request_ok = function(method, p, cb)
+    lsp.request_ok = function(method, _, cb)
       if method == 'chatora/listPages' then
-        params[#params + 1] = p
         cb({ ok = true, count = 0, scanned = 0, pages = {} })
       end
     end
     sidebar.close()
-    config.options.sidebar_tabs = {
-      { label = '古い', unread_only = true },
+    config.options.sidebar.tabs = {
+      { label = '古い' },
       { name = '二つ', filter = 'taro', related = 'memo' },
     }
     sidebar.open('proj')
     local win = vim.fn.bufwinid('chatora://sidebar')
-    assert(vim.wo[win].winbar:find(' 古い ', 1, true), 'label still names the tab: ' .. vim.wo[win].winbar)
-    assert(params[1] and params[1].unreadOnly == true, 'unread_only still narrows to unread: ' .. vim.inspect(params[1]))
+    assert(vim.wo[win].winbar:find(' #1 ', 1, true), 'label does not name a tab any more: ' .. vim.wo[win].winbar)
     local joined = table.concat(warned, '\n')
-    assert(joined:find('1 番目の `label` は `name` になりました', 1, true), 'label is said to be name now: ' .. joined)
-    assert(joined:find('1 番目の `unread_only` は `unread` になりました', 1, true), 'unread_only is said to be unread now: ' .. joined)
+    assert(joined:find('1 番目に知らないキー `label` があります', 1, true), 'label is an unknown key: ' .. joined)
     assert(
       joined:find('2 番目の中身を決めるキーは 1 つだけです（filter, related が一緒にあります）', 1, true),
       'two sources are called out: ' .. joined
     )
     sidebar.close()
-    config.options.sidebar_tabs = orig_tabs
+    config.options.sidebar.tabs = orig_tabs
     vim.notify = orig_notify
     lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
   end
@@ -2740,8 +2892,8 @@ local ok, err = pcall(function()
     local sidebar = require('chatora.sidebar')
     local lsp = require('chatora.lsp')
     local config = require('chatora.config')
-    local orig_ok, orig_start, orig_tabs = lsp.request_ok, lsp.ensure_start, config.options.sidebar_tabs
-    config.options.sidebar_tabs = { { name = '未読', unread = true } }
+    local orig_ok, orig_start, orig_tabs = lsp.request_ok, lsp.ensure_start, config.options.sidebar.tabs
+    config.options.sidebar.tabs = { { name = '未読', unread = true } }
     local batches = 0
     lsp.ensure_start = function() end
     lsp.request_ok = function(method, _, cb)
@@ -2756,7 +2908,7 @@ local ok, err = pcall(function()
     sidebar.load_more()
     assert(batches == 6, 'a scroll pulls one more batch, got ' .. batches)
     sidebar.close()
-    config.options.sidebar_tabs = orig_tabs
+    config.options.sidebar.tabs = orig_tabs
     lsp.request_ok, lsp.ensure_start = orig_ok, orig_start
   end
 
@@ -2770,10 +2922,10 @@ local ok, err = pcall(function()
     local config = require('chatora.config')
     local orig_backend, orig_request, orig_ok, orig_start = images.backend, lsp.request, lsp.request_ok, lsp.ensure_start
     local orig_thumbs, orig_images, orig_tabs =
-      config.options.sidebar_thumbnails, config.options.images, config.options.sidebar_tabs
-    config.options.sidebar_thumbnails = true
-    config.options.images = 'auto'
-    config.options.sidebar_tabs = {
+      config.options.sidebar.thumbnails, config.options.image.enabled, config.options.sidebar.tabs
+    config.options.sidebar.thumbnails = true
+    config.options.image.enabled = true
+    config.options.sidebar.tabs = {
       { name = 'a' },
       { name = 'b', filter = 'x' },
       { name = 'c', folders = { { name = 'f', image = '~/f.png', pages = { { title = 'r', image = '/tmp/r.png' } } } } },
@@ -2891,7 +3043,7 @@ local ok, err = pcall(function()
     -- The tab index outlives the tab list; later tests expect the first one.
     sidebar.select_tab(1)
 
-    config.options.sidebar_thumbnails, config.options.images, config.options.sidebar_tabs = orig_thumbs, orig_images, orig_tabs
+    config.options.sidebar.thumbnails, config.options.image.enabled, config.options.sidebar.tabs = orig_thumbs, orig_images, orig_tabs
     images.backend, lsp.request, lsp.request_ok, lsp.ensure_start = orig_backend, orig_request, orig_ok, orig_start
   end
 
@@ -2923,17 +3075,17 @@ local ok, err = pcall(function()
     chatora.setup(function(ctx)
       asked[#asked + 1] = tostring(ctx.project)
       if ctx.project == 'my-project' then
-        return { sidebar_tabs = work_tabs, autosave = 5, origin = 'https://example.com' }
+        return { sidebar = { tabs = work_tabs }, edit = { autosave = 5 }, origin = 'https://example.com' }
       end
-      return { project = 'my-project', autosave = 10 }
+      return { default_project = 'my-project', edit = { autosave = 10 } }
     end)
     assert(vim.deep_equal(asked, { 'nil' }), 'setup asks once, with no project: ' .. vim.inspect(asked))
-    assert(config.options.project == 'my-project' and config.options.autosave == 10, 'the no-project answer is the base')
+    assert(config.options.default_project == 'my-project' and config.options.edit.autosave == 10, 'the no-project answer is the base')
 
     sidebar.open('my-project')
     assert(vim.deep_equal(asked, { 'nil', 'my-project' }), 'entering a project asks for it: ' .. vim.inspect(asked))
-    assert(config.options.autosave == 5, 'options follow the project')
-    assert(config.options.sidebar_tabs == work_tabs, 'the answer is used as given, not copied')
+    assert(config.options.edit.autosave == 5, 'options follow the project')
+    assert(config.options.sidebar.tabs == work_tabs, 'the answer is used as given, not copied')
     assert(config.options.origin == 'https://scrapbox.io', 'what the server started with stays')
     assert(
       #warned == 1 and warned[1]:find('origin はサーバーの起動時に渡す', 1, true),
@@ -2945,27 +3097,27 @@ local ok, err = pcall(function()
 
     sidebar.open('other')
     assert(vim.deep_equal(asked, { 'nil', 'my-project', 'other' }), 'another project is asked for: ' .. vim.inspect(asked))
-    assert(config.options.autosave == 10, 'a project the function has nothing special for gets the base answer')
+    assert(config.options.edit.autosave == 10, 'a project the function has nothing special for gets the base answer')
     assert(vim.wo[win].winbar:find(' すべて ', 1, true), 'and the default tabs: ' .. vim.wo[win].winbar)
 
     sidebar.open('my-project')
     assert(#asked == 3, 'coming back does not ask again: ' .. vim.inspect(asked))
-    assert(config.options.sidebar_tabs == work_tabs, 'the kept answer comes back')
+    assert(config.options.sidebar.tabs == work_tabs, 'the kept answer comes back')
 
     chatora.set_project(nil)
-    assert(config.options.autosave == 10, 'no project means the base answer')
+    assert(config.options.edit.autosave == 10, 'no project means the base answer')
 
     -- A table is still a table: nothing per project, and use_project leaves it alone.
-    chatora.setup({ autosave = 7 })
+    chatora.setup({ edit = { autosave = 7 } })
     chatora.set_project('my-project')
-    assert(config.options.autosave == 7, 'a table setup has no per-project answer')
+    assert(config.options.edit.autosave == 7, 'a table setup has no per-project answer')
 
     -- Neither an error nor a non-table takes the plugin down.
     chatora.setup(function()
       error('boom')
     end)
     assert(warned[#warned]:find('setup() の関数でエラー', 1, true) and warned[#warned]:find('boom', 1, true), 'an error is reported: ' .. tostring(warned[#warned]))
-    assert(config.options.autosave == false, 'and the defaults stand')
+    assert(config.options.edit.autosave == false, 'and the defaults stand')
     chatora.setup(function()
       return 'oops'
     end)
@@ -2984,7 +3136,7 @@ local ok, err = pcall(function()
     local config = require('chatora.config')
     local sidebar = require('chatora.sidebar')
     local lsp = require('chatora.lsp')
-    local orig_start, orig_ok, orig_request, orig_tabs = lsp.ensure_start, lsp.request_ok, lsp.request, config.options.sidebar_tabs
+    local orig_start, orig_ok, orig_request, orig_tabs = lsp.ensure_start, lsp.request_ok, lsp.request, config.options.sidebar.tabs
     local requests = 0
     lsp.ensure_start = function() end
     lsp.request = function(_, _, cb)
@@ -2997,7 +3149,7 @@ local ok, err = pcall(function()
       end
     end
     sidebar.close()
-    config.options.sidebar_tabs = {
+    config.options.sidebar.tabs = {
       { name = 'plain' },
       { name = 'tree', folders = { { name = 'a', filter = 'taro' }, { name = 'b', filter = 'sakura' } } },
       { name = 'later', filter = 'qaynam' },
@@ -3020,7 +3172,7 @@ local ok, err = pcall(function()
     assert(requests == 4, 'nor does going back to a tab loaded before: ' .. requests)
 
     sidebar.close()
-    config.options.sidebar_tabs = orig_tabs
+    config.options.sidebar.tabs = orig_tabs
     lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
   end
 

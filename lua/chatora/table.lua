@@ -112,7 +112,7 @@ end
 --- enables both; a table selectively disables one via `border`/`header` set
 --- to `false` (any other value, including omission, stays enabled).
 local function table_opts()
-  local opt = config.options.tables
+  local opt = config.options.view.tables
   local border, header, grid = true, true, true
   if type(opt) == 'table' then
     if opt.border == false then
@@ -297,7 +297,7 @@ function M.render(bufnr)
   end
   ensure_hl()
   vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
-  if config.options.tables == false then
+  if config.options.view.tables == false then
     return
   end
 

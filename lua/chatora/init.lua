@@ -35,8 +35,8 @@ function M.resolve_project(cb)
     cb(M.session.project)
     return
   end
-  if config.options.project then
-    M.set_project(config.options.project)
+  if config.options.default_project then
+    M.set_project(config.options.default_project)
     cb(M.session.project)
     return
   end
@@ -258,7 +258,7 @@ function M.toggle()
   sidebar.toggle()
 end
 
---- Pin a tab to the sidebar, as an entry in `sidebar_tabs` would (see README).
+--- Pin a tab to the sidebar, as an entry in `sidebar.tabs` would (see README).
 function M.add_tab(spec)
   sidebar.add_tab(spec)
 end

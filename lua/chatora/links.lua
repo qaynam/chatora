@@ -25,10 +25,13 @@ function M.url_at(line, col)
   end
 end
 
---- Hand `url` to whatever `video` names, and say whether it took it. A function declines by
---- returning false, and so does anything naming no player — the default included.
+--- Hand `url` to whatever `open_video` names, and say whether it took it. A function
+--- declines by returning false, and `'browser'` (the default) names no player at all.
 local function play(url)
-  local player = config.options.video
+  local player = config.options.open_video
+  if player == 'browser' then
+    return false
+  end
   if type(player) == 'function' then
     local ok, took = pcall(player, url)
     if not ok then
@@ -57,11 +60,11 @@ end
 
 --- Open `url` in the system browser, asking first unless configured otherwise.
 function M.open_external(url)
-  local mode = config.options.external_link
-  if mode == 'ignore' or mode == false then
+  local mode = config.options.open_external_link
+  if mode == 'never' then
     return
   end
-  if mode ~= 'open' and vim.fn.confirm('ブラウザで開きますか？\n' .. url, '&Yes\n&No', 1) ~= 1 then
+  if mode ~= 'always' and vim.fn.confirm('ブラウザで開きますか？\n' .. url, '&Yes\n&No', 1) ~= 1 then
     return
   end
   local ok, err = pcall(require('chatora.browser').open, url)

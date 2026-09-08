@@ -51,7 +51,7 @@ end
 local state = {}
 
 local function options()
-  local opts = config.options.telomere
+  local opts = config.options.view.telomere
   if opts == false then
     return nil
   end

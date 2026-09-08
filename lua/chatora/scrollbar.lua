@@ -39,7 +39,7 @@ local MARK_PRIORITY = 200
 local bars = {}
 
 local function enabled()
-  local opts = config.options.telomere
+  local opts = config.options.view.telomere
   if opts == false then
     return false
   end

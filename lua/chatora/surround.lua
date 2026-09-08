@@ -16,7 +16,7 @@ local OFFICIAL = { '*', '/', '-', '_' }
 --- Marker characters the visual keys are bound to: Cosense's own four, the link bracket,
 --- and whatever markers the user defined notations for.
 local function markers()
-  local opts = config.options.surround
+  local opts = config.options.edit.surround
   if opts == false then
     return {}
   end

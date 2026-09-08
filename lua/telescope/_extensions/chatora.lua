@@ -38,9 +38,9 @@ local function await(method, params)
 end
 
 local function resolve_project(opts)
-  local project = opts.project or chatora_config.options.project
+  local project = opts.project or chatora_config.options.default_project
   if not project or project == '' then
-    error('chatora: no project configured; pass { project = "..." } or set it in setup()')
+    error('chatora: no project configured; pass { project = "..." } or set default_project in setup()')
   end
   return project
 end

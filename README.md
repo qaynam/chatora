@@ -137,47 +137,67 @@ URL を受け取る小さなアプリを作って登録します。あとは**�
 
 ## キーマップ
 
-### グローバル（`<leader>c`）
-
-`keymaps.prefix`（既定は `<leader>c`）の下にまとめて並びます。`prefix = false` を渡すと、
-グローバルのキーマップを一つも登録しません。
-
-| キー         | 動作                             | アクション名       |
-| ------------ | -------------------------------- | ------------------ |
-| `<leader>ct` | サイドバーを開閉                 | `toggle`           |
-| `<leader>cs` | ページを検索                     | `search`           |
-| `<leader>cn` | 新規ページ                       | `new`              |
-| `<leader>cr` | 関連ページを開閉                 | `related`          |
-| `<leader>cR` | 関連ページを下／右に切り替え     | `related_side`     |
-| `<leader>ci` | ページ情報                       | `info`             |
-| `<leader>cf` | サーバーの変更を取り込む         | `pull`             |
-| `<leader>cc` | 次の競合行へ                     | `next_conflict`    |
-| `<leader>cv` | クリップボードの画像を貼り付け   | `paste_image`      |
-| `<leader>cd` | ページを削除（確認あり）         | `delete`           |
-| `<leader>cI` | インデントを半角スペースに揃える | `normalize_indent` |
-| `<leader>cy` | ページ URL をコピー              | `copy_url`         |
-| `<leader>cY` | リンク記法 `[タイトル]` をコピー | `copy_link`        |
-| `<leader>co` | ブラウザで開く                   | `open_in_browser`  |
-| `<leader>ca` | アカウント切り替え               | `account`          |
-| `<leader>cp` | プロジェクト切り替え             | `project`          |
-| `<leader>c?` | ヘルプ                           | `help`             |
-
-個別に変えたい場合は、アクション名をキーにして書きます。
+キーは `keymaps` に、アクション名ごとに全部並んでいます。値はそのまま `vim.keymap.set` に渡すキーで、
+並びで書けば 2 つ以上、`false` で無しです。`prefix`（既定 `<leader>c`）は `<leader>c` 系の既定の頭で、
+`prefix = false` でその系統をまとめて外せます。`keymaps = false` で 1 つも入れません。
 
 ```lua
-keymaps = { info = '<leader>ck', copy_url = false }
+keymaps = { sidebar = 'gk', follow = { 'gd', '<CR>' }, copy_url = false }
 ```
+
+自分で割り当てるなら、アクションごとの `<Plug>(chatora-<アクション名>)`（`_` は `-` になります）か、
+`require('chatora.actions').<アクション名>()` を使います。ページのキーは `FileType cosense` で付けます。
+
+```lua
+require('chatora').setup({ keymaps = false })
+vim.keymap.set('n', '<leader>k', '<Plug>(chatora-sidebar)')
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'cosense',
+  callback = function(ev)
+    vim.keymap.set('n', 'gd', '<Plug>(chatora-follow)', { buffer = ev.buf })
+    vim.keymap.set('n', '<leader>p', require('chatora.actions').pull, { buffer = ev.buf })
+  end,
+})
+```
+
+### どこでも
+
+| 既定         | アクション | 動作                 |
+| ------------ | ---------- | -------------------- |
+| `<leader>ct` | `sidebar`  | サイドバーを開閉     |
+| `<leader>cs` | `search`   | ページを検索         |
+| `<leader>cn` | `new`      | 新規ページ           |
+| `<leader>cp` | `project`  | プロジェクト切り替え |
+| `<leader>ca` | `account`  | アカウント切り替え   |
+| `<leader>c?` | `help`     | ヘルプ               |
 
 ### ページバッファ
 
-| キー         | 動作                                                                  |
-| ------------ | --------------------------------------------------------------------- |
-| `gd`         | リンク先へジャンプ（`[ページ#行ID]` はその行へ、外部 URL はブラウザ） |
-| `gR`         | 関連ページパネルを開閉                                                |
-| `gs`         | ページを検索                                                          |
-| `]c`         | 次の競合行へ                                                          |
-| `]u` / `[u`  | 次 / 前の更新行へ（右端のマークが指している行）                       |
-| `:w` / `:wq` | 保存（同期）                                                          |
+| 既定                | アクション                      | 動作                                                                  |
+| ------------------- | ------------------------------- | --------------------------------------------------------------------- |
+| `gd`                | `follow`                        | リンク先へジャンプ（`[ページ#行ID]` はその行へ、外部 URL はブラウザ） |
+| `<leader>cr` / `gR` | `related`                       | 関連ページパネルを開閉                                                |
+| `<leader>cR`        | `related_side`                  | 関連ページパネルを下／右に切り替え                                    |
+| `<leader>ci`        | `info`                          | ページ情報                                                            |
+| `<leader>cf`        | `pull`                          | サーバーの変更を取り込む                                              |
+| `<leader>cc` / `]c` | `next_conflict`                 | 次の競合行へ                                                          |
+| `]u` / `[u`         | `next_updated` / `prev_updated` | 次 / 前の更新行へ（右端のマークが指している行）                       |
+| `<leader>cv`        | `paste_image`                   | クリップボードの画像を貼り付け                                        |
+| `<leader>cd`        | `delete`                        | ページを削除（確認あり）                                              |
+| `<leader>cI`        | `normalize_indent`              | インデントを半角スペースに揃える                                      |
+| `<leader>cy`        | `copy_url`                      | ページ URL をコピー                                                   |
+| `<leader>cY`        | `copy_link`                     | リンク記法 `[タイトル]` をコピー                                      |
+| `<leader>co`        | `open_in_browser`               | ブラウザで開く                                                        |
+| `:w` / `:wq`        |                                 | 保存（同期）                                                          |
+
+### insert モード
+
+| 既定              | アクション    | 動作                                                                                |
+| ----------------- | ------------- | ----------------------------------------------------------------------------------- |
+| `<C-t>`           | `insert_date` | 日時を挿入（書式は `edit.date_format`）                                             |
+| `<C-i>` / `<M-i>` | `insert_icon` | アイコンを挿入（[下記](docs/FEATURES.md#アイコン挿入)）                             |
+| `[`               |               | `[]` を自動ペア（`edit.autopair`。リンク補完はこの閉じたペアの中でのみ発火）        |
+| `<Tab>`           |               | テーブル行では本物のタブ、それ以外は元のマッピングに委譲（`edit.table_tab`）        |
 
 ### サイドバー
 
@@ -195,15 +215,6 @@ keymaps = { info = '<leader>ck', copy_url = false }
 行頭には保存状態（`✓` / `●`）と未読バー（`▍`）が出ます。未読バーは、最後に開いたあとに
 更新されたページに付きます。
 
-### insert モード
-
-| キー              | 動作                                                        |
-| ----------------- | ----------------------------------------------------------- |
-| `<C-t>`           | 日時を挿入                                                  |
-| `<C-i>` / `<M-i>` | アイコンを挿入（[下記](docs/FEATURES.md#アイコン挿入)）     |
-| `[`               | `[]` を自動ペア（リンク補完はこの閉じたペアの中でのみ発火） |
-| `<Tab>`           | テーブル行では本物のタブ、それ以外は元のマッピングに委譲    |
-
 ### visual モード
 
 選択したうえで記号を押すと、その範囲を囲みます。同じキーをもう一度押した場合は、入れ子にせず
@@ -217,74 +228,98 @@ keymaps = { info = '<leader>ck', copy_url = false }
 | `[`                    | `[選択]`。リンクは育てるものではないので normal モードに戻る |
 | ユーザー定義記法の記号 | `[<記号> 選択]`                                              |
 
-`surround = false` を渡すとすべて無効になり、記号のリストを渡すと、その記号だけが有効になります。
+`edit = { surround = false }` を渡すとすべて無効になり、記号のリストを渡すと、その記号だけが有効になります。
 
 ## 設定
 
-`setup()`（lazy.nvim なら `opts`）に渡します。既定値は `lua/chatora/config.lua` にまとまっています。
-テーブルの代わりに関数を渡すと、プロジェクトごとに違う設定にできます。[下記](docs/FEATURES.md#プロジェクトごとの設定)
+`setup()`（lazy.nvim なら `opts`）に渡します。既定値と型（LuaLS の `chatora.Config`）は
+`lua/chatora/config.lua` にあります。テーブルの代わりに関数を渡すと、プロジェクトごとに違う設定に
+できます。[下記](docs/FEATURES.md#プロジェクトごとの設定)
 
-### 接続
+```lua
+require('chatora').setup({
+  default_project = 'my-project',
+  keymaps = { sidebar = 'gk' },
+  sidebar = { tabs = { { name = 'すべて' }, { name = 'daily', related = 'daily' } } },
+  edit = { autosave = 10 },
+  view = { pads = { bullet = '•' } },
+})
+```
 
-| オプション   | 既定                    | 意味                                                                                            |
-| ------------ | ----------------------- | ----------------------------------------------------------------------------------------------- |
-| `origin`     | `'https://scrapbox.io'` | Cosense の origin                                                                               |
-| `project`    | なし                    | 固定するプロジェクト。未指定なら起動時に選択                                                    |
-| `server_cmd` | 自動検出                | LSP サーバーの起動コマンド                                                                      |
-| `log`        | `false`                 | 診断ログ。`true` で `${XDG_STATE_HOME:-~/.local/state}/chatora/chatora.log`、文字列ならそのパス |
+知らないキーがあると、起動時にそう言います。
 
-### サイドバー・関連ページ
+### 起動時に決まるもの
 
-| オプション          | 既定          | 意味                                                               |
-| ------------------- | ------------- | ------------------------------------------------------------------ |
-| `sidebar_width`     | `32`          | 幅                                                                 |
-| `sidebar_tabs`      | すべて / 未読 | 上部のタブ。ページのフィルタやリンクで絞ったタブを足せる。[下記](docs/FEATURES.md#サイドバーのタブ) |
-| `sidebar_separator` | `true`        | 行ごとの区切り下線。`'#RRGGBB'` で色を指定、`false` で無効         |
-| `sidebar_thumbnails` | `false`      | ページの最初の画像を行頭に出す。画像バックエンドが要る。[下記](docs/FEATURES.md#サイドバーのサムネイル) |
-| `sidebar_poll`      | `60`          | n 秒ごとに自動更新。`false` で無効、最短 5 秒                      |
-| `related_position`  | `'bottom'`    | 関連ページパネルの位置。`'right'` で全高の縦カラム                 |
-| `related_height`    | `8`           | `'bottom'` のときの高さ                                            |
-| `related_width`     | `40`          | `'right'` のときの幅                                               |
-| `related_auto_open` | `true`        | ページを開いたら関連パネルも開く。`q` で閉じると次の `gR` まで抑制 |
+| オプション           | 既定                    | 意味                                                                                                  |
+| -------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------- |
+| `origin`             | `'https://scrapbox.io'` | Cosense の origin                                                                                     |
+| `default_project`    | なし                    | 最初に開くプロジェクト。未指定なら起動時に選択。`:Chatora project` で切り替えられる                   |
+| `server_cmd`         | 自動検出                | LSP サーバーの起動コマンド                                                                            |
+| `log`                | `false`                 | 診断ログ。`true` で `${XDG_STATE_HOME:-~/.local/state}/chatora/chatora.log`、文字列ならそのパス       |
+| `notations`          | `{}`                    | ユーザー定義の装飾記法。[下記](docs/FEATURES.md#カスタム装飾記法)                                     |
+| `keymaps`            | `true`                  | [上記](#キーマップ)。`false` で 1 つも入れない                                                        |
+| `open_external_link` | `'confirm'`             | 外部 URL に `follow` したとき。`'always'` は確認なし、`'never'` は何もしない                          |
+| `open_video`         | `'browser'`             | 動く Gyazo キャプチャに `follow` したときの行き先。[下記](docs/FEATURES.md#動画を再生する)            |
 
-### 編集・保存
+上の 4 つはサーバーの起動時に渡すので、プロジェクトごとには変えられません。
 
-| オプション      | 既定                                                | 意味                                                                                         |
-| --------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `sync`          | `{ interval = 30, on_focus = true, notify = true }` | 背後での同期。[下記](docs/FEATURES.md#同期と競合)                                            |
-| `autosave`      | `false`                                             | 編集停止から n 秒後に自動保存                                                                |
-| `status`        | `true`                                              | 保存状態アイコン。`{ icons = {...}, echo = false }` で調整                                   |
-| `keymaps`       | `true`                                              | キーマップ全般。`{ insert_date, insert_icon, date_format, autopair, table_tab, prefix }`     |
-| `surround`      | `true`                                              | visual モードの装飾キー。記号のリストで限定、`false` で無効                                  |
-| `completion`    | `'auto'`                                            | `'auto'` は外部エンジンが無いときだけ内蔵補完を有効化。`'native'` は常に、`false` は外部任せ |
-| `external_link` | `'confirm'`                                         | 外部 URL 上の `gd`。`'open'` は確認なし、`'ignore'` は何もしない                             |
-| `video`         | `false`                                             | 動く Gyazo キャプチャ上の `gd` の行き先。[下記](docs/FEATURES.md#動画を再生する)             |
+### `sidebar`
 
-### 表示
+| キー               | 既定          | 意味                                                                                                         |
+| ------------------ | ------------- | ------------------------------------------------------------------------------------------------------------ |
+| `width`            | `32`          | 幅                                                                                                           |
+| `separator`        | `true`        | 行ごとの区切り下線。`'#RRGGBB'` で色を指定、`false` で無効                                                   |
+| `thumbnails`       | `false`       | ページの最初の画像を行頭に出す。画像バックエンドが要る。[下記](docs/FEATURES.md#サイドバーのサムネイル)       |
+| `refresh_interval` | `60`          | n 秒ごとに一覧を更新。`false` で止める、最短 5 秒                                                            |
+| `tabs`             | すべて / 未読 | 上部のタブ。ページのフィルタやリンクで絞ったタブを足せる。[下記](docs/FEATURES.md#サイドバーのタブ)           |
 
-| オプション          | 既定                               | 意味                                                                                                                                                                                    |
+### `related`
+
+| キー        | 既定       | 意味                                                               |
+| ----------- | ---------- | ------------------------------------------------------------------ |
+| `position`  | `'bottom'` | 関連ページパネルの位置。`'right'` で全高の縦カラム                 |
+| `height`    | `8`        | `'bottom'` のときの高さ                                            |
+| `width`     | `40`       | `'right'` のときの幅                                               |
+| `auto_open` | `true`     | ページを開いたら関連パネルも開く。`q` で閉じると次の `gR` まで抑制 |
+
+### `edit`
+
+| キー           | 既定                                                | 意味                                                                                         |
+| -------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `autosave`     | `false`                                             | 編集停止から n 秒後に自動保存                                                                |
+| `sync`         | `{ interval = 30, on_focus = true, notify = true }` | 背後での同期。[下記](docs/FEATURES.md#同期と競合)                                            |
+| `save_status`  | `true`                                              | 保存状態アイコン。`{ icons = {...}, echo = false }` で調整                                   |
+| `completion`   | `'auto'`                                            | `'auto'` は外部エンジンが無いときだけ内蔵補完を有効化。`'native'` は常に、`false` は外部任せ |
+| `autopair`     | `true`                                              | `[` で `[]` を入れる                                                                         |
+| `table_tab`    | `true`                                              | テーブル行の `<Tab>` は本物のタブ                                                            |
+| `surround`     | `true`                                              | visual モードの装飾キー。記号のリストで限定、`false` で無効                                  |
+| `paste_indent` | `true`                                              | `p` / `P` で貼った行を、その行の字下げに揃える                                               |
+| `date_format`  | `'%Y-%m-%d %H:%M:%S'`                               | `insert_date` が入れる書式（`os.date`）                                                      |
+
+### `view`
+
+| キー                | 既定                               | 意味                                                                                                                                                                                    |
 | ------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `conceal`           | `true`                             | 記法マークアップを隠す。`true` はカーソル行だけ元の記法に戻す。文字列を渡すとそれが `'concealcursor'` になる（`'nc'` なら読んでいる間は戻さない＝カーソル行のインライン画像も消えない） |
 | `pads`              | `true`                             | 箇条書きの中点。[下記](docs/FEATURES.md#箇条書き)                                                                                                                                       |
 | `telomere`          | `{ bar = true, scrollbar = true }` | 行ごとの更新バーと右端の一覧。[下記](docs/FEATURES.md#テロメア)                                                                                                                         |
-| `quote`             | `true`                             | `>` 行の縦棒と背景。[下記](docs/FEATURES.md#引用)                                                                                                                                             |
+| `quote`             | `true`                             | `>` 行の縦棒と背景。[下記](docs/FEATURES.md#引用)                                                                                                                                       |
 | `tables`            | `true`                             | `table:` ブロックの罫線。`{ border = false, header = false }`                                                                                                                           |
 | `codeblock_numbers` | `true`                             | コードブロックの行番号                                                                                                                                                                  |
 | `file_icon`         | `'󰈔'`                              | プロジェクトにアップロードしたファイルへのリンクに付くアイコン。`false` で無し                                                                                                          |
 | `title_margin`      | `1`                                | タイトル行の下に入れる仮想空行の数                                                                                                                                                      |
 | `spacing`           | `{ line = 0, code = 0 }`           | 行間に挿入する仮想空行                                                                                                                                                                  |
-| `notations`         | `{}`                               | ユーザー定義の装飾記法。[下記](docs/FEATURES.md#カスタム装飾記法)                                                                                                                       |
 
-### 画像
+### `image`
 
-| オプション           | 既定               | 意味                                                                                                                                                                                        |
-| -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `images`             | `'auto'`           | 描画バックエンドが使えるときだけ描く。`false` で無効                                                                                                                                        |
-| `image_backend`      | `'auto'`           | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック。`'image_nvim'` / `'snacks'` で固定、テーブル（か、それを返す関数）で自前。[下記](docs/FEATURES.md#描画バックエンドを差し替える) |
-| `image_height`       | `20`               | 単独行の画像の高さ（行数）。文中のインライン画像は常に 1 行                                                                                                                                 |
-| `image_height_large` | `image_height * 2` | `[[…]]`（大きい記法）の高さ。画像とアイコンの両方に効く                                                                                                                                     |
-| `image_gallery`      | `true`             | 画像だけの行を、同じ大きさのタイルを横に並べて描く。[下記](docs/FEATURES.md#画像だけの行)                                                                                                                             |
-| `image_border`       | `true`             | 画像に合成する枠。`{ width = 1, color = '#8888', padding = 12 }`                                                                                                                            |
+| キー           | 既定         | 意味                                                                                                                                                                                        |
+| -------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`      | `true`       | 描画バックエンドが使えるときに描く。`false` で無効                                                                                                                                          |
+| `backend`      | `'auto'`     | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック。`'image_nvim'` / `'snacks'` で固定、テーブル（か、それを返す関数）で自前。[下記](docs/FEATURES.md#描画バックエンドを差し替える) |
+| `height`       | `20`         | 単独行の画像の高さ（行数）。文中のインライン画像は常に 1 行                                                                                                                                 |
+| `height_large` | `height * 2` | `[[…]]`（大きい記法）の高さ。画像とアイコンの両方に効く                                                                                                                                     |
+| `gallery`      | `true`       | 画像だけの行を、同じ大きさのタイルを横に並べて描く。[下記](docs/FEATURES.md#画像だけの行)                                                                                                   |
+| `border`       | `true`       | 画像に合成する枠。`{ width = 1, color = '#8888', padding = 12 }`                                                                                                                            |
 
 ## 機能
 

@@ -45,7 +45,7 @@ local function numbered(line)
 end
 
 local function pad_opts()
-  local opts = config.options.pads
+  local opts = config.options.view.pads
   if type(opts) ~= 'table' then
     return DEFAULTS.bullet, DEFAULTS.guide, DEFAULTS.spacing, DEFAULTS.gap
   end
@@ -94,7 +94,7 @@ end
 --- images) must shift right by this much to stay aligned.
 function M.extra_cells(line, tabstop)
   line = line or ''
-  if config.options.pads == false or indent.level(line) == 0 then
+  if config.options.view.pads == false or indent.level(line) == 0 then
     return 0
   end
   local bullet, _, spacing, gap = pad_opts()
@@ -126,7 +126,7 @@ function M.render(bufnr)
     return
   end
   vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
-  if config.options.pads == false then
+  if config.options.view.pads == false then
     return
   end
   local bullet, guide, spacing, gap = pad_opts()

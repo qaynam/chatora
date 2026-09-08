@@ -2,77 +2,202 @@
 -- of the plugin/repo root and the chatora LSP server command to launch.
 local M = {}
 
--- Every option's shape is documented in README.md; only defaults live here.
+---@class chatora.SetupContext
+---@field project? string  The project being entered; nil for the call made at startup.
+
+---@class chatora.SourceContext
+---@field project string
+---@field log fun(...)  Shown in :messages and written to the server log; safe off the main loop.
+---@field done fun(result?: table, why?: string)  Hands the result in later; `done(nil, why)` reports a failure.
+
+---@class chatora.Row
+---@field title string
+---@field image? string  URL, or a path on this machine.
+---@field action? fun(row: chatora.Row, win: integer)  Called on <CR> instead of opening a page.
+
+--- A tab, or a folder inside one. One of filter / mine / related / pages / folders decides
+--- what it holds; none means every page of the project.
+---@class chatora.TabSpec
+---@field name string
+---@field icon? string
+---@field image? string
+---@field filter? string|{ type: string, value: string }  A page title: the web's icon filter.
+---@field mine? boolean  The reader's own pages (the saved web filter when there is one).
+---@field related? string|string[]  Pages linked to these, merged into one list.
+---@field pages? (chatora.Row|string)[]|fun(ctx: chatora.SourceContext): (chatora.Row|string)[]?
+---@field unread? boolean
+---@field open? boolean  Folders only: whether it starts open.
+---@field folders? chatora.TabSpec[]|fun(ctx: chatora.SourceContext): chatora.TabSpec[]?
+
+---@class chatora.SidebarConfig
+---@field width? integer
+---@field separator? boolean|string  A row underline; a color string sets its color.
+---@field thumbnails? boolean  A page's first picture in front of its title (needs an image backend).
+---@field refresh_interval? integer|false  Seconds between refreshes of the list on screen.
+---@field tabs? chatora.TabSpec[]|false  `false` for a single list without tabs.
+
+---@class chatora.RelatedConfig
+---@field position? 'bottom'|'right'
+---@field height? integer  When position is 'bottom'.
+---@field width? integer  When position is 'right'.
+---@field auto_open? boolean
+
+---@class chatora.SyncConfig
+---@field interval? integer  Seconds between polls.
+---@field on_focus? boolean  Also sync the moment a page is entered.
+---@field notify? boolean  Announce what came in.
+
+---@class chatora.EditConfig
+---@field autosave? integer|false  Seconds after the last edit.
+---@field sync? chatora.SyncConfig|false  Background merge of the server's copy into the page.
+---@field save_status? boolean|{ icons?: table<string, string>, echo?: boolean }
+---@field completion? 'auto'|'native'|false  'auto' enables the built-in completion only without an external engine.
+---@field autopair? boolean  Typing `[` inserts `[]`.
+---@field table_tab? boolean  <Tab> inserts a real tab on a table row.
+---@field surround? boolean|string[]  Visual-mode decoration keys; a list of markers restricts them.
+---@field paste_indent? boolean  `p` / `P` give pasted lines the indent of the line they land on.
+---@field date_format? string  os.date format of what insert_date inserts.
+
+---@class chatora.TelomereConfig
+---@field bar? boolean  The per-line mark in the sign column.
+---@field scrollbar? boolean  The overview of the whole page down the right edge.
+
+---@class chatora.QuoteConfig
+---@field bar? string  The glyph standing in for `>`.
+---@field hl? vim.api.keyset.highlight  For the bar (ChatoraQuoteBar).
+---@field text_hl? vim.api.keyset.highlight|false  For the quoted text (ChatoraQuoteText).
+---@field dim? boolean  Dim the text instead of tinting its background.
+---@field wrap? boolean  Continue the bar on wrapped lines.
+
+---@class chatora.ViewConfig
+---@field conceal? boolean|string  `true` reveals markup on the cursor line; a string is used as 'concealcursor'.
+---@field pads? boolean|{ bullet?: string }  The bullet of a list item.
+---@field quote? boolean|chatora.QuoteConfig
+---@field telomere? chatora.TelomereConfig|false
+---@field tables? boolean|{ border?: boolean, header?: boolean }
+---@field codeblock_numbers? boolean
+---@field file_icon? string|false  Drawn in place of the opening bracket of a link to an uploaded file.
+---@field title_margin? integer  Virtual blank lines under the title.
+---@field spacing? { line?: integer, code?: integer }  Virtual blank lines between lines.
+
+---@class chatora.ImageConfig
+---@field enabled? boolean
+---@field backend? 'auto'|'image_nvim'|'snacks'|table|fun(): table  'auto' prefers image.nvim, then snacks.nvim.
+---@field height? integer  Rows for a picture on a line of its own.
+---@field height_large? integer  Rows for the `[[…]]` notation; defaults to twice `height`.
+---@field gallery? boolean|integer|{ rows?: integer, aspect?: number }  Tiles for a line of pictures only.
+---@field border? boolean|{ width?: integer, color?: string, padding?: integer }
+
+--- Keys as `vim.keymap.set` takes them; a list maps several, `false` maps none. Defaults
+--- under `prefix` are written `<prefix>x`. Everything but the first six is mapped in page
+--- buffers only.
+---@class chatora.Keymaps
+---@field prefix? string|false  The namespace of the `<prefix>x` defaults; `false` drops all of them.
+---@field sidebar? string|string[]|false
+---@field search? string|string[]|false
+---@field new? string|string[]|false
+---@field project? string|string[]|false
+---@field account? string|string[]|false
+---@field help? string|string[]|false
+---@field follow? string|string[]|false
+---@field related? string|string[]|false
+---@field related_side? string|string[]|false
+---@field info? string|string[]|false
+---@field pull? string|string[]|false
+---@field next_conflict? string|string[]|false
+---@field next_updated? string|string[]|false
+---@field prev_updated? string|string[]|false
+---@field paste_image? string|string[]|false
+---@field delete? string|string[]|false
+---@field normalize_indent? string|string[]|false
+---@field copy_url? string|string[]|false
+---@field copy_link? string|string[]|false
+---@field open_in_browser? string|string[]|false
+---@field insert_date? string|string[]|false
+---@field insert_icon? string|string[]|false
+
+---@class chatora.NotationSpec
+---@field name string  Identifier of the semantic token; letters, digits and `_`.
+---@field icon? string  One character drawn in place of the marker.
+---@field hl? vim.api.keyset.highlight
+---@field rule? boolean  Extend the highlight across the whole row.
+
+---@class chatora.Config
+---@field origin? string
+---@field default_project? string  Opened without asking; `:Chatora project` overrides it for the session.
+---@field server_cmd? string[]
+---@field log? boolean|string  `true` writes under `$XDG_STATE_HOME/chatora`; a string is the file.
+---@field notations? table<string, chatora.NotationSpec>  Keyed by the one-character marker.
+---@field keymaps? boolean|chatora.Keymaps  `false` maps nothing at all.
+---@field open_external_link? 'confirm'|'always'|'never'  What `follow` does on an external URL.
+---@field open_video? 'browser'|string[]|fun(url: string): boolean?  Where `follow` sends a moving Gyazo capture: a command with `{url}`, or a function that may decline with `false`.
+---@field sidebar? chatora.SidebarConfig
+---@field related? chatora.RelatedConfig
+---@field edit? chatora.EditConfig
+---@field view? chatora.ViewConfig
+---@field image? chatora.ImageConfig
+
+-- Every option's meaning is documented in README.md; only defaults live here.
+---@type chatora.Config
 local defaults = {
   origin = 'https://scrapbox.io',
-  project = nil,
+  default_project = nil,
   server_cmd = nil,
-
-  sidebar_width = 32,
-  sidebar_tabs = {
-    { name = 'すべて' },
-    { name = '未読', mine = true, unread = true },
-  },
-  -- true derives the underline's color from the theme; a color string sets it outright.
-  sidebar_separator = true,
-  -- A page's first picture, one row tall, in front of its title. Needs an image backend.
-  sidebar_thumbnails = false,
-  sidebar_poll = 60,
-
-  related_height = 8,
-  -- Used when related_position is 'right'.
-  related_width = 40,
-  -- 'bottom' (a strip under the page) or 'right' (a full-height column). <leader>cR flips
-  -- it for the session.
-  related_position = 'bottom',
-  related_auto_open = true,
-
-  status = true,
-  autosave = false,
-  -- Background merge of the server's copy into the page on screen. `interval` is seconds
-  -- between polls, `on_focus` also syncs the moment a page is entered, and `notify`
-  -- announces what came in. `false` leaves a page exactly as opened until <leader>cf.
-  sync = { interval = 30, on_focus = true, notify = true },
-  completion = 'auto',
-  external_link = 'confirm',
-  -- Where `gd` goes on a Gyazo capture that moves: a function handed the playable URL, a
-  -- command with `{url}` filled in, or false to leave it to the browser. See README.
-  video = false,
-  keymaps = true,
-  -- Visual-mode decoration keys: `*` wraps the selection in [* ], `[` in [ ], and so on.
-  -- A list of marker characters restricts it to those; false installs none of them.
-  surround = true,
   log = false,
-
-  images = 'auto',
-  -- 'auto' (image.nvim, else snacks), 'image_nvim', 'snacks', or a backend of your own:
-  -- a table with `place` (or a function returning one). See README.
-  image_backend = 'auto',
-  image_height = 20,
-  image_height_large = nil,
-  image_gallery = true,
-  image_border = true,
-
-  pads = true,
-  quote = true,
-  -- Cosense's テロメア: `bar` is the per-line mark in the sign column, `scrollbar` the
-  -- overview of the whole page down the right edge.
-  telomere = { bar = true, scrollbar = true },
-  -- true conceals markup and reveals it on the cursor line. A string is passed to
-  -- 'concealcursor' instead: 'nc' keeps it concealed while reading, which also keeps an
-  -- inline image drawn on the line the cursor is on.
-  conceal = true,
-  -- Drawn in place of the opening bracket of a link to a file kept in the project, which is
-  -- otherwise indistinguishable from a link to a page. One character; false for none.
-  file_icon = '󰈔',
-  codeblock_numbers = true,
-  tables = true,
-  title_margin = 1,
-  spacing = { line = 0, code = 0 },
-
   notations = {},
+  keymaps = true,
+  open_external_link = 'confirm',
+  open_video = 'browser',
+
+  sidebar = {
+    width = 32,
+    separator = true,
+    thumbnails = false,
+    refresh_interval = 60,
+    tabs = {
+      { name = 'すべて' },
+      { name = '未読', mine = true, unread = true },
+    },
+  },
+  related = {
+    position = 'bottom',
+    height = 8,
+    width = 40,
+    auto_open = true,
+  },
+  edit = {
+    autosave = false,
+    sync = { interval = 30, on_focus = true, notify = true },
+    save_status = true,
+    completion = 'auto',
+    autopair = true,
+    table_tab = true,
+    surround = true,
+    paste_indent = true,
+    date_format = '%Y-%m-%d %H:%M:%S',
+  },
+  view = {
+    conceal = true,
+    pads = true,
+    quote = true,
+    telomere = { bar = true, scrollbar = true },
+    tables = true,
+    codeblock_numbers = true,
+    file_icon = '󰈔',
+    title_margin = 1,
+    spacing = { line = 0, code = 0 },
+  },
+  image = {
+    enabled = true,
+    backend = 'auto',
+    height = 20,
+    height_large = nil,
+    gallery = true,
+    border = true,
+  },
 }
 
+---@type chatora.Config
 M.options = vim.deepcopy(defaults)
 
 local uv = vim.uv or vim.loop
@@ -135,6 +260,35 @@ local function validate_notations(notations)
   return out
 end
 
+-- ---------------------------------------------------------------------------
+-- keys setup() does not know
+-- ---------------------------------------------------------------------------
+
+-- Keys a group may carry beyond its defaults, whose default is nil.
+local OPTIONAL = {
+  [''] = { default_project = true, server_cmd = true },
+  image = { height_large = true },
+}
+
+--- Say once which keys of `opts` mean nothing, at the top and inside each group: a
+--- misspelled key would otherwise leave the default in place without a word.
+local function warn_unknown(opts)
+  local function check(given, known, extra, prefix)
+    if type(given) ~= 'table' then
+      return
+    end
+    for key in pairs(given) do
+      if known[key] == nil and not (extra and extra[key]) then
+        vim.notify_once(('[chatora] setup() に知らないキー `%s%s` があります'):format(prefix, key), vim.log.levels.WARN)
+      end
+    end
+  end
+  check(opts, defaults, OPTIONAL[''], '')
+  for _, group in ipairs({ 'sidebar', 'related', 'edit', 'view', 'image' }) do
+    check(opts[group], defaults[group], OPTIONAL[group], group .. '.')
+  end
+end
+
 -- Absolute path of the repo/plugin root, derived from this file's location:
 -- lua/chatora/config.lua -> repo root. The repo root doubles as the plugin's
 -- runtimepath root so plugin managers can install it straight from GitHub.
@@ -146,10 +300,12 @@ end
 --- What setup() was last called with (a table, or a function of `ctx`), kept unmerged so
 --- `:Chatora reload` re-applies the user's configuration rather than a copy of it merged
 --- with defaults.
+---@type chatora.Config|fun(ctx: chatora.SetupContext): chatora.Config|nil
 M.user_opts = nil
 
 --- Tabs pinned with add_tab after setup, listed after the configured ones. Kept apart
 --- from `options`, which is swapped out per project.
+---@type chatora.TabSpec[]
 M.pinned_tabs = {}
 
 -- Handed to the server once, when it starts, so a project cannot have its own.
@@ -177,11 +333,13 @@ local function resolve(project)
     end
     opts = ret
   end
+  warn_unknown(opts or {})
   local options = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
   options.notations = validate_notations(options.notations)
   return options
 end
 
+---@param opts? chatora.Config|fun(ctx: chatora.SetupContext): chatora.Config
 function M.setup(opts)
   M.user_opts = opts
   M.pinned_tabs = {}
@@ -193,6 +351,7 @@ end
 --- Make `options` the ones for `project` (nil: the ones for no project). Only a setup()
 --- given a function has any: it is asked once per project, with `{ project = project }`,
 --- and its answer kept for the session. What the server was started with stays as it is.
+---@param project? string
 function M.use_project(project)
   if type(M.user_opts) ~= 'function' then
     return
@@ -245,6 +404,7 @@ function M.notation_icon(name)
 end
 
 --- The configured spec behind a notation's semantic token `name`, or nil.
+---@return chatora.NotationSpec?
 function M.notation_spec(name)
   for _, spec in pairs(M.options.notations) do
     if spec.name == name then
