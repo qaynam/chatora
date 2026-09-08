@@ -451,8 +451,8 @@ function M.rename_buffer(bufnr, new_uri)
 end
 
 --- Give an untitled buffer the name its first line says, and have the server know the page
---- under it. False when it cannot be saved yet: no title, or one a page already has, which
---- the web would open rather than overwrite.
+--- under it. False when the save is not to go ahead: no title yet, or a title a page already
+--- has, in which case the reader has been offered a merge into that page instead.
 local function name_untitled(bufnr)
   local project = uri.parse(vim.api.nvim_buf_get_name(bufnr))
   local title = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ''

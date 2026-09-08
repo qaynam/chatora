@@ -1229,9 +1229,10 @@ export interface MergePageResult {
 
 /**
  * Fold the page at `uri` into the page titled `into`: the buffer's lines below the title go
- * to the end of that page, and the page at `uri` is deleted. This is the web's answer to a
- * rename that lands on an existing title. `docText` is what a save would have sent, so
- * unsaved edits travel with the merge instead of going down with the page.
+ * to the end of that page, and the page at `uri`, when Cosense has one, is deleted. This is
+ * the web's answer to a rename that lands on an existing title. `docText` is what a save
+ * would have sent, so unsaved edits travel with the merge instead of going down with the
+ * page.
  *
  * Two commits, in this order: the delete runs only once the lines are on the other page,
  * so a failure between the two leaves both pages standing, with the text twice, which a
