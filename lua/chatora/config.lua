@@ -11,10 +11,12 @@ local defaults = {
   sidebar_width = 32,
   sidebar_tabs = {
     { label = 'すべて' },
-    { label = '未読', filter = 'me', unread_only = true },
+    { label = '未読', mine = true, unread_only = true },
   },
   -- true derives the underline's color from the theme; a color string sets it outright.
   sidebar_separator = true,
+  -- A page's first picture, one row tall, in front of its title. Needs an image backend.
+  sidebar_thumbnails = false,
   sidebar_poll = 60,
 
   related_height = 8,

@@ -26,6 +26,7 @@ import {
   composeAssets,
   fetchAsset,
   type GalleryTile,
+  thumbnailFile,
 } from './assets'
 import { buildCompletionItems, detectCompletionInDocument } from './completion'
 import { computeConcealRanges } from './decorations'
@@ -287,6 +288,11 @@ connection.onRequest('chatora/newPage', (params: { project: string; title: strin
 connection.onRequest('chatora/previewPage', (params: { project: string; title: string }) =>
   runtime.runPromise(handlers.previewPage(params)),
 )
+// A line from the reader's own sidebar functions, kept next to the server's so that
+// `:Chatora log` is the one place to look while writing one.
+connection.onNotification('chatora/log', (params: { message: string }) => {
+  Effect.runPromise(log('info', params.message, { from: 'client' }))
+})
 connection.onRequest('chatora/logPath', async () => ({
   ok: true as const,
   path: activeLogPath() ?? null,
@@ -361,8 +367,11 @@ connection.onRequest(
 )
 connection.onRequest(
   'chatora/fetchAsset',
-  (params: { project: string; url: string; border?: BorderParams }) =>
+  (params: { project: string; url: string; border?: BorderParams; thumb?: number }) =>
     runtime.runPromise(fetchAsset(params)),
+)
+connection.onRequest('chatora/thumbnailFile', (params: { path: string; size: number }) =>
+  runtime.runPromise(thumbnailFile(params)),
 )
 connection.onRequest(
   'chatora/composeAssets',

@@ -221,6 +221,52 @@ export const measure = (path: string): Effect.Effect<ImageSize | undefined> =>
  * density.
  */
 const MAX_IMAGE_EDGE = 2048
+const MAX_THUMB_EDGE = 256
+const MIN_THUMB_EDGE = 16
+
+/**
+ * A square of `size` pixels cut from the middle of `path`, cached under a `t`-prefixed name
+ * that carries the size (same reasoning as the other prefixes). Square so that it is the
+ * same width in every row, whatever the picture's own shape. Falls back to `path` when
+ * nothing can cut it.
+ */
+export const thumbnail = (
+  cacheDir: string,
+  hash: string,
+  path: string,
+  size: number,
+): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const edge = Math.min(MAX_THUMB_EDGE, Math.max(MIN_THUMB_EDGE, Math.floor(size)))
+    const thumbName = `t${hash}_${edge}`
+    const thumbPath = join(cacheDir, `${thumbName}.png`)
+    const existing = yield* findCached(cacheDir, thumbName)
+    if (Option.isSome(existing)) return existing.value
+
+    const magick = yield* Effect.promise(resolveMagick)
+    if (magick === null) return path
+    const square = `${edge}x${edge}`
+    return yield* Effect.tryPromise(() =>
+      execFileAsync(magick.cmd, [
+        `${path}[0]`,
+        '-auto-orient',
+        '-resize',
+        `${square}^`,
+        // -extent lays the picture over the background colour, which is white unless said
+        // otherwise, so a transparent picture would come out on a white tile.
+        '-background',
+        'none',
+        '-gravity',
+        'center',
+        '-extent',
+        square,
+        `PNG32:${thumbPath}`,
+      ]),
+    ).pipe(
+      Effect.as(thumbPath),
+      Effect.orElseSucceed(() => path),
+    )
+  })
 
 /**
  * `path`, or a copy no larger than MAX_IMAGE_EDGE on either side, cached under an

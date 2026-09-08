@@ -687,41 +687,68 @@ local function apply_images(bufnr, project, origin, border, epoch, images)
   end
 end
 
---- Draw one picture, one text row tall, at a 0-based (row, col) of `bufnr`.
+--- Draw one picture, one text row tall, at a 0-based (row, byte column `col`) of `bufnr`.
 ---
 --- For chrome that is not a page buffer, where none of the bookkeeping above applies:
 --- there is no notation to conceal, no signature to compare and no epoch to invalidate,
 --- because the caller owns the buffer and throws it away wholesale. The returned closer is
 --- theirs to call; nil means nothing was drawn, which callers treat as cosmetic and ignore.
 --- `on_placed` runs after the asset resolves, since that takes a round trip.
-function M.place_one(bufnr, project, url, row, col, on_placed)
+---
+--- `opts.screen_col` is where the picture lands on screen when the text before `col` is
+--- not one cell per byte; `opts.cells` reserves that many cells of the line for it, and
+--- `opts.thumb` asks for a square cut of that many pixels instead of the whole picture.
+--- `opts.conceal` hides the reserved cells under a backend that puts the picture beside
+--- the text rather than over it (snacks), so the two do not add up.
+function M.place_one(bufnr, project, url, row, col, on_placed, opts)
+  opts = opts or {}
   local active = images_enabled() and M.backend() or nil
   if not active then
     return
   end
-  local geom = { row = row + 1, byte_col = col, byte_end = col, screen_col = col }
+  local cells = opts.cells or 0
+  local geom = {
+    row = row + 1,
+    byte_col = col,
+    byte_end = col + cells,
+    screen_col = opts.screen_col or col,
+  }
+  local place_opts = { height = 1 }
+  if cells > 0 then
+    place_opts.max_width = cells
+  end
+  if opts.conceal then
+    place_opts.conceal = true
+  end
   local function draw(path)
     if not vim.api.nvim_buf_is_valid(bufnr) then
       return
     end
-    local placement = active.place(bufnr, path, geom, { height = 1 })
+    local placement = active.place(bufnr, path, geom, place_opts)
     if placement and on_placed then
       on_placed(placement)
     end
   end
 
-  local cached = path_by_key[url]
+  local key = opts.thumb and (url .. '\0thumb=' .. opts.thumb) or url
+  local cached = path_by_key[key]
   if cached then
     draw(cached)
     return
   end
-  lsp.request('chatora/fetchAsset', { project = project, url = url }, function(err, result)
+  local function got(err, result)
     if err or not result or result.ok == false then
       return
     end
-    path_by_key[url] = result.path
+    path_by_key[key] = result.path
     draw(result.path)
-  end)
+  end
+  -- A path names a picture on this machine, which only the reader's own config can do.
+  if opts.thumb and (url:sub(1, 1) == '/' or url:sub(1, 1) == '~') then
+    lsp.request('chatora/thumbnailFile', { path = vim.fn.expand(url), size = opts.thumb }, got)
+    return
+  end
+  lsp.request('chatora/fetchAsset', { project = project, url = url, thumb = opts.thumb }, got)
 end
 
 --- Throw the current placements away so the next refresh draws them again. Needed when

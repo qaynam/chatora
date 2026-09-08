@@ -184,6 +184,24 @@ describe('authStatus', () => {
     const result = await runOnce(handlers.authStatus(), httpLayer, credLayer)
     expect(result).toEqual({ ok: true, authenticated: false, origin: ORIGIN })
   })
+
+  test('a rate limit on verify is an error, not "unauthenticated", and is not remembered', async () => {
+    let calls = 0
+    const { layer: httpLayer } = testHttpClient(() => {
+      calls += 1
+      return calls === 1 ? new Response('slow down', { status: 429 }) : json(ME)
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      const first = yield* handlers.authStatus()
+      const second = yield* handlers.authStatus()
+      return { first, second }
+    })
+    const { first, second } = await runOnce(program, httpLayer, credLayer)
+    expect(first).toMatchObject({ ok: false, code: 'error' })
+    expect(second).toMatchObject({ ok: true, authenticated: true })
+    expect(calls).toBe(2)
+  })
 })
 
 describe('login', () => {

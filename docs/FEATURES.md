@@ -546,16 +546,134 @@ video = false                           -- 既定。ほかのリンクと同じ�
 
 ### サイドバーのタブ
 
+上部のタブは `sidebar_tabs` で決めます。既定は「すべて」と「未読」です。
+
 ```lua
 sidebar_tabs = {
-  { label = 'すべて' },
-  { label = '未読', filter = 'me', unread_only = true },
-  { label = '自分', filter = { type = 'icon', value = 'your-name' } },
+  { label = 'すべて', icon = '📖' },
+  { label = '未読', icon = '📩', mine = true, unread = true },
+  { label = 'sakura', filter = 'sakura' },
+  { label = 'ロードマップ', related = 'ロードマップ' },
 }
 ```
 
-`filter` は `'me'`（自分の保存済み Cosense フィルタ。無ければ自分の名前の icon フィルタ）か
-`{ type, value }` です。`sidebar_tabs = false` で、タブなしの単一リストになります。
+| キー | 意味 |
+|---|---|
+| `label` | タブの名前です。`name` でも書けます |
+| `icon` | 名前の前に付けます |
+| `filter` | web のフィルタと同じで、ページのタイトルを書きます。そのタイトルの `.icon` 記法を含むページと、その名前のユーザーが編集したページに絞ります |
+| `mine` | 自分のページに絞ります。`filter = '自分の名前'` と同じで、web で保存したフィルタがあればそれを使います |
+| `related` | そのページの関連ページ（ページの下に出る「関連ページ」と同じで、リンクでつながった 1 hop）を並べます。`{ 'daily', 'memo' }` のように並びで書くと、合わせて 1 つの一覧にします |
+| `pages` | 一覧を自分で作る関数です。下記 |
+| `unread` | 未読のページだけにします。`filter` と組み合わせないと、プロジェクト全体を 100 件ずつ読み進めます。自動で読むのは 500 件までで、続きは下までスクロールしたときに読みます |
+| `folders` | タブの中をフォルダーに分けます。下記 |
+
+`filter` は `{ type = 'icon', value = 'sakura' }` の形でも書けます。`sidebar_tabs = false` で、
+タブなしの単一リストになります。知らないキーがあると、起動時にそう言います。
+
+設定のあとから足すこともできます。
+
+```lua
+require('chatora').add_tab({ label = 'sakura', filter = 'sakura' })
+```
+
+`pages` に関数を渡すと、一覧の中身を自分で決められます。関数は `ctx` を 1 つ受け取り、タイトルの
+並び（文字列か `{ title = ... }` のテーブル）を `return` するか、あとで `ctx.done(list)` に渡します。
+どちらか一方で、両方したら `return` が勝ちます。`ctx.done` は `vim.system` のコールバックの中から
+呼んでも構いません。サーバーに聞くときは `require('chatora.lsp').request` が使えます。決まった
+並びなら、関数の代わりにその並びをそのまま書けます。
+
+| `ctx` のキー | 意味 |
+|---|---|
+| `project` | 今のプロジェクト名 |
+| `done(list)` | 非同期に結果を渡す。`done(nil, '理由')` で失敗を伝える |
+| `log(...)` | 下記 |
+
+書いている途中の様子は `ctx.log(...)` で見られます。どこから呼んでも安全で、`:messages` に出て、
+`:Chatora log`（`log = true` のとき）にもサーバーの記録と並んで残ります。`vim.system` の
+コールバックの中で `vim.notify` を呼ぶと、メインループの外なので失敗して何も出ません。
+
+```lua
+-- 決まったページを並べる
+{ label = 'よく見る', pages = function()
+  return { 'ホーム', 'TODO', 'ロードマップ' }
+end },
+
+-- 全文検索の結果を並べる
+{ label = '#tag', pages = function(ctx)
+  require('chatora.lsp').request('chatora/search', { project = ctx.project, query = '#tag' }, function(_, res)
+    ctx.done(res and res.pages or {})
+  end)
+end },
+```
+
+行に `action` を持たせると、`<CR>` でページを開く代わりにその関数を呼びます。呼ぶときには
+編集用のウィンドウがカレントになっているので、そのまま `:edit` などができます。引数はその行と、
+そのウィンドウです。Cosense と関係ないものを並べるのはこれでできます。
+
+```lua
+{ label = 'メモ帳', pages = function()
+  return {
+    { title = 'today.md', action = function()
+      vim.cmd.edit(vim.fn.expand('~/notes/today.md'))
+    end },
+  }
+end },
+```
+
+`chatora/search` は `{ project, query, mode = 'fulltext' | 'vector' }`、`chatora/listPages` は
+`{ project, skip, limit, filterType, filterValue }`、`chatora/relatedPages` は `{ project, title }`
+を受け取り、どれも `{ ok = true, pages = ... }`（relatedPages は `links1hop`）で返します。
+
+`folders` で、1 つのタブの中をフォルダーに分けられます。フォルダーには上のキーがそのまま書けて、
+見出しの行で `<CR>` すると開閉します。初めて開いたときに取りに行き、閉じたままのフォルダーは
+取りに行きません。`open = false` で閉じた状態から始まります。フォルダーの中にさらに `folders` を
+書けば入れ子になり、深さに応じて字下げして出ます。
+
+`folders` には関数も渡せます。`pages` と同じ形で、フォルダーの並び（上と同じ書き方のテーブル）を
+返すか `ctx.done` に渡すと、それがフォルダーになります。外の API から木を組み立てるのはこれで
+できます。`R` で読み込み直すと、この関数も呼び直します。
+
+```lua
+{ name = 'kanban', folders = function(ctx)
+  vim.system({ 'curl', '-s', 'https://example.com/api/projects' }, { text = true }, function(out)
+    local folders = {}
+    for _, p in ipairs(vim.json.decode(out.stdout).projects) do
+      folders[#folders + 1] = { name = p.title, folders = {
+        { name = 'todo', pages = p.todo },   -- タイトルの並び
+        { name = 'done', pages = p.done, open = false },
+      } }
+    end
+    ctx.done(folders)
+  end)
+end },
+```
+
+```lua
+{ name = 'custom', folders = {
+  { name = 'daily', icon = '📅', related = 'daily' },
+  { name = 'note', filter = 'note' },
+  { name = 'random', open = false, pages = function() return { 'ホーム', 'TODO' } end },
+} },
+```
+
+### サイドバーのサムネイル
+
+`sidebar_thumbnails = true` で、ページの最初の画像を 1 行分の高さで行頭に出します。web の一覧に
+出るサムネイルと同じ画像で、正方形に切ってから置くので、どの行でも同じ幅です。画像は画面に
+見えている行の分だけ取りに行き、スクロールで見えた行を足します。
+
+画像の描画バックエンド（image.nvim / snacks.nvim）が無いときは何も出ません。ImageMagick が
+無いときは切らずにそのまま置きます。
+
+自分で作った行やフォルダーにも `image` を持たせられます。URL のほか、`~/notes/x.png` のような
+このマシンのファイルのパスも書けます。
+
+```lua
+{ name = 'obsidian', image = '~/Pictures/obsidian.png', pages = function()
+  return { { title = 'today.md', image = '~/notes/today.png', action = ... } }
+end },
+```
 
 ## 連携
 

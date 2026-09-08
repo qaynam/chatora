@@ -2431,6 +2431,426 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end
 
+  -- Sidebar tabs: `name`/`icon` label a tab, a bare `filter` string is the web's page
+  -- filter (icon), `link` lists the pages around a title, an unknown key is called out,
+  -- and add_tab pins one more after setup.
+  do
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
+    local orig_tabs, orig_notify = config.options.sidebar_tabs, vim.notify
+    local warned, listed = {}, {}
+    vim.notify = function(msg)
+      warned[#warned + 1] = msg
+    end
+    lsp.ensure_start = function() end
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/relatedPages' then
+        listed[#listed + 1] = 'related ' .. params.title
+        local links = { { id = 'a', title = '古い方', updated = 1 }, { id = 'b', title = '新しい方', updated = 9 } }
+        if params.title == 'memo' then
+          links = { { id = 'b', title = '新しい方', updated = 9 }, { id = 'c', title = 'もう一つ', updated = 5 } }
+        end
+        cb(nil, { ok = true, links1hop = links, links2hop = {} })
+      else
+        cb('no client', nil)
+      end
+    end
+    lsp.request_ok = function(method, params, cb)
+      if method == 'chatora/listPages' then
+        listed[#listed + 1] = (params.filterType or '-') .. '=' .. (params.filterValue or '-')
+        cb({ ok = true, count = 1, scanned = 1, pages = { { id = 'p', title = 'ページ', updated = 1 } } })
+      end
+    end
+    sidebar.close()
+    config.options.sidebar_tabs = {
+      { name = 'All', icon = '📖' },
+      { name = 'sakura', filter = 'sakura' },
+      { label = 'リンク', related = 'ロードマップ' },
+      { name = 'typo', colour = 'red' },
+    }
+
+    sidebar.open('proj')
+    local win = vim.fn.bufwinid('chatora://sidebar')
+    local bar = vim.wo[win].winbar
+    assert(bar:find('📖 All', 1, true) and bar:find(' sakura ', 1, true), 'icon and name label the tabs: ' .. bar)
+    assert(
+      #warned == 1 and warned[1]:find('4 番目に知らないキー `colour`', 1, true),
+      'an unknown key is called out: ' .. vim.inspect(warned)
+    )
+    assert(vim.deep_equal(listed, { '-=-' }), 'the first tab lists everything: ' .. vim.inspect(listed))
+
+    sidebar.select_tab(2)
+    assert(vim.deep_equal(listed, { '-=-', 'icon=sakura' }), 'a bare filter string is an icon filter: ' .. vim.inspect(listed))
+
+    sidebar.select_tab(3)
+    assert(listed[3] == 'related ロードマップ', 'a link tab asks for the related pages: ' .. vim.inspect(listed))
+    local rows = vim.tbl_map(function(l)
+      return l:sub(2)
+    end, vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false))
+    assert(vim.deep_equal(rows, { '新しい方', '古い方' }), 'newest first: ' .. vim.inspect(rows))
+
+    -- Several titles make one list, a page linked from two of them appearing once.
+    require('chatora').add_tab({ name = '合わせて', related = { 'ロードマップ', 'memo' } })
+    sidebar.select_tab(5)
+    rows = vim.tbl_map(function(l)
+      return l:sub(2)
+    end, vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false))
+    assert(
+      vim.deep_equal(rows, { '新しい方', 'もう一つ', '古い方' }) and listed[#listed] == 'related memo' and listed[#listed - 1] == 'related ロードマップ',
+      'links merge, deduped and newest first: ' .. vim.inspect(rows) .. ' ' .. vim.inspect(listed)
+    )
+
+    require('chatora').add_tab({ name = '追加', filter = 'taro' })
+    assert(vim.wo[win].winbar:find(' 追加 ', 1, true), 'add_tab pins a tab while the sidebar is open')
+    sidebar.select_tab(6)
+    assert(listed[#listed] == 'icon=taro', 'and it queries like any other: ' .. vim.inspect(listed))
+
+    -- A `pages` function fills the tab itself: returning a list, or handing it to `done`
+    -- later, with plain titles accepted as rows.
+    local seen_ctx
+    require('chatora').add_tab({
+      name = '固定',
+      pages = function(ctx)
+        seen_ctx = ctx
+        return { 'ホーム', { title = 'TODO', updated = 3 } }
+      end,
+    })
+    sidebar.select_tab(7)
+    rows = vim.tbl_map(function(l)
+      return l:sub(2)
+    end, vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false))
+    assert(vim.deep_equal(rows, { 'ホーム', 'TODO' }), 'a pages function lists what it returns: ' .. vim.inspect(rows))
+    assert(seen_ctx and seen_ctx.project == 'proj', 'and is told the project: ' .. vim.inspect(seen_ctx))
+
+    -- A row with an `action` runs it instead of opening a page, in the editor window.
+    local acted
+    require('chatora').add_tab({
+      name = '自前',
+      pages = function()
+        return {
+          { title = 'メモ帳', action = function(row, target)
+            acted = { row.title, target, vim.api.nvim_get_current_win() }
+          end },
+        }
+      end,
+    })
+    sidebar.select_tab(8)
+    -- Entering a window that shows a page makes the sidebar follow that page's project;
+    -- the windows an earlier test left behind must not pull this one off 'proj'.
+    for _, w in ipairs(vim.api.nvim_list_wins()) do
+      if w ~= win and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(w)):match('^cosense://') then
+        pcall(vim.api.nvim_win_set_buf, w, vim.api.nvim_create_buf(false, true))
+      end
+    end
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+    sidebar.open_current()
+    assert(
+      acted and acted[1] == 'メモ帳' and acted[2] ~= win and vim.api.nvim_win_is_valid(acted[2]) and acted[3] == acted[2],
+      'the action runs with the row, in the editor window: ' .. vim.inspect(acted)
+    )
+    vim.api.nvim_set_current_win(win)
+
+    local deliver
+    require('chatora').add_tab({
+      name = '遅れて',
+      pages = function(ctx)
+        deliver = ctx.done
+      end,
+    })
+    sidebar.select_tab(9)
+    rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    assert(rows[1]:find('読み込み中', 1, true), 'waiting on done: ' .. vim.inspect(rows))
+    deliver({ 'あとから' })
+    rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    assert(rows[1]:sub(2) == 'あとから', 'the list lands when done is called: ' .. vim.inspect(rows))
+    deliver({ '二度目' })
+    rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    assert(rows[1]:sub(2) == 'あとから', 'a second done is ignored: ' .. vim.inspect(rows))
+
+    require('chatora').add_tab({
+      name = '壊れた',
+      pages = function()
+        error('boom')
+      end,
+    })
+    sidebar.select_tab(10)
+    rows = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    assert(rows[1]:find('該当なし', 1, true) and warned[#warned]:find('boom', 1, true), 'an erroring function is reported: ' .. vim.inspect(warned))
+
+    -- Folders: a tab holds lists of any of the kinds above, each behind a header that
+    -- <CR> opens and closes; a folder fetches when it first opens, and stays as the reader
+    -- left it across a rebuild.
+    listed = {}
+    require('chatora').add_tab({
+      name = 'custom',
+      folders = {
+        { name = 'daily', icon = '📅', related = 'daily' },
+        { name = 'note', filter = 'note', open = false },
+        { name = 'fixed', pages = function()
+          return { '固定' }
+        end },
+        { name = 'group', folders = {
+          { name = 'inner', pages = function()
+            return { '奥' }
+          end },
+        } },
+      },
+    })
+    sidebar.select_tab(11)
+    local function lines()
+      return vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    end
+    assert(
+      vim.deep_equal(
+        lines(),
+        { '▾ 📅 daily', ' 新しい方', ' 古い方', '▸ note', '▾ fixed', ' 固定', '▾ group', '  ▾ inner', '   奥' }
+      ),
+      'open folders list their pages under a header, a closed one only its header, a nested one indents: '
+        .. vim.inspect(lines())
+    )
+    assert(vim.deep_equal(listed, { 'related daily' }), 'a closed folder is not fetched: ' .. vim.inspect(listed))
+
+    vim.api.nvim_win_set_cursor(win, { 4, 0 })
+    sidebar.open_current()
+    assert(lines()[4] == '▾ note' and lines()[5] == ' ページ', '<CR> on a header opens the folder and fetches it: ' .. vim.inspect(lines()))
+    assert(listed[#listed] == 'icon=note', 'with its own query: ' .. vim.inspect(listed))
+    sidebar.open_current()
+    assert(lines()[4] == '▸ note' and lines()[5] == '▾ fixed', 'and closes it again: ' .. vim.inspect(lines()))
+
+    vim.api.nvim_win_set_cursor(win, { 8, 0 })
+    sidebar.open_current()
+    assert(lines()[8] == '  ▸ inner' and #lines() == 8, 'a nested folder closes on its own header: ' .. vim.inspect(lines()))
+
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+    sidebar.open_current()
+    sidebar.close()
+    sidebar.open('proj')
+    sidebar.select_tab(11)
+    assert(lines()[1] == '▸ 📅 daily', 'a folder the reader closed stays closed when the sidebar reopens: ' .. vim.inspect(lines()))
+
+    -- The folders themselves may come from a function, handed over later, each holding
+    -- what a folder spec holds; `pages` may then be a plain list. A reload asks again.
+    local deliver_folders, folder_asks = nil, 0
+    require('chatora').add_tab({
+      name = 'dyn',
+      folders = function(ctx)
+        folder_asks = folder_asks + 1
+        deliver_folders = ctx.done
+      end,
+    })
+    sidebar.select_tab(12)
+    assert(lines()[1]:find('読み込み中', 1, true), 'a heading waits for its folders: ' .. vim.inspect(lines()))
+    deliver_folders({ { name = 'p1', folders = { { name = 'todo', pages = { 'a', 'b' } } } } })
+    assert(
+      vim.deep_equal(lines(), { '▾ p1', '  ▾ todo', '   a', '   b' }),
+      'the folders a function hands over are drawn like written ones: ' .. vim.inspect(lines())
+    )
+    sidebar.reload()
+    assert(folder_asks == 2 and lines()[1] == '▾ p1', 'a reload asks the function again, keeping what it had meanwhile: ' .. vim.inspect(lines()))
+
+    -- A row written with `name` instead of `title` is dropped, and said.
+    require('chatora').add_tab({ name = '取り違え', pages = { { name = 'x' } } })
+    sidebar.select_tab(13)
+    assert(
+      lines()[1]:find('該当なし', 1, true) and warned[#warned]:find('取り違え: pages の要素に title がありません', 1, true),
+      'a row without a title is called out: ' .. vim.inspect(warned[#warned])
+    )
+
+    -- `done` called off the main loop (a vim.system callback, say) still lands.
+    require('chatora').add_tab({
+      name = 'later',
+      pages = function(ctx)
+        local timer = vim.uv.new_timer()
+        timer:start(0, 0, function()
+          timer:close()
+          ctx.log('got', { n = 1 })
+          ctx.done({ 'x' })
+        end)
+      end,
+    })
+    sidebar.select_tab(14)
+    assert(
+      vim.wait(1000, function()
+        return lines()[1] == ' x'
+      end),
+      'a done from a fast callback is brought back onto the main loop: ' .. vim.inspect(lines())
+    )
+    assert(
+      vim.wait(1000, function()
+        return warned[#warned] == '[chatora] later: got { n = 1 }'
+      end),
+      'ctx.log from a fast callback still reaches vim.notify, with the tab named: ' .. vim.inspect(warned[#warned])
+    )
+
+    sidebar.close()
+    config.options.sidebar_tabs = orig_tabs
+    vim.notify = orig_notify
+    lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
+  end
+
+  -- An unread list thinned to nothing keeps pulling batches, but only so far on its own:
+  -- the rest waits for the reader to scroll, so one open cannot fire a hundred requests.
+  do
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_ok, orig_start, orig_tabs = lsp.request_ok, lsp.ensure_start, config.options.sidebar_tabs
+    config.options.sidebar_tabs = { { name = '未読', unread = true } }
+    local batches = 0
+    lsp.ensure_start = function() end
+    lsp.request_ok = function(method, _, cb)
+      if method == 'chatora/listPages' then
+        batches = batches + 1
+        cb({ ok = true, count = 10000, scanned = 100, pages = {} })
+      end
+    end
+    sidebar.close()
+    sidebar.open('proj')
+    assert(batches == 5, 'the automatic scan stops at 500 pages, got ' .. batches .. ' batches')
+    sidebar.load_more()
+    assert(batches == 6, 'a scroll pulls one more batch, got ' .. batches)
+    sidebar.close()
+    config.options.sidebar_tabs = orig_tabs
+    lsp.request_ok, lsp.ensure_start = orig_ok, orig_start
+  end
+
+  -- Sidebar thumbnails: a page's first picture sits in front of its title, cut square
+  -- server-side and placed for the rows on screen only. A refresh of the marks leaves
+  -- them alone; the lines changing takes them down and draws them again.
+  do
+    local sidebar = require('chatora.sidebar')
+    local images = require('chatora.images')
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_backend, orig_request, orig_ok, orig_start = images.backend, lsp.request, lsp.request_ok, lsp.ensure_start
+    local orig_thumbs, orig_images, orig_tabs =
+      config.options.sidebar_thumbnails, config.options.images, config.options.sidebar_tabs
+    config.options.sidebar_thumbnails = true
+    config.options.images = 'auto'
+    config.options.sidebar_tabs = {
+      { name = 'a' },
+      { name = 'b', filter = 'x' },
+      { name = 'c', folders = { { name = 'f', image = '~/f.png', pages = { { title = 'r', image = '/tmp/r.png' } } } } },
+    }
+
+    local placed, closed, fetched = {}, {}, {}
+    images.backend = function()
+      return {
+        place = function(_, path, geom, opts)
+          local id = #placed + 1
+          placed[id] = { path = path, row = geom.row, byte_col = geom.byte_col, screen_col = geom.screen_col, opts = opts }
+          return {
+            close = function()
+              closed[#closed + 1] = id
+            end,
+            ok = function()
+              return true
+            end,
+          }
+        end,
+      }
+    end
+    lsp.ensure_start = function() end
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/fetchAsset' then
+        fetched[#fetched + 1] = { url = params.url, thumb = params.thumb }
+        cb(nil, { ok = true, path = '/tmp/' .. params.url:match('[^/]+$') })
+      elseif method == 'chatora/thumbnailFile' then
+        fetched[#fetched + 1] = { path = params.path, size = params.size }
+        cb(nil, { ok = true, path = '/tmp/cut-' .. params.path:match('[^/]+$') })
+      else
+        cb('no client', nil)
+      end
+    end
+    local pages = {}
+    for i = 1, 60 do
+      pages[i] = { id = 'id' .. i, title = 'ページ' .. i, updated = 100 - i }
+      if i % 2 == 1 then
+        pages[i].image = 'https://cdn.example.com/' .. i .. '.png'
+      end
+    end
+    lsp.request_ok = function(method, params, cb)
+      if method == 'chatora/listPages' then
+        local list = pages
+        if params.filterValue == 'x' then
+          list = {}
+          for i = #pages, 1, -1 do
+            list[#list + 1] = pages[i]
+          end
+        end
+        cb({ ok = true, count = #list, scanned = #list, pages = list })
+      end
+    end
+
+    sidebar.close()
+    sidebar.open('proj')
+    local buf = vim.fn.bufnr('chatora://sidebar')
+    local win = vim.fn.bufwinid(buf)
+    local first = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
+    assert(first == '     ページ1', 'the title moves right to leave room: ' .. vim.inspect(first))
+
+    -- On screen plus one screen's worth below, as the sidebar counts it (the winbar takes
+    -- a row of the window's height).
+    local top, bottom
+    vim.api.nvim_win_call(win, function()
+      top, bottom = vim.fn.line('w0'), vim.fn.line('w$')
+    end)
+    local expected = 0
+    for r = 0, math.min(bottom + (bottom - top + 1), 60) - 1 do
+      if (r + 1) % 2 == 1 then
+        expected = expected + 1
+      end
+    end
+    assert(#placed == expected, ('%d rows on or near the screen get a picture, placed %d'):format(expected, #placed))
+    assert(
+      placed[1].row == 1 and placed[1].byte_col == 1 and placed[1].screen_col == 1 and placed[1].opts.max_width == 3 and placed[1].opts.height == 1 and placed[1].opts.conceal == true,
+      'placed after the bar over three concealed cells, one row tall: ' .. vim.inspect(placed[1])
+    )
+    assert(fetched[1].thumb == 64 and fetched[1].url == 'https://cdn.example.com/1.png', 'asked as a square cut: ' .. vim.inspect(fetched[1]))
+    assert(vim.tbl_isempty(closed), 'nothing closed yet')
+
+    sidebar.refresh_marks()
+    assert(#placed == expected and vim.tbl_isempty(closed), 'a refresh of the marks leaves the pictures alone')
+
+    sidebar.select_tab(2)
+    assert(#closed == expected, 'a different list takes them all down: ' .. #closed)
+    assert(#placed == 2 * expected, 'and draws the new rows: ' .. #placed)
+    assert(placed[expected + 1].path == '/tmp/59.png', 'the reversed list starts with its own picture: ' .. vim.inspect(placed[expected + 1]))
+
+    local before_scroll = #placed
+    vim.api.nvim_win_call(win, function()
+      vim.cmd('normal! Gzt')
+    end)
+    vim.api.nvim_exec_autocmds('WinScrolled', { pattern = tostring(win) })
+    assert(#placed > before_scroll, 'scrolling places the rows that came on screen: ' .. #placed)
+
+    -- A row or folder of the reader's own carries `image`, a URL or a path on this machine;
+    -- a path goes to the server as a file to cut, not a URL to fetch.
+    sidebar.select_tab(3)
+    local shown = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    assert(vim.deep_equal(shown, { '▾     f', '     r' }), 'a folder header leaves the same room: ' .. vim.inspect(shown))
+    local header, row = placed[#placed - 1], placed[#placed]
+    assert(
+      header.path == '/tmp/cut-f.png' and header.byte_col == #'▾ ' and header.screen_col == 1,
+      'the folder picture sits after the glyph: ' .. vim.inspect(header)
+    )
+    assert(row.path == '/tmp/cut-r.png' and row.byte_col == 1 and row.screen_col == 1, 'the row picture after the bar: ' .. vim.inspect(row))
+    assert(
+      fetched[#fetched].path == '/tmp/r.png' and fetched[#fetched].size == 64 and fetched[#fetched - 1].path == vim.fn.expand('~/f.png'),
+      'paths are expanded and cut as files: ' .. vim.inspect({ fetched[#fetched - 1], fetched[#fetched] })
+    )
+
+    sidebar.close()
+    assert(#closed == #placed, 'closing the sidebar takes every picture down: ' .. #closed .. ' of ' .. #placed)
+    -- The tab index outlives the tab list; later tests expect the first one.
+    sidebar.select_tab(1)
+
+    config.options.sidebar_thumbnails, config.options.images, config.options.sidebar_tabs = orig_thumbs, orig_images, orig_tabs
+    images.backend, lsp.request, lsp.request_ok, lsp.ensure_start = orig_backend, orig_request, orig_ok, orig_start
+  end
+
   -- sidebar polling: a refetched first batch replaces the head and pulls an
   -- edited page up out of the tail, without duplicating it or dropping the
   -- rest of what infinite scroll already loaded.

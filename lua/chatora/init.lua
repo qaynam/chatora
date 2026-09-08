@@ -251,6 +251,11 @@ function M.toggle()
   sidebar.toggle()
 end
 
+--- Pin a tab to the sidebar, as an entry in `sidebar_tabs` would (see README).
+function M.add_tab(spec)
+  sidebar.add_tab(spec)
+end
+
 --- Switch (or add) the active account, then reopen the sidebar from scratch:
 --- projects differ per account, so the remembered project choice is dropped
 --- and resolve_project runs again against the new account.

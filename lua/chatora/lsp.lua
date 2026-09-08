@@ -118,6 +118,16 @@ function M.request_wait(method, params, timeout_ms)
   return reply
 end
 
+--- Send a chatora/* notification, if the client is running. Nothing comes back.
+function M.notify(method, params)
+  local client = get_client()
+  if not client then
+    return false
+  end
+  client:notify(method, params)
+  return true
+end
+
 --- Like request(), but unwraps the {ok=true,...}/{ok=false,code,message}
 --- envelope used by every chatora/* response: notifies on transport error
 --- or ok=false, and only calls cb(result) on success.

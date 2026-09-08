@@ -83,7 +83,13 @@ export interface SessionStateShape {
   /** Login/logout invalidate every cache — a fresh credential may resolve, or verify, differently. */
   readonly invalidateCredentials: () => Effect.Effect<void>
   /** Verifies /api/users/me at most once per session; both success and failure stay cached until invalidated. */
-  readonly ensureVerified: () => Effect.Effect<Option.Option<Me>, never, HttpClient>
+  /**
+   * The user the credential belongs to, verified once per session. `Option.none` means the
+   * credential was refused (401/403), or there is none; that answer is kept. A failure
+   * that says nothing about the credential (a rate limit, the network) fails instead, and
+   * the next call asks again.
+   */
+  readonly ensureVerified: () => Effect.Effect<Option.Option<Me>, CosenseApiError, HttpClient>
   readonly setVerifiedUser: (user: Me) => Effect.Effect<void>
   /** The verified user's id, or '' if this session hasn't verified yet. */
   readonly verifiedUserId: () => Effect.Effect<string>
@@ -203,11 +209,13 @@ export const makeSessionStateLayer = (
                     Option.some(user),
                     { status: 'ok', user },
                   ]),
-                  Effect.catchAll(() =>
-                    Effect.succeed([
-                      Option.none<Me>(),
-                      { status: 'failed' } as VerifiedCache,
-                    ] as const),
+                  Effect.catchAll((error) =>
+                    error.status === 401 || error.status === 403
+                      ? Effect.succeed([
+                          Option.none<Me>(),
+                          { status: 'failed' } as VerifiedCache,
+                        ] as const)
+                      : Effect.fail(error),
                   ),
                 ),
             }),
