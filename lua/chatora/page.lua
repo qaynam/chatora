@@ -573,28 +573,15 @@ local function page_windows()
   return wins
 end
 
--- Options put aside while a quit is being refused, and restored once the command is over.
-local quit_refusal = nil
-
---- Make the :q in progress fail the way Neovim fails one itself: for the length of the
---- command the buffer counts as abandoned rather than hidden, and 'confirm' is off so
---- Neovim does not ask again. The result is its own one-line E37, where an error thrown
---- from the callback would print a traceback and wait for Enter.
-local function refuse_quit(bufnr)
-  if not quit_refusal then
-    quit_refusal = { confirm = vim.o.confirm }
-    vim.schedule(function()
-      vim.o.confirm = quit_refusal.confirm
-      quit_refusal = nil
-    end)
+--- Keep bufnr on screen through the :q in progress: a second window over it, made where
+--- the closing one is, means that window abandons nothing and Neovim closes it without a
+--- word, and the split takes its place, view and all. Nothing looks to have happened,
+--- which is what Cancel means. (An error thrown from the callback would print a
+--- traceback; a refusal from Neovim, its E37 and a wait for Enter.)
+local function keep_open(bufnr)
+  if vim.api.nvim_get_current_buf() == bufnr then
+    vim.cmd('split')
   end
-  vim.bo[bufnr].bufhidden = 'wipe'
-  vim.o.confirm = false
-  vim.schedule(function()
-    if vim.api.nvim_buf_is_valid(bufnr) then
-      vim.bo[bufnr].bufhidden = ''
-    end
-  end)
 end
 
 -- :q on a page. Asked here, in Neovim's own words, rather than left to Neovim: under
@@ -617,12 +604,11 @@ vim.api.nvim_create_autocmd('QuitPre', {
       )
       if choice == 1 then
         -- The same save as :w, questions included: a title another page has asks whether
-        -- to merge, and declining that is a save that did not happen.
-        vim.api.nvim_buf_call(ev.buf, function()
-          vim.cmd('write')
-        end)
+        -- to merge, and declining that is a save that did not happen. Called directly:
+        -- a :write from inside an autocommand fires no BufWriteCmd (E676 instead).
+        M.save(ev.buf)
         if vim.bo[ev.buf].modified then
-          refuse_quit(ev.buf)
+          keep_open(ev.buf)
           return
         end
       elseif choice == 2 then
@@ -635,7 +621,7 @@ vim.api.nvim_create_autocmd('QuitPre', {
           end
         end)
       else
-        refuse_quit(ev.buf)
+        keep_open(ev.buf)
         return
       end
     end

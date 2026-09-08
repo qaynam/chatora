@@ -1792,8 +1792,9 @@ local ok, err = pcall(function()
     end)
     assert(synced == false and #asked == 0, 'an untitled page is not synced')
 
-    -- :q on an unsaved page asks in Neovim's words. Cancel keeps the window and the text;
-    -- a save that was declined keeps them too; No throws the edits away with the buffer.
+    -- :q on an unsaved page asks in Neovim's words. Cancel keeps the page on screen, with
+    -- no error and no message; a save that was declined keeps it too; No throws the edits
+    -- away with the buffer.
     do
       local wins_before = #vim.api.nvim_list_wins()
       local scratch = vim.api.nvim_create_buf(false, true)
@@ -1801,22 +1802,28 @@ local ok, err = pcall(function()
       vim.api.nvim_win_set_buf(0, scratch)
       vim.cmd('wincmd p')
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '', '消えては困る' })
+      vim.api.nvim_win_set_cursor(0, { 2, 3 })
       answers = { 3 }
-      local closed = pcall(vim.cmd, 'q')
-      assert(not closed and #vim.api.nvim_list_wins() == wins_before + 1, 'Cancel keeps the window')
+      vim.v.errmsg = ''
+      local ok = pcall(vim.cmd, 'q')
+      assert(
+        ok and vim.v.errmsg == '' and #vim.api.nvim_list_wins() == wins_before + 1 and vim.api.nvim_get_current_buf() == buf,
+        'Cancel keeps the page on screen without a word: ' .. vim.inspect({ ok, vim.v.errmsg, #vim.api.nvim_list_wins() })
+      )
+      assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), { 2, 3 }), 'and where the cursor was')
       assert(prompts[#prompts]:find('^Save changes to "cosense://proj/'), 'asked as Neovim asks: ' .. vim.inspect(prompts[#prompts]))
       answers = { 1 }
-      closed = pcall(vim.cmd, 'q')
+      ok = pcall(vim.cmd, 'q')
       assert(
-        not closed and vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] == '消えては困る',
-        'Yes on a page that cannot be saved yet keeps everything'
+        ok and vim.api.nvim_get_current_buf() == buf and vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] == '消えては困る',
+        'Yes on a page that cannot be saved yet keeps everything, quietly: ' .. vim.inspect({ ok, #vim.api.nvim_list_wins() })
       )
       answers = { 2 }
-      closed = pcall(vim.cmd, 'q')
+      ok = pcall(vim.cmd, 'q')
       vim.wait(200, function()
         return not vim.api.nvim_buf_is_valid(buf)
       end)
-      assert(closed and not vim.api.nvim_buf_is_valid(buf), 'No closes the window and drops the edits with the buffer')
+      assert(ok and not vim.api.nvim_buf_is_valid(buf), 'No closes the window and drops the edits with the buffer')
       assert(#vim.api.nvim_list_wins() == wins_before, 'and the window is gone')
       for _, w in ipairs(vim.api.nvim_list_wins()) do
         if vim.api.nvim_win_get_buf(w) == scratch then
