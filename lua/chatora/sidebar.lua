@@ -573,6 +573,7 @@ function render()
   -- Writing lines into an unloaded buffer loads it, and a buffer loaded that way comes
   -- back with option defaults.
   ensure_buf()
+  require('chatora.render').quiet_indent_guides(buf)
   local separators = config.options.sidebar.separator ~= false
   local tab = tabs[active]
   line_pages, line_folders = {}, {}

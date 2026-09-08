@@ -1324,6 +1324,35 @@ local ok, err = pcall(function()
     assert(told and told.bufnr == buf and told.enabled == false, 'ibl must be told once it exists')
 
     vim.api.nvim_buf_delete(buf, { force = true })
+
+    -- The sidebar's rows start with blanks as well (a thumbnail's cells, a folder's
+    -- indent), and it is built anew by :Chatora reload, after the plugin has loaded.
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
+    lsp.ensure_start = function() end
+    lsp.request = function(_, _, cb)
+      cb('no client', nil)
+    end
+    lsp.request_ok = function(method, _, cb)
+      if method == 'chatora/listPages' then
+        cb({ ok = true, count = 1, scanned = 1, pages = { { id = 'p', title = 'ページ', updated = 1 } } })
+      end
+    end
+    told = nil
+    package.loaded.ibl = {
+      setup_buffer = function(bufnr, opts)
+        told = { bufnr = bufnr, enabled = opts.enabled }
+      end,
+    }
+    sidebar.close()
+    sidebar.open('proj')
+    local sbuf = vim.fn.bufnr('chatora://sidebar')
+    package.loaded.ibl = nil
+    assert(vim.b[sbuf].snacks_indent == false, 'the sidebar is kept clear of snacks.indent')
+    assert(told and told.bufnr == sbuf and told.enabled == false, 'and of indent-blankline')
+    sidebar.close()
+    lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
   end
 
   -- 'linebreak' moves a run of Japanese to the next row whole, so a page window has it off

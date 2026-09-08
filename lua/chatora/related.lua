@@ -84,6 +84,7 @@ end
 
 local function render(links1hop, links2hop)
   ensure_hl()
+  require('chatora.render').quiet_indent_guides(buf)
   line_items = {}
   local lines = {}
   local header_lines = {}

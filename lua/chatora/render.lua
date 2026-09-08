@@ -22,12 +22,13 @@ local REFRESH_DEBOUNCE_MS = 60
 --- Ask the indent-guide plugins to leave this buffer alone.
 ---
 --- Cosense indents one space per level, so a guide stands in every column of the indent —
---- under the bullets chatora draws in those same columns. The plugins that offer a
+--- under the bullets chatora draws in those same columns; the sidebar's rows start with
+--- blanks too, in front of a thumbnail or under a folder. The plugins that offer a
 --- buffer-local opt-out get one; indent-blankline is told directly, but only once it is
 --- loaded. It usually loads on the first real file the reader opens, which is why the lines
---- can appear on a page that was clean a moment ago, so this is retried on every render
---- until it lands.
-local function quiet_indent_guides(bufnr)
+--- can appear on a buffer that was clean a moment ago, so callers retry this on every
+--- render until it lands.
+function M.quiet_indent_guides(bufnr)
   vim.b[bufnr].snacks_indent = false
   vim.b[bufnr].miniindentscope_disable = true
   if vim.b[bufnr].chatora_indent_guides_off then
@@ -40,7 +41,7 @@ local function quiet_indent_guides(bufnr)
 end
 
 local function set_win_opts(bufnr)
-  quiet_indent_guides(bufnr)
+  M.quiet_indent_guides(bufnr)
   -- 'linebreak' breaks at 'breakat' characters, and a run of Japanese has none: the whole
   -- run moves to the next row and leaves the row above nearly empty, while `.` and `@` in
   -- an inline code span do count and split it. Measured on a wrapped quote: the bar alone

@@ -166,6 +166,7 @@ function M.open()
   vim.bo[buf].modifiable = false
   vim.bo[buf].bufhidden = 'wipe'
   vim.bo[buf].filetype = 'chatora_help'
+  require('chatora.render').quiet_indent_guides(buf)
 
   local width = 0
   for _, l in ipairs(lines) do
