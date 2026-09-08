@@ -55,8 +55,8 @@ Cosense には同じタイトルのページが 1 つしかありません。既
 **ローカルで書いた内容が消えることはありません**。
 
 ```lua
-sync = { interval = 30, on_focus = true, notify = true }  -- 既定
-sync = false                                              -- 手動（<leader>cf）だけにする
+edit = { sync = { interval = 30, on_focus = true, notify = true } }  -- 既定
+edit = { sync = false }                                              -- 手動（pull のキー）だけにする
 ```
 
 `interval` はポーリングの間隔（秒）です。画面に出ているバッファだけを回し、離れると止まり、
@@ -90,12 +90,12 @@ chatora は最後の段に中点を描き、1 段を 1 マスで表します。�
 **どの文字で書いた行も同じ段は同じ深さに見えます**。
 
 ```lua
-pads = {
+view = { pads = {
   bullet = '•',      -- 中点のグリフ
   guide = false,     -- 文字を渡すと上位レベルに縦線を引く（Cosense には無い）
   spacing = false,   -- true で 1 段を 2 マスに広げる
   gap = 0,           -- 中点と本文の間の追加余白
-}
+} }
 ```
 
 `spacing = true` にすると web に近い広めの段になりますが、長い行を折り返したときに 2 行目以降が
@@ -113,13 +113,13 @@ pads = {
 変えません。リストの中では縦棒が中点の隣に立ち、`> ` は隠れます。
 
 ```lua
-quote = {
+view = { quote = {
   bar = '▌',                                   -- 太さはグリフで決まる: ▏ ▎ ▍ ▌ ┃ │
   hl = { fg = '#4493f8' },                     -- 縦棒（ChatoraQuoteBar）
   text_hl = { bg = '#2a2a2a' },                -- 引用本文（ChatoraQuoteText）
   dim = true,                                  -- 背景ではなく、本文を Comment の色に落とす
   wrap = false,                                -- 折り返し行への追従をやめる
-}
+} }
 ```
 
 `hl` と `text_hl` は `nvim_set_hl` にそのまま渡ります。省略すると、背景は colorscheme の地の色から
@@ -254,8 +254,8 @@ vim.api.nvim_set_hl(0, '@lsp.type.code.cosense', { bg = '#303030' })
 全行が更新済みのときも、指し示すものが無いのでマークを出しません。
 
 ```lua
-telomere = { bar = true, scrollbar = false }  -- 右端のマークだけやめる
-telomere = false                              -- どちらも出さない
+view = { telomere = { bar = true, scrollbar = false } }  -- 右端のマークだけやめる
+view = { telomere = false }                              -- どちらも出さない
 ```
 
 色はどれも `default = true` で定義しているので、colorscheme の後に
@@ -324,7 +324,7 @@ Cosense にアップロードしたファイル（`https://<origin>/files/<id>.<
 [report.html https://scrapbox.io/files/….html]   -- 󰈔 report.html
 ```
 
-括弧はもともと隠れているので、行の幅は変わりません。アイコンは `file_icon` で変えられます。
+括弧はもともと隠れているので、行の幅は変わりません。アイコンは `view.file_icon` で変えられます。
 1 文字でないものは無視して、単に隠します。
 
 ### 画像の表示
@@ -347,7 +347,7 @@ ImageMagick（`brew install imagemagick`）、そして描画プラグインが�
 `:Chatora images redraw` で描き直せます。
 
 `[[…]]`（大きい記法）は、画像にもアイコンにも効きます。`[[name.icon]]` が単独で行にあるときは
-`image_height_large` の大きさで描き、文中にあるときは 1 行のままです。
+`image.height_large` の大きさで描き、文中にあるときは 1 行のままです。
 
 GIF は最初のフレームだけを描きます。端末のグラフィックプロトコルが静止画しか合成しないからです。
 Gyazo は、写真も GIF もチーム Gyazo も描けます。
@@ -382,7 +382,7 @@ VS Code の内蔵ターミナルは sixel と iTerm inline images を話し、ki
    `magick -list format | grep -i SIXEL` に `SIXEL* SIXEL rw-` が出れば入っています
    （Homebrew の imagemagick には入っています）。
 
-chatora 側の `image_backend` は、既定の `'auto'` のままで構いません。image.nvim があればそちらが
+chatora 側の `image.backend` は、既定の `'auto'` のままで構いません。image.nvim があればそちらが
 優先され、プロトコルの選択は上の 2 に任せられます。
 
 ### 画像だけの行
@@ -392,10 +392,10 @@ chatora 側の `image_backend` は、既定の `'auto'` のままで構いませ
 分は、次の段に折り返します。
 
 ```lua
-image_gallery = true                          -- 既定。高さは image_height、タイルは幅 3 : 高さ 4
-image_gallery = { rows = 12, aspect = 4 / 3 } -- 高さ 12 行で、横長のタイル
-image_gallery = 12                            -- 高さだけ変える
-image_gallery = false                         -- 並べず、文中と同じ 1 行の高さで置く
+image = { gallery = true }                          -- 既定。高さは image.height、タイルは幅 3 : 高さ 4
+image = { gallery = { rows = 12, aspect = 4 / 3 } } -- 高さ 12 行で、横長のタイル
+image = { gallery = 12 }                            -- 高さだけ変える
+image = { gallery = false }                         -- 並べず、文中と同じ 1 行の高さで置く
 ```
 
 `aspect` はタイルの幅を高さで割った値です。並べた 1 枚の絵はサーバーが ImageMagick で作るので、
@@ -408,9 +408,9 @@ ImageMagick が無いときは 1 枚ずつ縦に積みます。画像が 1 枚�
 そのどちらを使うかを選ぶだけです。
 
 ```lua
-image_backend = 'auto'        -- 既定。image.nvim があればそれ、無ければ snacks
-image_backend = 'image_nvim'  -- 固定
-image_backend = 'snacks'
+image = { backend = 'auto' }        -- 既定。image.nvim があればそれ、無ければ snacks
+image = { backend = 'image_nvim' }  -- 固定
+image = { backend = 'snacks' }
 ```
 
 端末ごとに変えたいときは、関数を渡します。描画のたびに呼ばれ、名前を返しても、後述のバックエンド
@@ -418,9 +418,9 @@ image_backend = 'snacks'
 
 ```lua
 -- kitty プロトコルが通る端末では snacks、通らない VS Code では sixel に設定した image.nvim
-image_backend = function()
+image = { backend = function()
   return vim.env.TERM_PROGRAM == 'vscode' and 'image_nvim' or 'snacks'
-end
+end }
 ```
 
 image.nvim を `backend = 'sixel'` にすると、その nvim では常に sixel になります。`'auto'` のままだと
@@ -443,7 +443,7 @@ kitty しか解さない端末（Ghostty など）で何も出なくなるので
 返す関数）で `place` を実装します。
 
 ```lua
-image_backend = {
+image = { backend = {
   --- bufnr の (row, col) に path の画像を置き、閉じ方を返す。描けなければ nil。
   --- geom = { row(1始まり), byte_col, byte_end, screen_col, indent_col, indent_screen_col,
   ---          align_indent }、opts = { height | max_height, max_width }。
@@ -459,7 +459,7 @@ image_backend = {
       ok = function() return handle:visible() end,
     }
   end,
-}
+} }
 ```
 
 `place` の無いテーブルを渡した場合は、一度だけ警告して既定のバックエンドに戻ります。
@@ -493,16 +493,16 @@ origin の中のリダイレクトだけです。
 ### 動画を再生する
 
 Gyazo の動画（GIF キャプチャを含む）は、本文には静止画で出ます。端末は動画を再生できないので、
-`gd` したときの行き先を `video` で決めます。
+`gd` したときの行き先を `open_video` で決めます。
 
 ```lua
-video = 'open'                          -- macOS の既定のプレイヤー
-video = { 'mpv', '--loop', '{url}' }    -- コマンドと引数（'{url}' が置き換わる）
-video = function(url)                   -- 自分で決める。false を返すとブラウザに回す
+open_video = 'open'                          -- macOS の既定のプレイヤー
+open_video = { 'mpv', '--loop', '{url}' }    -- コマンドと引数（'{url}' が置き換わる）
+open_video = function(url)                   -- 自分で決める。false を返すとブラウザに回す
   vim.system({ 'mpv', url }, { detach = true })
   return true
 end
-video = false                           -- 既定。ほかのリンクと同じくブラウザ
+open_video = 'browser'                       -- 既定。ほかのリンクと同じくブラウザ
 ```
 
 渡ってくる URL は、素の Gyazo なら `https://i.gyazo.com/<hash>.mp4` で、プレイヤーがそのまま
@@ -548,8 +548,8 @@ video = false                           -- 既定。ほかのリンクと同じ�
 ### プロジェクトごとの設定
 
 `setup()` に関数を渡すと、プロジェクトが決まるたびに `{ project = 名前 }` を受け取って呼ばれ、返した
-テーブルがそのプロジェクトの設定になります。起動時は `project = nil` で呼ばれるので、`project` や
-`origin` はそこで返します。答えはプロジェクトごとに覚えておくので、行き来しても呼び直しません。
+テーブルがそのプロジェクトの設定になります。起動時は `project = nil` で呼ばれるので、`default_project`
+や `origin` はそこで返します。答えはプロジェクトごとに覚えておくので、行き来しても呼び直しません。
 `origin` / `notations` / `log` / `server_cmd` はサーバーの起動時に渡すため、プロジェクトごとには変えられません。
 
 ```lua
@@ -558,21 +558,21 @@ require('chatora').setup(function(ctx)
   if ctx.project == 'my-project' then
     tabs[#tabs + 1] = { name = 'ロードマップ', related = 'ロードマップ' }
   end
-  return { project = 'my-project', autosave = 10, sidebar_tabs = tabs }
+  return { default_project = 'my-project', edit = { autosave = 10 }, sidebar = { tabs = tabs } }
 end)
 ```
 
 ### サイドバーのタブ
 
-上部のタブは `sidebar_tabs` で決めます。既定は「すべて」と「未読」です。
+上部のタブは `sidebar.tabs` で決めます。既定は「すべて」と「未読」です。
 
 ```lua
-sidebar_tabs = {
+sidebar = { tabs = {
   { name = 'すべて', icon = '📖' },
   { name = '未読', icon = '📩', mine = true, unread = true },
   { name = 'sakura', filter = 'sakura' },
   { name = 'ロードマップ', related = 'ロードマップ' },
-}
+} }
 ```
 
 | キー | 意味 |
@@ -586,7 +586,7 @@ sidebar_tabs = {
 | `unread` | 未読のページだけにします。`filter` と組み合わせないと、プロジェクト全体を 100 件ずつ読み進めます。自動で読むのは 500 件までで、続きは下までスクロールしたときに読みます |
 | `folders` | タブの中をフォルダーに分けます。下記 |
 
-`filter` は `{ type = 'icon', value = 'sakura' }` の形でも書けます。`sidebar_tabs = false` で、
+`filter` は `{ type = 'icon', value = 'sakura' }` の形でも書けます。`sidebar.tabs = false` で、
 タブなしの単一リストになります。知らないキーがあると、起動時にそう言います。中身を決めるキー
 （`filter` / `mine` / `related` / `pages` / `folders`）は 1 つだけ書きます。2 つ以上あるときも、そう言います。
 以前の `label` と `unread_only` はそのまま動きますが、`name` と `unread` になったと 1 回だけ言います。
@@ -679,7 +679,7 @@ end },
 
 ### サイドバーのサムネイル
 
-`sidebar_thumbnails = true` で、ページの最初の画像を 1 行分の高さで行頭に出します。web の一覧に
+`sidebar.thumbnails = true` で、ページの最初の画像を 1 行分の高さで行頭に出します。web の一覧に
 出るサムネイルと同じ画像で、正方形に切ってから置くので、どの行でも同じ幅です。画像は画面に
 見えている行の分だけ取りに行き、スクロールで見えた行を足します。
 

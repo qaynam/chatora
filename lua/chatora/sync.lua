@@ -17,7 +17,7 @@ local in_flight = {}
 local conflicts_by_bufnr = {}
 
 local function options()
-  local opt = require('chatora.config').options.sync
+  local opt = require('chatora.config').options.edit.sync
   if opt == false then
     return nil
   end

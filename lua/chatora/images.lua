@@ -1,5 +1,5 @@
 -- Inline image rendering, over 3rd/image.nvim, snacks.nvim, or a backend the reader wrote
--- themselves (`image_backend`). Which terminal graphics protocol the pixels travel in is the
+-- themselves (`image.backend`). Which terminal graphics protocol the pixels travel in is the
 -- backend's business, not chatora's. A no-op when none of them is usable.
 --
 -- What to draw comes from `chatora/images`; where the bytes come from is
@@ -49,7 +49,7 @@ end
 --- Border params for chatora/fetchAsset, or nil. The frame is composited into
 --- the image's own pixels server-side, since a cell grid cannot hug its edges.
 local function border_params()
-  local opt = config.options.image_border
+  local opt = config.options.image.border
   if opt == false or opt == nil then
     return nil
   end
@@ -68,9 +68,9 @@ end
 --- one setting still scales both.
 local function standalone_height(large)
   if not large then
-    return config.options.image_height
+    return config.options.image.height
   end
-  return config.options.image_height_large or config.options.image_height * 2
+  return config.options.image.height_large or config.options.image.height * 2
 end
 
 -- A backend draws either inline virtual *text* (one row, side by side) or virtual *lines*
@@ -84,13 +84,13 @@ local GALLERY_TILE_HEIGHT_PX = 720
 --- How a line that holds nothing but pictures is drawn: nil to leave the pictures in the
 --- text line at one row tall, else the row cap and each tile's width-to-height ratio.
 local function gallery_layout()
-  local opt = config.options.image_gallery
+  local opt = config.options.image.gallery
   if opt == false or opt == nil then
     return nil
   end
   local rows = type(opt) == 'number' and opt or (type(opt) == 'table' and opt.rows) or nil
   return {
-    rows = rows or config.options.image_height,
+    rows = rows or config.options.image.height,
     aspect = (type(opt) == 'table' and opt.aspect) or GALLERY_ASPECT,
   }
 end
@@ -145,7 +145,7 @@ local function snacks_image()
   return snacks.image
 end
 
--- Backend contract, which `image_backend` lets a reader implement themselves:
+-- Backend contract, which `image.backend` lets a reader implement themselves:
 --
 --   place(bufnr, path, geom, opts) -> { close = fn, ok = fn? } | nil
 --
@@ -258,7 +258,7 @@ local function snacks_backend()
   }
 end
 
---- The active render backend per config.image_backend, or nil when none is usable.
+--- The active render backend per config.image.backend, or nil when none is usable.
 ---
 --- `'auto'` prefers image.nvim and falls back to snacks; a name picks one of them outright.
 --- A table is a backend of the reader's own: whatever satisfies the contract above draws,
@@ -269,19 +269,19 @@ end
 --- one for good, and a picture drawn in the wrong one is silence), so choosing per terminal
 --- has to be something the reader can express.
 function M.backend()
-  local pref = config.options.image_backend
+  local pref = config.options.image.backend
   if type(pref) == 'function' then
     local ok, built = pcall(pref)
     pref = ok and built or nil
     if not ok then
-      report_once('image_backend の関数が失敗しました: ' .. tostring(built))
+      report_once('image.backend の関数が失敗しました: ' .. tostring(built))
     end
   end
   if type(pref) == 'table' then
     if type(pref.place) == 'function' then
       return pref
     end
-    report_once('image_backend に place 関数がありません。既定のバックエンドを使います')
+    report_once('image.backend に place 関数がありません。既定のバックエンドを使います')
     pref = 'auto'
   end
   if pref == 'snacks' then
@@ -294,7 +294,7 @@ function M.backend()
 end
 
 local function images_enabled()
-  local opt = config.options.images
+  local opt = config.options.image.enabled
   if opt == false then
     return false
   end
@@ -370,7 +370,7 @@ end
 --- whether this terminal drew anything: hiding a link that never became an image
 --- would leave the line blank.
 local function conceal_notation(bufnr, geom)
-  if config.options.conceal == false then
+  if config.options.view.conceal == false then
     return
   end
   for _, member in ipairs(geom.members or { geom }) do
@@ -833,7 +833,7 @@ end
 
 --- What each picture of bufnr is doing, one line each, for `:Chatora images`.
 function M.status(bufnr)
-  local lines = { string.format('画像: backend = %s', tostring(config.options.image_backend)) }
+  local lines = { string.format('画像: backend = %s', tostring(config.options.image.backend)) }
   local rows = {}
   for key, pool in pairs(placements_by_bufnr[bufnr] or {}) do
     for _, handle in ipairs(pool) do

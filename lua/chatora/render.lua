@@ -48,7 +48,7 @@ local function set_win_opts(bufnr)
   for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
     vim.wo[win].linebreak = false
   end
-  local conceal = config.options.conceal
+  local conceal = config.options.view.conceal
   if conceal ~= false then
     -- A string is a 'concealcursor' value. The default reveals the cursor line, which is
     -- how markup stays editable — but it also un-draws an inline image on that one line,
@@ -65,7 +65,7 @@ end
 --- The character standing in for a file link's opening bracket, or nil when the reader
 --- turned it off or asked for something a conceal cannot draw — Neovim shows one character.
 local function file_icon()
-  local icon = config.options.file_icon
+  local icon = config.options.view.file_icon
   return config.is_single_char(icon) and icon or nil
 end
 
@@ -105,7 +105,7 @@ function M.refresh(bufnr)
     if err or not result or result.ok == false then
       return
     end
-    if config.options.conceal == false then
+    if config.options.view.conceal == false then
       vim.api.nvim_buf_clear_namespace(bufnr, M.ns, 0, -1)
     else
       apply(bufnr, result.conceal or {})

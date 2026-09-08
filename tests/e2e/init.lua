@@ -26,7 +26,7 @@ end
 
 require('chatora').setup({
   origin = origin,
-  project = 'testproj',
+  default_project = 'testproj',
   server_cmd = { 'node', repo_root .. '/packages/server/dist/main.js', '--stdio' },
   notations = {
     -- Both carry a foreground, so a run wearing the two of them says which marker won.

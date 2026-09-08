@@ -42,7 +42,7 @@ local function ensure_hl()
   -- Underline spans the full row, separating rows without spending a line. A hairline
   -- rather than a window border's color, since every row carries one; a color given to
   -- `sidebar_separator` wins.
-  local configured = config.options.sidebar_separator
+  local configured = config.options.sidebar.separator
   vim.api.nvim_set_hl(0, 'ChatoraSidebarRow', {
     underline = true,
     sp = type(configured) == 'string' and configured or require('chatora.highlight').hairline(),
@@ -90,7 +90,7 @@ local DEFAULT_TABS = {
   { name = '未読', mine = true, unread = true },
 }
 
--- What a `sidebar_tabs` entry, or a folder at any depth in one, may say. A key outside
+-- What a `sidebar.tabs` entry, or a folder at any depth in one, may say. A key outside
 -- this list is a typo the reader would otherwise only notice as a tab that lists everything.
 -- `label` and `unread_only` are what v0.1 shipped; still accepted, with a warning.
 local LIST_KEYS = {
@@ -326,7 +326,7 @@ end
 --- @param keep_state boolean False when the project changed: another project's list is
 ---   not this one's.
 local function build_tabs(keep_state)
-  local specs = config.options.sidebar_tabs
+  local specs = config.options.sidebar.tabs
   if specs == false then
     specs = { DEFAULT_TABS[1] }
   elseif type(specs) ~= 'table' or #specs == 0 then
@@ -339,7 +339,7 @@ local function build_tabs(keep_state)
   tabs = {}
   for i, spec in ipairs(specs) do
     local prior = keep_state and previous[i] or nil
-    local where = ('sidebar_tabs の %d 番目'):format(i)
+    local where = ('sidebar.tabs の %d 番目'):format(i)
     local tab = make_list(spec, where, '#' .. i, prior)
     attach_folders(tab, spec, where, tab.carried)
     tab.carried = nil
@@ -482,7 +482,7 @@ local READ_BAR = ' '
 local PIN_MARK = '󰐃 '
 
 local function thumbnails_on()
-  return config.options.sidebar_thumbnails == true
+  return config.options.sidebar.thumbnails == true
 end
 
 local function drop_thumbs()
@@ -573,7 +573,7 @@ function render()
   -- Writing lines into an unloaded buffer loads it, and a buffer loaded that way comes
   -- back with option defaults.
   ensure_buf()
-  local separators = config.options.sidebar_separator ~= false
+  local separators = config.options.sidebar.separator ~= false
   local tab = tabs[active]
   line_pages, line_folders = {}, {}
   local lines = {}
@@ -929,7 +929,7 @@ function M.load_more()
   load_list(lists[#lists], index)
 end
 
---- Pin one more tab, as an entry at the end of `sidebar_tabs` would, in every project.
+--- Pin one more tab, as an entry at the end of `sidebar.tabs` would, in every project.
 function M.add_tab(spec)
   config.pinned_tabs[#config.pinned_tabs + 1] = spec
   build_tabs(true)
@@ -1061,7 +1061,7 @@ end
 
 local function start_polling()
   stop_polling()
-  local seconds = config.options.sidebar_poll
+  local seconds = config.options.sidebar.refresh_interval
   if type(seconds) ~= 'number' or seconds <= 0 then
     return
   end
@@ -1283,7 +1283,7 @@ function M.open(proj, opts)
   local focus = not (opts and opts.focus == false)
   if not (win and vim.api.nvim_win_is_valid(win)) then
     local origin = vim.api.nvim_get_current_win()
-    vim.cmd('topleft ' .. tostring(config.options.sidebar_width) .. 'vsplit')
+    vim.cmd('topleft ' .. tostring(config.options.sidebar.width) .. 'vsplit')
     win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(win, buf)
     -- Scrolling brings rows on screen whose thumbnails were never fetched.

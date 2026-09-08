@@ -42,7 +42,7 @@ local send_save
 --- Debounced autosave: (re)arm the buffer's timer; fires config.autosave
 --- seconds (minimum 1s) after the last edit, saving only if still modified.
 local function schedule_autosave(bufnr)
-  local secs = config.options.autosave
+  local secs = config.options.edit.autosave
   if not secs or secs == false then
     return
   end
@@ -116,7 +116,7 @@ local title_margin_ns = vim.api.nvim_create_namespace('chatora_title_margin')
 -- (the buffer must stay byte-identical to what gets saved to Cosense).
 local function apply_title_margin(bufnr)
   vim.api.nvim_buf_clear_namespace(bufnr, title_margin_ns, 0, -1)
-  local margin = config.options.title_margin
+  local margin = config.options.view.title_margin
   if type(margin) ~= 'number' or margin < 1 or vim.api.nvim_buf_line_count(bufnr) == 0 then
     return
   end
@@ -162,34 +162,6 @@ local function finalize_buffer(bufnr, project, title)
       end,
     })
   end
-  vim.keymap.set('n', 'gR', function()
-    related.toggle()
-  end, { buffer = bufnr, nowait = true, silent = true, desc = 'chatora: 関連ページパネルをトグル' })
-  -- External URLs open in the browser (confirmed first); everything else is
-  -- the normal LSP definition jump into another cosense:// buffer.
-  vim.keymap.set('n', 'gd', function()
-    require('chatora.links').goto_definition()
-  end, {
-    buffer = bufnr,
-    nowait = true,
-    silent = true,
-    desc = 'chatora: リンク先へジャンプ / 外部 URL はブラウザで開く',
-  })
-  vim.keymap.set('n', 'gs', function()
-    require('chatora').search()
-  end, { buffer = bufnr, nowait = true, silent = true, desc = 'chatora: ページ検索' })
-  -- ]c is vim's own "next diff hunk"; a merge conflict is the same kind of thing to step
-  -- through, and diff mode is never on in a page buffer.
-  vim.keymap.set('n', ']c', function()
-    require('chatora.sync').next_conflict()
-  end, { buffer = bufnr, nowait = true, silent = true, desc = 'chatora: 次の競合へ' })
-  -- ]u / [u step through what the right-edge marks point at.
-  vim.keymap.set('n', ']u', function()
-    require('chatora.telomere').jump(1)
-  end, { buffer = bufnr, nowait = true, silent = true, desc = 'chatora: 次の更新行へ' })
-  vim.keymap.set('n', '[u', function()
-    require('chatora.telomere').jump(-1)
-  end, { buffer = bufnr, nowait = true, silent = true, desc = 'chatora: 前の更新行へ' })
 
   codeblock.attach(bufnr)
   images.attach(bufnr, project)

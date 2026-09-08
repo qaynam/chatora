@@ -265,7 +265,7 @@ local function decorate_block(bufnr, lines, block)
       line_hl_group = 'ChatoraCodeBlock',
       priority = PRIORITY,
     })
-    if config.options.codeblock_numbers ~= false then
+    if config.options.view.codeblock_numbers ~= false then
       local n = ('%' .. width .. 'd '):format(lnum - block.start_line + 1)
       -- Anchored at the marker's indent so the gutter sits under `code:<name>` rather
       -- than at the window edge, and clamped: a shorter line has no such column.

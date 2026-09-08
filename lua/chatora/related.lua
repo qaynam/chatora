@@ -147,12 +147,12 @@ function M.refresh(project, title)
   end)
 end
 
--- Set when the user closes the panel with q: related_auto_open must not fight
+-- Set when the user closes the panel with q: related.auto_open must not fight
 -- an explicit close, so auto-open stays off until the next manual toggle.
 local user_closed = false
 
 --- Notify the panel that a page was (re)loaded: refreshes it if currently
---- open, opens it first when related_auto_open is on, otherwise just
+--- open, opens it first when related.auto_open is on, otherwise just
 --- remembers the target page for next time it opens.
 function M.on_page_opened(project, title)
   -- An untitled page has no links yet and no name the server could look up; the panel
@@ -165,7 +165,7 @@ function M.on_page_opened(project, title)
     M.refresh(project, title)
     return
   end
-  if config.options.related_auto_open and not user_closed then
+  if config.options.related.auto_open and not user_closed then
     M.open()
   end
 end
@@ -176,7 +176,7 @@ local side_override = nil
 
 --- 'bottom' or 'right'.
 function M.side()
-  return side_override or (config.options.related_position == 'right' and 'right' or 'bottom')
+  return side_override or (config.options.related.position == 'right' and 'right' or 'bottom')
 end
 
 --- Move the panel to the other edge, reopening it there when it is on screen. The choice
@@ -220,9 +220,9 @@ function M.open()
   parent_win = cur
 
   if M.side() == 'right' then
-    vim.cmd('botright ' .. tostring(config.options.related_width) .. 'vsplit')
+    vim.cmd('botright ' .. tostring(config.options.related.width) .. 'vsplit')
   else
-    vim.cmd('belowright ' .. tostring(config.options.related_height) .. 'split')
+    vim.cmd('belowright ' .. tostring(config.options.related.height) .. 'split')
   end
   win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, buf)

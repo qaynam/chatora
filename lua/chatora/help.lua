@@ -6,8 +6,8 @@
 local M = {}
 
 --- Each section is a title plus rows. A row is { key, description }, or a bare
---- string for a full-width note. `rows = 'global'` stands for the configured
---- <leader>c namespace, which is only known once setup() has run.
+--- string for a full-width note. `rows` may be a function, for the sections that list
+--- configured keys, which are only known once setup() has run.
 local SECTIONS = {
   {
     title = 'コマンド',
@@ -29,7 +29,9 @@ local SECTIONS = {
   },
   {
     title = 'グローバルキーマップ',
-    rows = 'global',
+    rows = function()
+      return require('chatora.keymaps').rows('global')
+    end,
   },
   {
     title = 'サイドバー',
@@ -49,24 +51,25 @@ local SECTIONS = {
   },
   {
     title = 'ページバッファ',
-    rows = {
-      { ':w / :wq', '保存（同期。:wq 一回で保存して閉じる）' },
-      { ':q', '閉じる（未保存なら保存するか確認）' },
-      { 'gd', 'リンク先へジャンプ（外部 URL は確認してブラウザで開く）' },
-      { 'gR', '関連ページパネルをトグル' },
-      { ']u / [u', '次 / 前の更新行へ' },
-      { '<leader>cf', 'サーバーの変更を取り込む（マージ。ローカルの内容は消えない）' },
-      { ']c', '次の競合行へ' },
-      { '<leader>cv', 'クリップボードの画像をアップロードして貼り付け' },
-      { 'gs', 'ページを検索' },
-      { '[ / #', 'リンク・ハッシュタグを補完（[ は ] を自動で補う）' },
-      { '<C-t>', '日時を挿入（insert モード）' },
-      { '<C-i> / <M-i>', 'アイコンを挿入。補完で候補を選んでいればその候補のアイコン' },
-      { 'v して * _ - /', '選択を [* ] などで囲む（同じキーの連打で [*** ] まで育つ）' },
-      { 'v して [', '選択を [ ] で囲んでリンクにする' },
-      { '<Tab>', 'テーブル行だけ本物のタブ。他は元のマッピング（補完など）に委譲' },
-      '1 行目を書き換えるとページをリネームする。タイトル行を離れたときに確認が出て、答えるまでタイトルは送らない。',
-    },
+    rows = function()
+      local keymaps = require('chatora.keymaps')
+      local rows = {
+        { ':w / :wq', '保存（同期。:wq 一回で保存して閉じる）' },
+        { ':q', '閉じる（未保存なら保存するか確認）' },
+      }
+      vim.list_extend(rows, keymaps.rows('page'))
+      rows[#rows + 1] = { '[ / #', 'リンク・ハッシュタグを補完（[ は ] を自動で補う）' }
+      for _, row in ipairs(keymaps.rows('insert')) do
+        rows[#rows + 1] = { row[1], row[2] .. '（insert モード）' }
+      end
+      vim.list_extend(rows, {
+        { 'v して * _ - /', '選択を [* ] などで囲む（同じキーの連打で [*** ] まで育つ）' },
+        { 'v して [', '選択を [ ] で囲んでリンクにする' },
+        { '<Tab>', 'テーブル行だけ本物のタブ。他は元のマッピング（補完など）に委譲' },
+        '1 行目を書き換えるとページをリネームする。タイトル行を離れたときに確認が出て、答えるまでタイトルは送らない。',
+      })
+      return rows
+    end,
   },
   {
     title = '検索',
@@ -99,16 +102,17 @@ local SECTIONS = {
   {
     title = '設定（setup / lazy.nvim の opts、抜粋）',
     rows = {
-      { 'autosave = 3', '編集が止まって 3 秒後に自動保存' },
-      { 'pads = false', '箇条書きの中点表示をやめる' },
-      { 'tables = false', 'table: ブロックの罫線描画をやめる' },
-      { 'keymaps = false', '<C-t> / <C-i> / [ の自動ペアをやめる' },
-      { 'external_link = "open"', 'gd で確認なしにブラウザを開く' },
-      { 'sidebar_poll = false', 'サイドバーの自動更新を止める（既定 60 秒間隔）' },
-      { 'sync = false', 'ページの自動同期を止める（既定 30 秒間隔、手動は <leader>cf）' },
-      { 'quote = { bar = "┃" }', '引用の縦棒を変える（false で無効）' },
+      { 'edit = { autosave = 3 }', '編集が止まって 3 秒後に自動保存' },
+      { 'view = { pads = false }', '箇条書きの中点表示をやめる' },
+      { 'view = { tables = false }', 'table: ブロックの罫線描画をやめる' },
+      { 'keymaps = { sidebar = "gk" }', 'アクション名ごとにキーを変える（false で外す）' },
+      { 'keymaps = false', 'キーを一つも入れない。<Plug>(chatora-follow) などで自分で割り当てる' },
+      { 'open_external_link = "always"', 'gd で確認なしにブラウザを開く' },
+      { 'sidebar = { refresh_interval = false }', 'サイドバーの自動更新を止める（既定 60 秒間隔）' },
+      { 'edit = { sync = false }', 'ページの自動同期を止める（既定 30 秒間隔、手動は pull のキー）' },
+      { 'view = { quote = { bar = "┃" } }', '引用の縦棒を変える（false で無効）' },
       { 'notations = {...}', '独自の [記号 本文] 記法を定義する' },
-      '全オプションと statusline 連携は README を参照。',
+      'setup() に関数を渡すとプロジェクトごとに変えられる。全オプションと statusline 連携は README を参照。',
     },
   },
 }
@@ -117,8 +121,8 @@ local INDENT = '  '
 local GAP = '  '
 
 local function rows_of(section)
-  if section.rows == 'global' then
-    return require('chatora.keymaps').global_rows()
+  if type(section.rows) == 'function' then
+    return section.rows()
   end
   return section.rows
 end

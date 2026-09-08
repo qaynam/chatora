@@ -9,7 +9,7 @@ local config = require('chatora.config')
 M.ns = vim.api.nvim_create_namespace('chatora_spacing')
 
 local function settings()
-  local raw = config.options.spacing
+  local raw = config.options.view.spacing
   if type(raw) ~= 'table' then
     return { line = 0, code = 0 }
   end

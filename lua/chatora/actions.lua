@@ -1,5 +1,6 @@
--- Page-scoped actions reachable from the <leader>c namespace, mirroring what Cosense's
--- own page menu offers. Each one works on the cosense:// buffer in the current window.
+-- Everything a key of chatora's can do, one function each, for the reader to map as they
+-- like (`<Plug>(chatora-<name>)` stands for each one too). The page actions mirror what
+-- Cosense's own page menu offers and work on the cosense:// buffer in the current window.
 local M = {}
 
 local config = require('chatora.config')
@@ -370,6 +371,71 @@ function M.info()
   for _, key in ipairs({ 'q', '<Esc>' }) do
     vim.keymap.set('n', key, close, { buffer = buf, nowait = true, silent = true })
   end
+end
+
+-- ---------------------------------------------------------------------------
+-- the rest of the keys
+-- ---------------------------------------------------------------------------
+
+function M.sidebar()
+  require('chatora').toggle()
+end
+
+function M.search()
+  require('chatora').search()
+end
+
+function M.new()
+  require('chatora').new()
+end
+
+function M.project()
+  require('chatora').switch_project()
+end
+
+function M.account()
+  require('chatora').switch_account()
+end
+
+function M.help()
+  require('chatora').help()
+end
+
+--- Follow the link under the cursor: a page opens in a buffer, an external URL goes to the
+--- browser (see `open_external_link`), a moving Gyazo capture to `open_video`.
+function M.follow()
+  if not current_page() then
+    return
+  end
+  require('chatora.links').goto_definition()
+end
+
+function M.related()
+  require('chatora.related').toggle()
+end
+
+--- Move to the next line the right-edge marks point at (updated since the page was
+--- last opened).
+function M.next_updated()
+  if not current_page() then
+    return
+  end
+  require('chatora.telomere').jump(1)
+end
+
+function M.prev_updated()
+  if not current_page() then
+    return
+  end
+  require('chatora.telomere').jump(-1)
+end
+
+function M.insert_date()
+  require('chatora.keymaps').insert_date()
+end
+
+function M.insert_icon()
+  require('chatora.keymaps').insert_icon()
 end
 
 return M

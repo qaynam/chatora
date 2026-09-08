@@ -85,7 +85,7 @@ end
 --- engine will serve this buffer, so link completion works even where the
 --- user disabled blink.cmp for the cosense filetype.
 local function enable_native_if_needed(bufnr)
-  local mode = require('chatora.config').options.completion
+  local mode = require('chatora.config').options.edit.completion
   if mode == false then
     return
   end

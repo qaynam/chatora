@@ -63,6 +63,12 @@ bun run verify   # typecheck + bun test + build + biome + smoke + E2E
 - バッファ名を付け替えても、LSP クライアントは古い名前で文書を開いたままです。名前を変える前に
   `vim.lsp.buf_detach_client`、変えたあとに付け直さないと、新しい名前への要求が
   `document not synced` になります（`page.lua` の `rename_buffer`）
+- 設定は `sidebar` / `related` / `edit` / `view` / `image` の入れ子です。オプションを足すときは
+  `config.lua` の型（`chatora.Config` など）と README の表の両方に足します。v0.1 の平らなキーは
+  `config.lua` の `MOVED` で移していて、警告つきで動きます
+- キーは `keymaps.lua` の `ACTIONS` が唯一の表です。ページのキーを `page.lua` などに直接
+  `vim.keymap.set` しないでください。アクションは `actions.lua` に置き、`<Plug>(chatora-…)` が
+  自動で付きます
 - `setup()` に関数が渡されていると、`config.options` はプロジェクトごとに差し替わります
   （`config.use_project`、入口は `init.set_project`）。設定を `config.options` に書き戻すと
   次の差し替えで消えるので、あとから足すものは別に持ちます（`config.pinned_tabs`）
