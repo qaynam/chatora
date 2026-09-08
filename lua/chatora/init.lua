@@ -21,6 +21,13 @@ function M.setup(opts)
   require('chatora.paste').install()
 end
 
+--- Make `name` the session's project. The configuration follows the project (see
+--- config.use_project), so this comes before anything reads options for it.
+function M.set_project(name)
+  M.session.project = name
+  config.use_project(name)
+end
+
 --- Resolve the active project: config.project if set, else the session's
 --- remembered choice, else prompt via vim.ui.select.
 function M.resolve_project(cb)
@@ -29,7 +36,7 @@ function M.resolve_project(cb)
     return
   end
   if config.options.project then
-    M.session.project = config.options.project
+    M.set_project(config.options.project)
     cb(M.session.project)
     return
   end
@@ -50,7 +57,7 @@ function M.resolve_project(cb)
         return
       end
       local name = choice.name or choice.displayName
-      M.session.project = name
+      M.set_project(name)
       cb(name)
     end)
   end)
@@ -191,7 +198,7 @@ function M.use_project(name, opts, cb)
         vim.log.levels.WARN
       )
     end
-    M.session.project = result.project
+    M.set_project(result.project)
     if cb then
       cb(result.project)
     end
@@ -262,7 +269,7 @@ end
 function M.switch_account()
   require('chatora.account').switch(function()
     require('chatora.keymaps').invalidate_account_cache()
-    M.session.project = nil
+    M.set_project(nil)
     M.resolve_project(function(project)
       sidebar.open(project)
     end)

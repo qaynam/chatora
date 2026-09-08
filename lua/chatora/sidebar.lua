@@ -86,12 +86,13 @@ end
 -- ---------------------------------------------------------------------------
 
 local DEFAULT_TABS = {
-  { label = 'すべて' },
-  { label = '未読', mine = true, unread_only = true },
+  { name = 'すべて' },
+  { name = '未読', mine = true, unread = true },
 }
 
 -- What a `sidebar_tabs` entry, or a folder at any depth in one, may say. A key outside
 -- this list is a typo the reader would otherwise only notice as a tab that lists everything.
+-- `label` and `unread_only` are what v0.1 shipped; still accepted, with a warning.
 local LIST_KEYS = {
   label = true,
   name = true,
@@ -137,14 +138,17 @@ local function new_state()
   }
 end
 
+-- The keys that decide what a list holds. One at most: the others narrow or decorate.
+local SOURCE_KEYS = { 'filter', 'mine', 'related', 'pages', 'folders' }
+
 --- One list from its spec: a tab, or a folder inside one. `prior` is the list that stood
 --- at the same position before a rebuild; its pages are carried over only under the same
---- label, since a reordered or renamed list is a different query.
-local function make_list(spec, where, fallback_label, prior)
+--- name, since a reordered or renamed list is a different query.
+local function make_list(spec, where, fallback_name, prior)
   for key in pairs(spec) do
     if not LIST_KEYS[key] then
       vim.notify_once(
-        ('[chatora] %sに知らないキー `%s` があります（使えるのは label, icon, image, filter, mine, related, pages, unread, open, folders）'):format(
+        ('[chatora] %sに知らないキー `%s` があります（使えるのは name, icon, image, filter, mine, related, pages, unread, open, folders）'):format(
           where,
           key
         ),
@@ -170,8 +174,26 @@ local function make_list(spec, where, fallback_label, prior)
       vim.log.levels.WARN
     )
   end
-  local label = spec.label or spec.name or fallback_label
-  local carried = prior ~= nil and prior.label == label and prior or nil
+  if spec.label ~= nil then
+    vim.notify_once(('[chatora] %sの `label` は `name` になりました'):format(where), vim.log.levels.WARN)
+  end
+  if spec.unread_only ~= nil then
+    vim.notify_once(('[chatora] %sの `unread_only` は `unread` になりました'):format(where), vim.log.levels.WARN)
+  end
+  local sources = {}
+  for _, key in ipairs(SOURCE_KEYS) do
+    if spec[key] ~= nil and spec[key] ~= false then
+      sources[#sources + 1] = key
+    end
+  end
+  if #sources > 1 then
+    vim.notify_once(
+      ('[chatora] %sの中身を決めるキーは 1 つだけです（%s が一緒にあります）'):format(where, table.concat(sources, ', ')),
+      vim.log.levels.WARN
+    )
+  end
+  local name = spec.name or spec.label or fallback_name
+  local carried = prior ~= nil and prior.name == name and prior or nil
   local pages = spec.pages
   if type(pages) == 'table' then
     local fixed = pages
@@ -180,7 +202,7 @@ local function make_list(spec, where, fallback_label, prior)
     end
   end
   return {
-    label = label,
+    name = name,
     where = where,
     icon = spec.icon,
     image = type(spec.image) == 'string' and spec.image ~= '' and spec.image or nil,
@@ -188,7 +210,7 @@ local function make_list(spec, where, fallback_label, prior)
     mine = (spec.mine == true or spec.filter == 'me') and true or nil,
     related = (type(spec.related) == 'string' or type(spec.related) == 'table') and spec.related or nil,
     pages = type(pages) == 'function' and pages or nil,
-    unread_only = (spec.unread_only or spec.unread) and true or nil,
+    unread = (spec.unread or spec.unread_only) and true or nil,
     state = carried and carried.state or new_state(),
     carried = carried,
   }
@@ -197,7 +219,7 @@ end
 --- What the reader's functions get to say. Safe from any callback: a notify off the main
 --- loop would fail, and the failure would vanish into the callback. Shown in :messages and
 --- written next to the server's lines, so `:Chatora log` has both.
-local function make_logger(label)
+local function make_logger(name)
   return function(...)
     local parts = {}
     for i = 1, select('#', ...) do
@@ -205,7 +227,7 @@ local function make_logger(label)
       -- One line per call: a record in the log file is a line, and a table would spill over.
       parts[#parts + 1] = type(value) == 'string' and value or vim.inspect(value, { newline = ' ', indent = '' })
     end
-    local message = label .. ': ' .. table.concat(parts, ' ')
+    local message = name .. ': ' .. table.concat(parts, ' ')
     local function emit()
       vim.notify('[chatora] ' .. message, vim.log.levels.INFO)
       lsp.notify('chatora/log', { message = message })
@@ -224,7 +246,7 @@ end
 --- result or with nil and why, and never inside `fn` itself, so what is done with the
 --- result cannot be mistaken for the function's own error. Everything the function is
 --- given rides on `ctx`, so a later addition never changes its arguments.
-local function call_source(fn, what, label, cb)
+local function call_source(fn, what, name, cb)
   local finished, returned, held = false, false, nil
   local function settle(value, why)
     if value == nil then
@@ -249,7 +271,7 @@ local function call_source(fn, what, label, cb)
     end
   end
   local ok, ret = xpcall(function()
-    return fn({ project = project, log = make_logger(label), done = done })
+    return fn({ project = project, log = make_logger(name), done = done })
   end, function(e)
     -- Where it broke, since an error out of a C function (table.sort, say) names no line.
     return debug.traceback(tostring(e), 2)
@@ -310,6 +332,9 @@ local function build_tabs(keep_state)
   elseif type(specs) ~= 'table' or #specs == 0 then
     specs = DEFAULT_TABS
   end
+  if #config.pinned_tabs > 0 then
+    specs = vim.list_extend(vim.list_extend({}, specs), config.pinned_tabs)
+  end
   local previous = tabs
   tabs = {}
   for i, spec in ipairs(specs) do
@@ -339,6 +364,21 @@ local function collect_lists(list, open_only, out)
     end
   end
   return out
+end
+
+--- Whether anything of `tab` has come in: what tells a tab shown again from one never
+--- loaded. The tab's own state says nothing once it has folders, and a heading with
+--- folders still to ask for has no lists at all.
+local function has_loaded(tab)
+  if tab.folders_fn and tab.folders_resolved then
+    return true
+  end
+  for _, list in ipairs(collect_lists(tab, false, {})) do
+    if list.state.fetched then
+      return true
+    end
+  end
+  return false
 end
 
 --- The lists a tab draws.
@@ -403,7 +443,7 @@ local function tabline()
   local parts = {}
   for i, tab in ipairs(tabs) do
     local hl = i == active and 'ChatoraSidebarTabActive' or 'ChatoraSidebarTabInactive'
-    local text = (tab.icon and (tab.icon .. ' ') or '') .. tab.label
+    local text = (tab.icon and (tab.icon .. ' ') or '') .. tab.name
     -- %<n>@fn@ … %X makes the label clickable; the handler switches to tab n.
     parts[#parts + 1] = ('%%%d@v:lua.chatora_sidebar_tab_click@%%#%s# %s %%*%%X'):format(i, hl, text)
   end
@@ -565,7 +605,7 @@ function render()
   local function add_folder(folder, depth)
     local indent = string.rep('  ', depth)
     local glyph = folder.open and FOLDER_OPEN or FOLDER_CLOSED
-    lines[#lines + 1] = indent .. glyph .. pad .. (folder.icon and (folder.icon .. ' ') or '') .. folder.label
+    lines[#lines + 1] = indent .. glyph .. pad .. (folder.icon and (folder.icon .. ' ') or '') .. folder.name
     rows[#rows + 1] = {
       folder = true,
       thumb = pad ~= '' and folder.image and { url = folder.image, col = #indent + #glyph, screen_col = #indent + 1 }
@@ -694,7 +734,7 @@ local function batch_params(tab, skip)
     project = project,
     skip = skip,
     limit = PAGE_SIZE,
-    unreadOnly = tab.unread_only or nil,
+    unreadOnly = tab.unread or nil,
     filterType = filter_type,
     filterValue = filter_value,
   }
@@ -709,7 +749,7 @@ end
 --- Only rows the renderer can draw: a title each, in the order given. A table without one
 --- is said out loud, since a row is keyed by `title` while a folder is keyed by `name`,
 --- and the one is easily written for the other.
-local function as_rows(list, label)
+local function as_rows(list, name)
   local rows = {}
   for _, entry in ipairs(type(list) == 'table' and list or {}) do
     if type(entry) == 'string' then
@@ -718,7 +758,7 @@ local function as_rows(list, label)
       rows[#rows + 1] = entry
     elseif type(entry) == 'table' then
       vim.notify_once(
-        ('[chatora] %s: pages の要素に title がありません（行は title、フォルダーは name です）'):format(label),
+        ('[chatora] %s: pages の要素に title がありません（行は title、フォルダーは name です）'):format(name),
         vim.log.levels.WARN
       )
     end
@@ -766,11 +806,11 @@ end
 --- a title come newest first, as the other tabs are.
 local function fetch_whole(tab, cb)
   if tab.pages then
-    call_source(tab.pages, 'pages', tab.label, function(list, why)
+    call_source(tab.pages, 'pages', tab.name, function(list, why)
       if list == nil then
         cb(nil, why)
       else
-        cb(as_rows(list, tab.label))
+        cb(as_rows(list, tab.name))
       end
     end)
     return
@@ -842,14 +882,14 @@ end
 --- without its first batch; once they all have one, the scroll reaching the bottom extends
 --- the last of them, which is what the bottom belongs to.
 --- Ask a heading's `folders` function for its folders and hang them on it, carrying over
---- what a folder of the same label held before, then draw and fetch what came.
+--- what a folder of the same name held before, then draw and fetch what came.
 local function resolve_folders(node, index)
   if node.folders_loading then
     return
   end
   node.folders_loading = true
   local previous = node.folders
-  call_source(node.folders_fn, 'folders', node.label, function(specs, why)
+  call_source(node.folders_fn, 'folders', node.name, function(specs, why)
     node.folders_loading = false
     node.folders_resolved = true
     if specs == nil then
@@ -889,16 +929,9 @@ function M.load_more()
   load_list(lists[#lists], index)
 end
 
---- Pin one more tab, as an entry at the end of `sidebar_tabs` would.
+--- Pin one more tab, as an entry at the end of `sidebar_tabs` would, in every project.
 function M.add_tab(spec)
-  local specs = config.options.sidebar_tabs
-  if specs == false then
-    specs = { DEFAULT_TABS[1] }
-  elseif type(specs) ~= 'table' or #specs == 0 then
-    specs = vim.deepcopy(DEFAULT_TABS)
-  end
-  specs[#specs + 1] = spec
-  config.options.sidebar_tabs = specs
+  config.pinned_tabs[#config.pinned_tabs + 1] = spec
   build_tabs(true)
   if is_open() then
     apply_winbar()
@@ -1230,6 +1263,9 @@ end
 function M.open(proj, opts)
   local same_project = project == proj
   if not same_project then
+    -- New pages and searches belong to the project in front of the reader, not to
+    -- whichever one the session started on; so does the configuration read below.
+    require('chatora').set_project(proj)
     if project then
       sessions[project] = { tabs = tabs, active = active }
     end
@@ -1283,12 +1319,14 @@ function M.open(proj, opts)
 
   lsp.ensure_start(buf)
   -- Reopening shows what is already loaded; the poll loop below brings it up to date in
-  -- the background. Only a first open (or a project switch) has nothing to show.
-  if #tabs > 0 and #tabs[active].state.pages > 0 then
+  -- the background. Only a first open (or a project switch) has nothing to show, and
+  -- loading that one tab must not throw the others' pages away.
+  if #tabs > 0 and has_loaded(tabs[active]) then
     render()
     restore_cursor()
   else
-    M.reload()
+    render()
+    M.load_more()
   end
   start_polling()
 
@@ -1345,9 +1383,6 @@ vim.api.nvim_create_autocmd('BufEnter', {
     end
     -- The cursor stays where the reader put it; only the list moves.
     M.open(proj, { focus = false })
-    -- New pages and searches belong to the project in front of them, not to whichever one
-    -- the session started on.
-    require('chatora').session.project = proj
   end,
 })
 

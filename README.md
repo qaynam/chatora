@@ -222,6 +222,7 @@ keymaps = { info = '<leader>ck', copy_url = false }
 ## 設定
 
 `setup()`（lazy.nvim なら `opts`）に渡します。既定値は `lua/chatora/config.lua` にまとまっています。
+テーブルの代わりに関数を渡すと、プロジェクトごとに違う設定にできます。[下記](docs/FEATURES.md#プロジェクトごとの設定)
 
 ### 接続
 

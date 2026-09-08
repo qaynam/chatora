@@ -10,8 +10,8 @@ local defaults = {
 
   sidebar_width = 32,
   sidebar_tabs = {
-    { label = 'すべて' },
-    { label = '未読', mine = true, unread_only = true },
+    { name = 'すべて' },
+    { name = '未読', mine = true, unread = true },
   },
   -- true derives the underline's color from the theme; a color string sets it outright.
   sidebar_separator = true,
@@ -143,14 +143,79 @@ local function plugin_root()
   return vim.fn.fnamemodify(source, ':p:h:h:h')
 end
 
---- The table setup() was last called with, kept unmerged so `:Chatora reload` re-applies
---- the user's configuration rather than a copy of it merged with defaults.
+--- What setup() was last called with (a table, or a function of `ctx`), kept unmerged so
+--- `:Chatora reload` re-applies the user's configuration rather than a copy of it merged
+--- with defaults.
 M.user_opts = nil
+
+--- Tabs pinned with add_tab after setup, listed after the configured ones. Kept apart
+--- from `options`, which is swapped out per project.
+M.pinned_tabs = {}
+
+-- Handed to the server once, when it starts, so a project cannot have its own.
+local SERVER_KEYS = { 'origin', 'notations', 'log', 'server_cmd' }
+
+-- The answer given with no project, and the ones given per project, for the session:
+-- asking again would hand the sidebar new tables and closures for the same tabs, and
+-- their fetched pages are carried over by identity.
+local base = nil
+local per_project = {}
+
+local function resolve(project)
+  local opts = M.user_opts
+  if type(opts) == 'function' then
+    local ok, ret = xpcall(opts, debug.traceback, { project = project })
+    if not ok then
+      vim.notify('[chatora] setup() の関数でエラーになりました: ' .. tostring(ret), vim.log.levels.ERROR)
+      ret = nil
+    elseif type(ret) ~= 'table' then
+      vim.notify(
+        ('[chatora] setup() の関数は設定のテーブルを返してください（%s が返りました）'):format(type(ret)),
+        vim.log.levels.WARN
+      )
+      ret = nil
+    end
+    opts = ret
+  end
+  local options = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
+  options.notations = validate_notations(options.notations)
+  return options
+end
 
 function M.setup(opts)
   M.user_opts = opts
-  M.options = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
-  M.options.notations = validate_notations(M.options.notations)
+  M.pinned_tabs = {}
+  per_project = {}
+  base = resolve(nil)
+  M.options = base
+end
+
+--- Make `options` the ones for `project` (nil: the ones for no project). Only a setup()
+--- given a function has any: it is asked once per project, with `{ project = project }`,
+--- and its answer kept for the session. What the server was started with stays as it is.
+function M.use_project(project)
+  if type(M.user_opts) ~= 'function' then
+    return
+  end
+  if project == nil then
+    M.options = base
+    return
+  end
+  local options = per_project[project]
+  if not options then
+    options = resolve(project)
+    for _, key in ipairs(SERVER_KEYS) do
+      if not vim.deep_equal(options[key], base[key]) then
+        vim.notify_once(
+          ('[chatora] %s はサーバーの起動時に渡すので、プロジェクトごとには変えられません'):format(key),
+          vim.log.levels.WARN
+        )
+        options[key] = base[key]
+      end
+    end
+    per_project[project] = options
+  end
+  M.options = options
 end
 
 --- Repo root (= plugin root), used as LSP root_dir and for locating the server.
