@@ -2467,7 +2467,7 @@ local ok, err = pcall(function()
     config.options.sidebar_tabs = {
       { name = 'All', icon = '📖' },
       { name = 'sakura', filter = 'sakura' },
-      { label = 'リンク', related = 'ロードマップ' },
+      { name = 'リンク', related = 'ロードマップ' },
       { name = 'typo', colour = 'red' },
     }
 
@@ -2690,6 +2690,50 @@ local ok, err = pcall(function()
     lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
   end
 
+  -- The key names v0.1 shipped with still work, each saying once what it is now. Two keys
+  -- that decide a list's contents in one spec are called out: only one of them can win.
+  do
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
+    local orig_tabs, orig_notify = config.options.sidebar_tabs, vim.notify
+    local warned, params = {}, {}
+    vim.notify = function(msg)
+      warned[#warned + 1] = msg
+    end
+    lsp.ensure_start = function() end
+    lsp.request = function(_, _, cb)
+      cb('no client', nil)
+    end
+    lsp.request_ok = function(method, p, cb)
+      if method == 'chatora/listPages' then
+        params[#params + 1] = p
+        cb({ ok = true, count = 0, scanned = 0, pages = {} })
+      end
+    end
+    sidebar.close()
+    config.options.sidebar_tabs = {
+      { label = '古い', unread_only = true },
+      { name = '二つ', filter = 'taro', related = 'memo' },
+    }
+    sidebar.open('proj')
+    local win = vim.fn.bufwinid('chatora://sidebar')
+    assert(vim.wo[win].winbar:find(' 古い ', 1, true), 'label still names the tab: ' .. vim.wo[win].winbar)
+    assert(params[1] and params[1].unreadOnly == true, 'unread_only still narrows to unread: ' .. vim.inspect(params[1]))
+    local joined = table.concat(warned, '\n')
+    assert(joined:find('1 番目の `label` は `name` になりました', 1, true), 'label is said to be name now: ' .. joined)
+    assert(joined:find('1 番目の `unread_only` は `unread` になりました', 1, true), 'unread_only is said to be unread now: ' .. joined)
+    assert(
+      joined:find('2 番目の中身を決めるキーは 1 つだけです（filter, related が一緒にあります）', 1, true),
+      'two sources are called out: ' .. joined
+    )
+    sidebar.close()
+    config.options.sidebar_tabs = orig_tabs
+    vim.notify = orig_notify
+    lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
+  end
+
   -- An unread list thinned to nothing keeps pulling batches, but only so far on its own:
   -- the rest waits for the reader to scroll, so one open cannot fire a hundred requests.
   do
@@ -2875,7 +2919,7 @@ local ok, err = pcall(function()
     sidebar.close()
 
     local asked = {}
-    local work_tabs = { { label = '仕事' }, { label = 'todo', filter = 'taro' } }
+    local work_tabs = { { name = '仕事' }, { name = 'todo', filter = 'taro' } }
     chatora.setup(function(ctx)
       asked[#asked + 1] = tostring(ctx.project)
       if ctx.project == 'my-project' then

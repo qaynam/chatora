@@ -554,9 +554,9 @@ video = false                           -- 既定。ほかのリンクと同じ�
 
 ```lua
 require('chatora').setup(function(ctx)
-  local tabs = { { label = 'すべて' }, { label = '未読', mine = true, unread = true } }
+  local tabs = { { name = 'すべて' }, { name = '未読', mine = true, unread = true } }
   if ctx.project == 'my-project' then
-    tabs[#tabs + 1] = { label = 'ロードマップ', related = 'ロードマップ' }
+    tabs[#tabs + 1] = { name = 'ロードマップ', related = 'ロードマップ' }
   end
   return { project = 'my-project', autosave = 10, sidebar_tabs = tabs }
 end)
@@ -568,16 +568,16 @@ end)
 
 ```lua
 sidebar_tabs = {
-  { label = 'すべて', icon = '📖' },
-  { label = '未読', icon = '📩', mine = true, unread = true },
-  { label = 'sakura', filter = 'sakura' },
-  { label = 'ロードマップ', related = 'ロードマップ' },
+  { name = 'すべて', icon = '📖' },
+  { name = '未読', icon = '📩', mine = true, unread = true },
+  { name = 'sakura', filter = 'sakura' },
+  { name = 'ロードマップ', related = 'ロードマップ' },
 }
 ```
 
 | キー | 意味 |
 |---|---|
-| `label` | タブの名前です。`name` でも書けます |
+| `name` | タブの名前です |
 | `icon` | 名前の前に付けます |
 | `filter` | web のフィルタと同じで、ページのタイトルを書きます。そのタイトルの `.icon` 記法を含むページと、その名前のユーザーが編集したページに絞ります |
 | `mine` | 自分のページに絞ります。`filter = '自分の名前'` と同じで、web で保存したフィルタがあればそれを使います |
@@ -587,12 +587,14 @@ sidebar_tabs = {
 | `folders` | タブの中をフォルダーに分けます。下記 |
 
 `filter` は `{ type = 'icon', value = 'sakura' }` の形でも書けます。`sidebar_tabs = false` で、
-タブなしの単一リストになります。知らないキーがあると、起動時にそう言います。
+タブなしの単一リストになります。知らないキーがあると、起動時にそう言います。中身を決めるキー
+（`filter` / `mine` / `related` / `pages` / `folders`）は 1 つだけ書きます。2 つ以上あるときも、そう言います。
+以前の `label` と `unread_only` はそのまま動きますが、`name` と `unread` になったと 1 回だけ言います。
 
 設定のあとから足すこともできます。
 
 ```lua
-require('chatora').add_tab({ label = 'sakura', filter = 'sakura' })
+require('chatora').add_tab({ name = 'sakura', filter = 'sakura' })
 ```
 
 `pages` に関数を渡すと、一覧の中身を自分で決められます。関数は `ctx` を 1 つ受け取り、タイトルの
@@ -613,12 +615,12 @@ require('chatora').add_tab({ label = 'sakura', filter = 'sakura' })
 
 ```lua
 -- 決まったページを並べる
-{ label = 'よく見る', pages = function()
+{ name = 'よく見る', pages = function()
   return { 'ホーム', 'TODO', 'ロードマップ' }
 end },
 
 -- 全文検索の結果を並べる
-{ label = '#tag', pages = function(ctx)
+{ name = '#tag', pages = function(ctx)
   require('chatora.lsp').request('chatora/search', { project = ctx.project, query = '#tag' }, function(_, res)
     ctx.done(res and res.pages or {})
   end)
@@ -630,7 +632,7 @@ end },
 そのウィンドウです。Cosense と関係ないものを並べるのはこれでできます。
 
 ```lua
-{ label = 'メモ帳', pages = function()
+{ name = 'メモ帳', pages = function()
   return {
     { title = 'today.md', action = function()
       vim.cmd.edit(vim.fn.expand('~/notes/today.md'))
