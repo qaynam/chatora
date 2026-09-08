@@ -202,6 +202,21 @@ describe('uploadImage GCS flow', () => {
     expect(put?.init.body).toEqual(PNG)
   })
 
+  test('bytes Cosense already holds are answered with their URL, and nothing more is sent', async () => {
+    const { result, calls } = run([
+      PROJECT('gcs'),
+      ['/upload-request', () => json({ embedUrl: 'https://scrapbox.io/files/again.png' })],
+    ])
+    expect(await result).toEqual({
+      ok: true,
+      notation: '[https://scrapbox.io/files/again.png]',
+      url: 'https://scrapbox.io/files/again.png',
+    })
+    expect(calls.some((c) => c.url.includes('storage.googleapis.com'))).toBe(false)
+    expect(calls.some((c) => c.url.includes('/verify'))).toBe(false)
+    expect(calls.some((c) => c.url.includes('gyazo'))).toBe(false)
+  })
+
   test('a failure at any step reports rather than writing a broken notation', async () => {
     const { result } = run([
       PROJECT('gcs'),

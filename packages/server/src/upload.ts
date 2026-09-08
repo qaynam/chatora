@@ -46,6 +46,8 @@ interface GyazoUpload {
 interface GcsUploadRequest {
   readonly signedUrl?: string
   readonly fileId?: string
+  /** Present instead of the two above when the same bytes are already a file of the project. */
+  readonly embedUrl?: string
 }
 interface GcsVerify {
   readonly embedUrl?: string
@@ -151,8 +153,21 @@ const uploadToGcs = (args: {
       yield* log('warn', 'gcs upload-request failed', { status: requested?.status })
       return err('アップロード先 URL を取得できませんでした')
     }
-    const { signedUrl, fileId } = ((yield* readJson(requested)) as GcsUploadRequest | null) ?? {}
-    if (!signedUrl || !fileId) return err('アップロード先 URL が空でした')
+    const answer = ((yield* readJson(requested)) as GcsUploadRequest | null) ?? {}
+    // Cosense keeps one copy per md5: bytes it already holds are answered with the file's
+    // URL outright, and there is nothing left to send or verify. Pasting the same picture
+    // twice is the everyday case (cosense-cli reads the answer the same way).
+    if (typeof answer.embedUrl === 'string' && answer.embedUrl !== '') {
+      yield* log('info', 'image already uploaded', { to: 'gcs', url: answer.embedUrl })
+      return succeed(answer.embedUrl)
+    }
+    const { signedUrl, fileId } = answer
+    if (!signedUrl || !fileId) {
+      yield* log('warn', 'gcs upload-request answered nothing usable', {
+        keys: Object.keys(answer).join(','),
+      })
+      return err('アップロード先 URL が空でした')
+    }
 
     // Signed for exactly `content-type;host`, so sending any other header breaks the
     // signature — in particular the session headers, which Google would reject.
