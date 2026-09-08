@@ -270,43 +270,6 @@ local OPTIONAL = {
   image = { height_large = true },
 }
 
--- The keys of v0.1's flat layout, and where each went. Only named in the warning: the old
--- key does nothing, since carrying it over would keep every old name alive for good.
-local RENAMED = {
-  project = 'default_project',
-  external_link = 'open_external_link',
-  video = 'open_video',
-  sidebar_width = 'sidebar.width',
-  sidebar_separator = 'sidebar.separator',
-  sidebar_thumbnails = 'sidebar.thumbnails',
-  sidebar_poll = 'sidebar.refresh_interval',
-  sidebar_tabs = 'sidebar.tabs',
-  related_position = 'related.position',
-  related_height = 'related.height',
-  related_width = 'related.width',
-  related_auto_open = 'related.auto_open',
-  autosave = 'edit.autosave',
-  sync = 'edit.sync',
-  status = 'edit.save_status',
-  completion = 'edit.completion',
-  surround = 'edit.surround',
-  conceal = 'view.conceal',
-  pads = 'view.pads',
-  quote = 'view.quote',
-  telomere = 'view.telomere',
-  tables = 'view.tables',
-  codeblock_numbers = 'view.codeblock_numbers',
-  file_icon = 'view.file_icon',
-  title_margin = 'view.title_margin',
-  spacing = 'view.spacing',
-  images = 'image.enabled',
-  image_backend = 'image.backend',
-  image_height = 'image.height',
-  image_height_large = 'image.height_large',
-  image_gallery = 'image.gallery',
-  image_border = 'image.border',
-}
-
 --- Say once which keys of `opts` mean nothing, at the top and inside each group: a
 --- misspelled key would otherwise leave the default in place without a word.
 local function warn_unknown(opts)
@@ -316,15 +279,7 @@ local function warn_unknown(opts)
     end
     for key in pairs(given) do
       if known[key] == nil and not (extra and extra[key]) then
-        local moved = prefix == '' and RENAMED[key] or nil
-        vim.notify_once(
-          ('[chatora] setup() に知らないキー `%s%s` があります%s'):format(
-            prefix,
-            key,
-            moved and ('（`' .. moved .. '` になりました）') or ''
-          ),
-          vim.log.levels.WARN
-        )
+        vim.notify_once(('[chatora] setup() に知らないキー `%s%s` があります'):format(prefix, key), vim.log.levels.WARN)
       end
     end
   end

@@ -1197,8 +1197,7 @@ local ok, err = pcall(function()
   end
 
   -- A key setup() does not know is called out once and does nothing — at the top, inside
-  -- a group, and in keymaps — naming the new key when it is one of v0.1's flat ones, so a
-  -- configuration from then says where to move each line rather than quietly losing it.
+  -- a group, and in keymaps — so a misspelled one is not quietly lost.
   do
     local config = require('chatora.config')
     local orig_notify = vim.notify
@@ -1218,17 +1217,16 @@ local ok, err = pcall(function()
     assert(o.edit.autopair == true and o.keymaps.sidebar == nil, 'nor is an old keymaps key')
     local joined = table.concat(warned, '\n')
     for _, line in ipairs({
-      '知らないキー `sidebar_width` があります（`sidebar.width` になりました）',
+      '知らないキー `sidebar_width` があります',
       '知らないキー `colour` があります',
       '知らないキー `sidebar.widht` があります',
     }) do
       assert(joined:find(line, 1, true), 'expected: ' .. line .. '\nin: ' .. joined)
     end
-    assert(not joined:find('`colour` があります（', 1, true), 'a key that never existed gets no new name')
     require('chatora.keymaps').attach(vim.api.nvim_create_buf(false, true))
     joined = table.concat(warned, '\n')
-    assert(joined:find('keymaps に知らないキー `toggle` があります（`keymaps.sidebar` になりました）', 1, true), 'keymaps.toggle names keymaps.sidebar: ' .. joined)
-    assert(joined:find('keymaps に知らないキー `autopair` があります（`edit.autopair` になりました）', 1, true), 'keymaps.autopair names edit.autopair: ' .. joined)
+    assert(joined:find('keymaps に知らないキー `toggle` があります', 1, true), 'an old keymaps key is unknown too: ' .. joined)
+    assert(joined:find('keymaps に知らないキー `autopair` があります', 1, true), 'so is a behaviour that moved to edit: ' .. joined)
     chatora.setup({})
     vim.notify = orig_notify
   end
