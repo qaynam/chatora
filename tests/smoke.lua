@@ -2851,6 +2851,135 @@ local ok, err = pcall(function()
     images.backend, lsp.request, lsp.request_ok, lsp.ensure_start = orig_backend, orig_request, orig_ok, orig_start
   end
 
+  -- setup() given a function: asked with no project at startup, then once per project as
+  -- each is entered, and the answer is kept, so coming back to a project hands the sidebar
+  -- the very same tab specs. What the server was started with cannot differ per project.
+  do
+    local config = require('chatora.config')
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local orig_start, orig_ok, orig_request, orig_notify = lsp.ensure_start, lsp.request_ok, lsp.request, vim.notify
+    local warned = {}
+    vim.notify = function(msg)
+      warned[#warned + 1] = msg
+    end
+    lsp.ensure_start = function() end
+    lsp.request = function(_, _, cb)
+      cb('no client', nil)
+    end
+    lsp.request_ok = function(method, _, cb)
+      if method == 'chatora/listPages' then
+        cb({ ok = true, count = 1, scanned = 1, pages = { { id = 'p', title = 'ページ', updated = 1 } } })
+      end
+    end
+    sidebar.close()
+
+    local asked = {}
+    local work_tabs = { { label = '仕事' }, { label = 'todo', filter = 'taro' } }
+    chatora.setup(function(ctx)
+      asked[#asked + 1] = tostring(ctx.project)
+      if ctx.project == 'my-project' then
+        return { sidebar_tabs = work_tabs, autosave = 5, origin = 'https://example.com' }
+      end
+      return { project = 'my-project', autosave = 10 }
+    end)
+    assert(vim.deep_equal(asked, { 'nil' }), 'setup asks once, with no project: ' .. vim.inspect(asked))
+    assert(config.options.project == 'my-project' and config.options.autosave == 10, 'the no-project answer is the base')
+
+    sidebar.open('my-project')
+    assert(vim.deep_equal(asked, { 'nil', 'my-project' }), 'entering a project asks for it: ' .. vim.inspect(asked))
+    assert(config.options.autosave == 5, 'options follow the project')
+    assert(config.options.sidebar_tabs == work_tabs, 'the answer is used as given, not copied')
+    assert(config.options.origin == 'https://scrapbox.io', 'what the server started with stays')
+    assert(
+      #warned == 1 and warned[1]:find('origin はサーバーの起動時に渡す', 1, true),
+      'a server key answered per project is called out: ' .. vim.inspect(warned)
+    )
+    local win = vim.fn.bufwinid('chatora://sidebar')
+    assert(vim.wo[win].winbar:find(' 仕事 ', 1, true), 'the sidebar shows the project\'s tabs: ' .. vim.wo[win].winbar)
+    assert(chatora.session.project == 'my-project', 'the sidebar\'s project is the session\'s')
+
+    sidebar.open('other')
+    assert(vim.deep_equal(asked, { 'nil', 'my-project', 'other' }), 'another project is asked for: ' .. vim.inspect(asked))
+    assert(config.options.autosave == 10, 'a project the function has nothing special for gets the base answer')
+    assert(vim.wo[win].winbar:find(' すべて ', 1, true), 'and the default tabs: ' .. vim.wo[win].winbar)
+
+    sidebar.open('my-project')
+    assert(#asked == 3, 'coming back does not ask again: ' .. vim.inspect(asked))
+    assert(config.options.sidebar_tabs == work_tabs, 'the kept answer comes back')
+
+    chatora.set_project(nil)
+    assert(config.options.autosave == 10, 'no project means the base answer')
+
+    -- A table is still a table: nothing per project, and use_project leaves it alone.
+    chatora.setup({ autosave = 7 })
+    chatora.set_project('my-project')
+    assert(config.options.autosave == 7, 'a table setup has no per-project answer')
+
+    -- Neither an error nor a non-table takes the plugin down.
+    chatora.setup(function()
+      error('boom')
+    end)
+    assert(warned[#warned]:find('setup() の関数でエラー', 1, true) and warned[#warned]:find('boom', 1, true), 'an error is reported: ' .. tostring(warned[#warned]))
+    assert(config.options.autosave == false, 'and the defaults stand')
+    chatora.setup(function()
+      return 'oops'
+    end)
+    assert(warned[#warned]:find('テーブルを返してください', 1, true), 'a non-table is reported: ' .. tostring(warned[#warned]))
+
+    sidebar.close()
+    chatora.setup({})
+    vim.notify = orig_notify
+    lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
+  end
+
+  -- Closing and reopening the sidebar shows what it had, without a request: a tab of
+  -- folders too, whose own state never holds a page. A tab still empty when the sidebar
+  -- closed is loaded on its own, the other tabs' pages left alone.
+  do
+    local config = require('chatora.config')
+    local sidebar = require('chatora.sidebar')
+    local lsp = require('chatora.lsp')
+    local orig_start, orig_ok, orig_request, orig_tabs = lsp.ensure_start, lsp.request_ok, lsp.request, config.options.sidebar_tabs
+    local requests = 0
+    lsp.ensure_start = function() end
+    lsp.request = function(_, _, cb)
+      cb('no client', nil)
+    end
+    lsp.request_ok = function(method, _, cb)
+      if method == 'chatora/listPages' then
+        requests = requests + 1
+        cb({ ok = true, count = 1, scanned = 1, pages = { { id = 'p', title = 'ページ', updated = 1 } } })
+      end
+    end
+    sidebar.close()
+    config.options.sidebar_tabs = {
+      { name = 'plain' },
+      { name = 'tree', folders = { { name = 'a', filter = 'taro' }, { name = 'b', filter = 'sakura' } } },
+      { name = 'later', filter = 'qaynam' },
+    }
+    sidebar.open('proj')
+    sidebar.select_tab(2)
+    assert(requests == 3, 'the first tab and both folders were fetched once: ' .. requests)
+    sidebar.close()
+    sidebar.open('proj')
+    assert(requests == 3, 'reopening on the folder tab asks for nothing: ' .. requests)
+    local lines = vim.api.nvim_buf_get_lines(vim.fn.bufnr('chatora://sidebar'), 0, -1, false)
+    assert(#lines >= 4 and not table.concat(lines, '\n'):find('読み込み中', 1, true), 'and shows the folders as they were: ' .. vim.inspect(lines))
+
+    sidebar.select_tab(3)
+    assert(requests == 4, 'a tab shown for the first time is fetched: ' .. requests)
+    sidebar.close()
+    sidebar.open('proj')
+    assert(requests == 4, 'reopening on a plain tab asks for nothing either: ' .. requests)
+    sidebar.select_tab(1)
+    assert(requests == 4, 'nor does going back to a tab loaded before: ' .. requests)
+
+    sidebar.close()
+    config.options.sidebar_tabs = orig_tabs
+    lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
+  end
+
   -- sidebar polling: a refetched first batch replaces the head and pulls an
   -- edited page up out of the tail, without duplicating it or dropping the
   -- rest of what infinite scroll already loaded.

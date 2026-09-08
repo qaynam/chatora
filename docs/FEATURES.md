@@ -540,9 +540,27 @@ video = false                           -- 既定。ほかのリンクと同じ�
 戻ります。カーソルは動かしません。
 
 一度読んだプロジェクトの一覧は nvim を終了するまで保持するので、行き来にリクエストは要りません。
+サイドバーを閉じて開き直したときも、読み込み直しません。
 
 `P` のピッカーは、保存済みの全アカウントのプロジェクトを並べ、アカウント名を先頭の列に出します。
 選ぶと、[必要ならアカウントごと](#シェルから起動)切り替わります。
+
+### プロジェクトごとの設定
+
+`setup()` に関数を渡すと、プロジェクトが決まるたびに `{ project = 名前 }` を受け取って呼ばれ、返した
+テーブルがそのプロジェクトの設定になります。起動時は `project = nil` で呼ばれるので、`project` や
+`origin` はそこで返します。答えはプロジェクトごとに覚えておくので、行き来しても呼び直しません。
+`origin` / `notations` / `log` / `server_cmd` はサーバーの起動時に渡すため、プロジェクトごとには変えられません。
+
+```lua
+require('chatora').setup(function(ctx)
+  local tabs = { { label = 'すべて' }, { label = '未読', mine = true, unread = true } }
+  if ctx.project == 'my-project' then
+    tabs[#tabs + 1] = { label = 'ロードマップ', related = 'ロードマップ' }
+  end
+  return { project = 'my-project', autosave = 10, sidebar_tabs = tabs }
+end)
+```
 
 ### サイドバーのタブ
 

@@ -310,6 +310,9 @@ local function build_tabs(keep_state)
   elseif type(specs) ~= 'table' or #specs == 0 then
     specs = DEFAULT_TABS
   end
+  if #config.pinned_tabs > 0 then
+    specs = vim.list_extend(vim.list_extend({}, specs), config.pinned_tabs)
+  end
   local previous = tabs
   tabs = {}
   for i, spec in ipairs(specs) do
@@ -339,6 +342,21 @@ local function collect_lists(list, open_only, out)
     end
   end
   return out
+end
+
+--- Whether anything of `tab` has come in: what tells a tab shown again from one never
+--- loaded. The tab's own state says nothing once it has folders, and a heading with
+--- folders still to ask for has no lists at all.
+local function has_loaded(tab)
+  if tab.folders_fn and tab.folders_resolved then
+    return true
+  end
+  for _, list in ipairs(collect_lists(tab, false, {})) do
+    if list.state.fetched then
+      return true
+    end
+  end
+  return false
 end
 
 --- The lists a tab draws.
@@ -889,16 +907,9 @@ function M.load_more()
   load_list(lists[#lists], index)
 end
 
---- Pin one more tab, as an entry at the end of `sidebar_tabs` would.
+--- Pin one more tab, as an entry at the end of `sidebar_tabs` would, in every project.
 function M.add_tab(spec)
-  local specs = config.options.sidebar_tabs
-  if specs == false then
-    specs = { DEFAULT_TABS[1] }
-  elseif type(specs) ~= 'table' or #specs == 0 then
-    specs = vim.deepcopy(DEFAULT_TABS)
-  end
-  specs[#specs + 1] = spec
-  config.options.sidebar_tabs = specs
+  config.pinned_tabs[#config.pinned_tabs + 1] = spec
   build_tabs(true)
   if is_open() then
     apply_winbar()
@@ -1230,6 +1241,9 @@ end
 function M.open(proj, opts)
   local same_project = project == proj
   if not same_project then
+    -- New pages and searches belong to the project in front of the reader, not to
+    -- whichever one the session started on; so does the configuration read below.
+    require('chatora').set_project(proj)
     if project then
       sessions[project] = { tabs = tabs, active = active }
     end
@@ -1283,12 +1297,14 @@ function M.open(proj, opts)
 
   lsp.ensure_start(buf)
   -- Reopening shows what is already loaded; the poll loop below brings it up to date in
-  -- the background. Only a first open (or a project switch) has nothing to show.
-  if #tabs > 0 and #tabs[active].state.pages > 0 then
+  -- the background. Only a first open (or a project switch) has nothing to show, and
+  -- loading that one tab must not throw the others' pages away.
+  if #tabs > 0 and has_loaded(tabs[active]) then
     render()
     restore_cursor()
   else
-    M.reload()
+    render()
+    M.load_more()
   end
   start_polling()
 
@@ -1345,9 +1361,6 @@ vim.api.nvim_create_autocmd('BufEnter', {
     end
     -- The cursor stays where the reader put it; only the list moves.
     M.open(proj, { focus = false })
-    -- New pages and searches belong to the project in front of them, not to whichever one
-    -- the session started on.
-    require('chatora').session.project = proj
   end,
 })
 
