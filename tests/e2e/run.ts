@@ -234,13 +234,39 @@ check('GET .../ホーム/links2hop happened', links2hopReq !== undefined)
 
 // (d) preview POST shape
 const previewRequests = requests.filter((r) => r.method === 'POST' && r.path === PREVIEW_PATH)
-// The save step edits ホーム; the new-page step then creates a page, which is the one
-// preview that names no page id.
-check('two POSTs .../page-edit-for-ai/preview', previewRequests.length === 2, previewRequests)
+// The save step edits ホーム; the new-page step creates a page, which is the one preview
+// that names no page id; the rename step edits ホーム's title line; the merge step appends
+// to メモ and then deletes the renamed page.
+check('five POSTs .../page-edit-for-ai/preview', previewRequests.length === 5, previewRequests)
 check(
   'the second preview creates a page (no pageId)',
   (previewRequests[1]?.body as { pageId?: string } | undefined)?.pageId === undefined,
   previewRequests[1],
+)
+const renamePreview = previewRequests[2]?.body as
+  | { pageId?: string; changes?: { _update?: string; lines?: { text?: string } }[] }
+  | undefined
+check(
+  'the rename preview updates the title line of pg1',
+  renamePreview?.pageId === 'pg1' &&
+    (renamePreview.changes ?? []).some((c) => c._update === 'l1' && c.lines?.text === 'ホーム改'),
+  renamePreview,
+)
+const appendPreview = previewRequests[3]?.body as
+  | { pageId?: string; changes?: { _insert?: string }[] }
+  | undefined
+check(
+  'the merge appends to メモ (pg2) at _end',
+  appendPreview?.pageId === 'pg2' &&
+    (appendPreview.changes ?? []).length > 0 &&
+    (appendPreview.changes ?? []).every((c) => c._insert === '_end'),
+  appendPreview,
+)
+check(
+  'and then deletes the renamed page (pg1)',
+  JSON.stringify(previewRequests[4]?.body) ===
+    JSON.stringify({ pageId: 'pg1', changes: [{ deleted: true }] }),
+  previewRequests[4],
 )
 
 const previewReq = previewRequests[0]
@@ -272,7 +298,7 @@ if (previewReq) {
 
 // (e) submit POST carries previewId 'pv1'
 const submitRequests = requests.filter((r) => r.method === 'POST' && r.path === SUBMIT_PATH)
-check('two POSTs .../page-edit-for-ai/submit', submitRequests.length === 2, submitRequests)
+check('five POSTs .../page-edit-for-ai/submit', submitRequests.length === 5, submitRequests)
 const submitReq = submitRequests[0]
 if (submitReq) {
   const body = submitReq.body as { previewId?: string } | undefined
@@ -289,6 +315,24 @@ check(
     submitIndex,
     homeGetIndices: homeGets.map((r) => requests.indexOf(r)),
   },
+)
+
+// the rename offered to rewrite the links that named the old title, and the scenario took it
+const REPLACE_LINKS_PATH = '/api/pages/testproj/replace/links'
+const replaceLinks = requests.filter((r) => r.method === 'POST' && r.path === REPLACE_LINKS_PATH)
+check(
+  'one POST .../replace/links, from the old title to the new one',
+  replaceLinks.length === 1 &&
+    replaceLinks[0]?.status === 200 &&
+    JSON.stringify(replaceLinks[0].body) === JSON.stringify({ from: 'ホーム', to: 'ホーム改' }),
+  replaceLinks,
+)
+const renameSubmit = submitRequests[2]
+check(
+  'the links are rewritten only after the rename is submitted',
+  renameSubmit !== undefined &&
+    replaceLinks[0] !== undefined &&
+    requests.indexOf(replaceLinks[0]) > requests.indexOf(renameSubmit),
 )
 
 // opening a page records the read, which is the only thing that clears its unread mark

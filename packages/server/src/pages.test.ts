@@ -577,6 +577,7 @@ describe('openPage / newPage', () => {
     expect(result).toEqual({
       ok: true,
       uri: 'cosense://proj/My Page',
+      title: 'My Page',
       text: 'My Page\nbody',
       exists: true,
       pageId: 'pg1',
@@ -611,6 +612,7 @@ describe('openPage / newPage', () => {
     expect(result).toEqual({
       ok: true,
       uri: 'cosense://proj/New Page',
+      title: 'New Page',
       text: 'New Page',
       exists: false,
       readOnly: false,
@@ -661,7 +663,7 @@ describe('savePage', () => {
       return yield* handlers.savePage('cosense://proj/Page', 'Page\n')
     })
     const result = await runOnce(program, httpLayer, credLayer)
-    expect(result).toEqual({ ok: true, commitId: 'c1', noop: true })
+    expect(result).toEqual({ ok: true, commitId: 'c1', title: 'Page', noop: true })
   })
 
   test('full flow: preview -> submit -> refetch, correct RawChange, base state re-keyed', async () => {
@@ -693,7 +695,7 @@ describe('savePage', () => {
       return yield* handlers.savePage('cosense://proj/Page', 'Page\nnew line\n')
     })
     const result = await runOnce(program, httpLayer, credLayer)
-    expect(result).toEqual({ ok: true, commitId: 'c2' })
+    expect(result).toEqual({ ok: true, commitId: 'c2', title: 'Page' })
 
     const previewCall = calls.find((c) => c.url.endsWith('/preview'))
     const body = JSON.parse(previewCall?.init.body as string) as {
@@ -708,6 +710,46 @@ describe('savePage', () => {
 
     const submitCall = calls.find((c) => c.url.endsWith('/submit'))
     expect(JSON.parse(submitCall?.init.body as string)).toEqual({ previewId: 'pv1' })
+  })
+
+  test('keepTitle: the body goes under the title the server has, and the reply says so', async () => {
+    let submitted = false
+    const { layer: httpLayer, calls } = testHttpClient((url) => {
+      if (url.endsWith('/page-edit-for-ai/preview')) {
+        return json({ previewId: 'pv1', expireAt: 'later', pagePreview: null })
+      }
+      if (url.endsWith('/page-edit-for-ai/submit')) {
+        submitted = true
+        return json({ commitId: 'c2', page: { title: 'Page' } })
+      }
+      return json({
+        id: 'pg1',
+        title: 'Page',
+        commitId: submitted ? 'c2' : 'c1',
+        persistent: true,
+        lines: submitted
+          ? [
+              { id: 'l1', text: 'Page' },
+              { id: 'l2', text: 'body' },
+            ]
+          : [{ id: 'l1', text: 'Page' }],
+      })
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      return yield* handlers.savePage('cosense://proj/Page', 'Renamed\nbody\n', { keepTitle: true })
+    })
+    const result = await runOnce(program, httpLayer, credLayer)
+    expect(result).toEqual({ ok: true, commitId: 'c2', title: 'Page', keptTitle: true })
+
+    const previewCall = calls.find((c) => c.url.endsWith('/preview'))
+    const body = JSON.parse(previewCall?.init.body as string) as {
+      changes: readonly { _insert?: string; _update?: string; lines: { text: string } }[]
+    }
+    expect(body.changes.map((c) => [c._insert ?? c._update, c.lines.text])).toEqual([
+      ['_end', 'body'],
+    ])
   })
 
   test('a 409 NotFastForward preview conflict maps to code "notFastForward"', async () => {
@@ -732,6 +774,246 @@ describe('savePage', () => {
       code: 'notFastForward',
       message: 'remote page has changed; reload and try again',
     })
+  })
+})
+
+describe('rename: titleTaken / mergePage / replaceLinks', () => {
+  const page = (
+    id: string,
+    title: string,
+    lines: readonly { id: string; text: string }[],
+    commitId = 'c1',
+  ) => json({ id, title, commitId, persistent: true, lines })
+  const noPage = (title: string) =>
+    json({ persistent: false, id: 'fake', commitId: 'fake', lines: [{ id: 'x', text: title }] })
+
+  test('titleTaken: another page with the title, case and spaces aside, is taken', async () => {
+    const { layer: httpLayer } = testHttpClient((url) => {
+      if (url.includes('/proj/Page/')) return page('pg1', 'Page', [{ id: 'l1', text: 'Page' }])
+      if (url.includes('/proj/other_page/')) {
+        return page('pg2', 'Other page', [{ id: 'o1', text: 'Other page' }])
+      }
+      return noPage('?')
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      return yield* handlers.titleTaken({ uri: 'cosense://proj/Page', title: 'other page' })
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toEqual({
+      ok: true,
+      taken: true,
+      title: 'Other page',
+    })
+  })
+
+  test("titleTaken: a free title and the page's own title are not taken", async () => {
+    const { layer: httpLayer } = testHttpClient((url) => {
+      if (url.includes('/proj/Page/')) return page('pg1', 'Page', [{ id: 'l1', text: 'Page' }])
+      // An old title of this same page: Cosense redirects it back to the page.
+      if (url.includes('/proj/Old/')) return page('pg1', 'Page', [{ id: 'l1', text: 'Page' }])
+      return noPage('Free')
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      const free = yield* handlers.titleTaken({ uri: 'cosense://proj/Page', title: 'Free' })
+      const own = yield* handlers.titleTaken({ uri: 'cosense://proj/Page', title: 'page' })
+      const old = yield* handlers.titleTaken({ uri: 'cosense://proj/Page', title: 'Old' })
+      return { free, own, old }
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toEqual({
+      free: { ok: true, taken: false },
+      own: { ok: true, taken: false },
+      old: { ok: true, taken: false },
+    })
+  })
+
+  test('mergePage: appends the body to the target, then deletes the page, and an open target syncs the lines in', async () => {
+    let appended = false
+    const { layer: httpLayer, calls } = testHttpClient((url, init) => {
+      if (url.endsWith('/page-edit-for-ai/preview')) {
+        const body = JSON.parse(init.body as string) as { changes: { deleted?: true }[] }
+        if (body.changes[0]?.deleted === true) {
+          return json({ previewId: 'pv-delete', expireAt: 'later', pageDelete: true })
+        }
+        appended = true
+        return json({ previewId: 'pv-append', expireAt: 'later', pagePreview: null })
+      }
+      if (url.endsWith('/page-edit-for-ai/submit')) {
+        return json({ commitId: 'c9', page: { title: 'Target' } })
+      }
+      if (url.includes('/proj/Page/')) {
+        return page('pg1', 'Page', [
+          { id: 'l1', text: 'Page' },
+          { id: 'l2', text: 'stale body' },
+        ])
+      }
+      if (url.includes('/proj/Target/')) {
+        return page(
+          'pg2',
+          'Target',
+          appended
+            ? [
+                { id: 't1', text: 'Target' },
+                { id: 't2', text: 'body 1' },
+                { id: 't3', text: 'body 2' },
+              ]
+            : [{ id: 't1', text: 'Target' }],
+          appended ? 'c9' : 'c1',
+        )
+      }
+      return noPage('?')
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      yield* handlers.openPage({ project: 'proj', title: 'Target' })
+      const merged = yield* handlers.mergePage(
+        'cosense://proj/Page',
+        'Target',
+        'Page\nbody 1\nbody 2\n',
+      )
+      // The buffer's edits went, not the page's last saved lines.
+      const gone = yield* handlers.savePage('cosense://proj/Page', 'Page\n')
+      // The buffer holding the target still shows what it opened with; a sync brings the
+      // appended lines in as the server's change rather than reading them as deleted.
+      const targetSync = yield* handlers.syncPage('cosense://proj/Target', 'Target\n')
+      return { merged, gone, targetSync }
+    })
+    const result = await runOnce(program, httpLayer, credLayer)
+    expect(result.merged).toEqual({ ok: true, title: 'Target', appended: 2 })
+    expect(result.gone).toEqual({
+      ok: false,
+      code: 'error',
+      message: 'page state not found; reopen the page',
+    })
+    expect(result.targetSync).toMatchObject({
+      ok: true,
+      changed: true,
+      text: 'Target\nbody 1\nbody 2',
+      conflicts: [],
+    })
+
+    const edits = calls
+      .filter((c) => c.url.endsWith('/preview') || c.url.endsWith('/submit'))
+      .map((c) => ({
+        kind: c.url.endsWith('/preview') ? 'preview' : 'submit',
+        body: JSON.parse(c.init.body as string),
+      }))
+    expect(edits.map((e) => e.kind)).toEqual(['preview', 'submit', 'preview', 'submit'])
+    const append = edits[0]?.body as {
+      pageId: string
+      changes: { _insert: string; lines: { id: string; text: string } }[]
+    }
+    expect(append.pageId).toBe('pg2')
+    expect(append.changes.map((c) => [c._insert, c.lines.text])).toEqual([
+      ['_end', 'body 1'],
+      ['_end', 'body 2'],
+    ])
+    for (const change of append.changes) expect(/^[0-9a-f]{24}$/.test(change.lines.id)).toBe(true)
+    expect(edits[1]?.body).toEqual({ previewId: 'pv-append' })
+    expect(edits[2]?.body).toEqual({ pageId: 'pg1', changes: [{ deleted: true }] })
+    expect(edits[3]?.body).toEqual({ previewId: 'pv-delete' })
+  })
+
+  test('mergePage: an untitled page, with no state under its stand-in name, merges its body', async () => {
+    const { layer: httpLayer, calls } = testHttpClient((url) => {
+      if (url.endsWith('/page-edit-for-ai/preview')) {
+        return json({ previewId: 'pv1', expireAt: 'later', pagePreview: null })
+      }
+      if (url.endsWith('/page-edit-for-ai/submit')) {
+        return json({ commitId: 'c9', page: { title: 'Target' } })
+      }
+      if (url.includes('/proj/Target/'))
+        return page('pg2', 'Target', [{ id: 't1', text: 'Target' }])
+      return noPage('?')
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const result = await runOnce(
+      handlers.mergePage('cosense://proj/無題', 'Target', 'Target\nline\n'),
+      httpLayer,
+      credLayer,
+    )
+    expect(result).toEqual({ ok: true, title: 'Target', appended: 1 })
+    const previews = calls.filter((c) => c.url.endsWith('/preview'))
+    expect(previews).toHaveLength(1)
+    expect(JSON.parse(previews[0]?.init.body as string).pageId).toBe('pg2')
+  })
+
+  test('mergePage: a page that does not exist yet has nothing to delete', async () => {
+    const { layer: httpLayer, calls } = testHttpClient((url) => {
+      if (url.endsWith('/page-edit-for-ai/preview')) {
+        return json({ previewId: 'pv1', expireAt: 'later', pagePreview: null })
+      }
+      if (url.endsWith('/page-edit-for-ai/submit')) {
+        return json({ commitId: 'c9', page: { title: 'Target' } })
+      }
+      if (url.includes('/proj/Target/'))
+        return page('pg2', 'Target', [{ id: 't1', text: 'Target' }])
+      return noPage('New')
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'New' })
+      return yield* handlers.mergePage('cosense://proj/New', 'Target', 'New\nline\n')
+    })
+    expect(await runOnce(program, httpLayer, credLayer)).toEqual({
+      ok: true,
+      title: 'Target',
+      appended: 1,
+    })
+    expect(calls.filter((c) => c.url.endsWith('/preview'))).toHaveLength(1)
+  })
+
+  test('mergePage: a delete the server does not echo as one is not submitted', async () => {
+    const { layer: httpLayer, calls } = testHttpClient((url, init) => {
+      if (url.endsWith('/page-edit-for-ai/preview')) {
+        const body = JSON.parse(init.body as string) as { changes: { deleted?: true }[] }
+        return json({
+          previewId: body.changes[0]?.deleted === true ? 'pv-delete' : 'pv-append',
+          expireAt: 'later',
+          pagePreview: null,
+        })
+      }
+      if (url.endsWith('/page-edit-for-ai/submit')) {
+        return json({ commitId: 'c9', page: { title: 'Target' } })
+      }
+      if (url.includes('/proj/Page/')) return page('pg1', 'Page', [{ id: 'l1', text: 'Page' }])
+      if (url.includes('/proj/Target/'))
+        return page('pg2', 'Target', [{ id: 't1', text: 'Target' }])
+      return noPage('?')
+    })
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const program = Effect.gen(function* () {
+      yield* handlers.openPage({ project: 'proj', title: 'Page' })
+      return yield* handlers.mergePage('cosense://proj/Page', 'Target', 'Page\nline\n')
+    })
+    const result = await runOnce(program, httpLayer, credLayer)
+    expect(result.ok).toBe(false)
+    const submits = calls
+      .filter((c) => c.url.endsWith('/submit'))
+      .map((c) => JSON.parse(c.init.body as string))
+    expect(submits).toEqual([{ previewId: 'pv-append' }])
+  })
+
+  test('replaceLinks: POSTs from/to and reads the count out of the message', async () => {
+    const { layer: httpLayer, calls } = testHttpClient(() =>
+      json({ message: '2 pages have been successfully updated!' }),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const result = await runOnce(
+      handlers.replaceLinks({ project: 'proj', from: 'Old', to: 'New' }),
+      httpLayer,
+      credLayer,
+    )
+    expect(result).toEqual({
+      ok: true,
+      message: '2 pages have been successfully updated!',
+      pages: 2,
+    })
+    expect(calls[0]?.url).toBe(`${ORIGIN}/api/pages/proj/replace/links`)
+    expect(JSON.parse(calls[0]?.init.body as string)).toEqual({ from: 'Old', to: 'New' })
   })
 })
 

@@ -9,6 +9,7 @@ local images = require('chatora.images')
 local pads = require('chatora.pads')
 local config = require('chatora.config')
 local status = require('chatora.status')
+local rename = require('chatora.rename')
 
 local uv = vim.uv or vim.loop
 local autosave_timers = {}
@@ -55,12 +56,13 @@ local function schedule_autosave(bufnr)
     math.max(1000, math.floor(secs * 1000)),
     0,
     vim.schedule_wrap(function()
-      -- An untitled page is saved by hand: naming it is the reader's decision.
+      -- An untitled page is saved by hand: naming it is the reader's decision. So is a
+      -- changed title (rename.settle); until it is answered the body goes under the old one.
       if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].modified and not vim.b[bufnr].chatora_untitled then
         -- Not `:write`: that is BufWriteCmd, which blocks the editor until the save
         -- round-trips because `:wq` needs it to. Nothing is waiting on an autosave, so it
         -- goes straight to the request and the cursor keeps moving while it is in flight.
-        send_save(bufnr)
+        send_save(bufnr, nil, { keep_title = rename.pending(bufnr) })
       end
     end)
   )
@@ -194,12 +196,14 @@ local function finalize_buffer(bufnr, project, title)
   require('chatora.telomere').attach(bufnr)
   require('chatora.scrollbar').attach(bufnr)
   pads.attach(bufnr)
+  rename.attach(bufnr)
   require('chatora.table').attach(bufnr)
   require('chatora.render').attach(bufnr)
   require('chatora.spacing').attach(bufnr)
   require('chatora.completion').attach(bufnr)
   require('chatora.keymaps').attach(bufnr)
   require('chatora.surround').attach(bufnr)
+  require('chatora.paste').attach(bufnr)
   require('chatora.emptylink').attach(bufnr)
   -- BufEnter fired while this page's content was still being fetched, when sync refuses to
   -- touch the buffer, so the poll has to be started from here instead.
@@ -287,6 +291,7 @@ local function handle_read(ev)
     set_content(bufnr, result.text)
     apply_pending_row(bufnr)
     vim.b[bufnr].chatora_meta = result.meta
+    vim.b[bufnr].chatora_title = result.title
     -- Following a [/other-project/page] link lands on a project this session may only read.
     -- The buffer says so rather than letting the edit fail at save time, hours later.
     if result.readOnly then
@@ -309,7 +314,7 @@ local SAVE_TIMEOUT_MS = 15000
 --- on. Anything that would speak for the whole buffer — clearing 'modified', replacing the
 --- text the server normalized — is skipped in that case. The base is left pointing at what
 --- was actually saved, so the next save diffs against it and picks the rest up.
-local function apply_save(bufnr, uri_str, save_err, save_result, tick)
+local function apply_save(bufnr, uri_str, save_err, save_result, tick, opts)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
@@ -353,82 +358,101 @@ local function apply_save(bufnr, uri_str, save_err, save_result, tick)
   end
 
   if result.text and unchanged then
+    local text = result.text
+    if result.keptTitle then
+      -- The server's copy still has the old title; the typed one stays until it is answered.
+      text = (vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or '') .. (text:match('\n.*') or '')
+    end
     local winid = vim.fn.bufwinid(bufnr)
     local cursor = nil
     if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
       cursor = vim.api.nvim_win_get_cursor(winid)
     end
-    set_content(bufnr, result.text)
+    set_content(bufnr, text)
     if cursor and vim.api.nvim_win_is_valid(winid) then
       local max_line = vim.api.nvim_buf_line_count(bufnr)
       pcall(vim.api.nvim_win_set_cursor, winid, { math.min(cursor[1], max_line), cursor[2] })
     end
   end
 
-  if unchanged then
+  if unchanged and not result.keptTitle then
     vim.bo[bufnr].modified = false
   end
+  if not result.keptTitle then
+    vim.b[bufnr].chatora_rename_held = nil
+  end
+
+  -- The server keys the page by what it is called now (numbered if Cosense had to), so the
+  -- buffer takes that name before anything else asks about the page under the old one.
+  local project, current = uri.parse(uri_str)
+  local renamed = result.title ~= nil and result.title ~= current
+  if renamed then
+    M.rename_buffer(bufnr, uri.format(project, result.title))
+  end
+
   -- Success feedback is one cmdline echo + the ✓ icon, not a toast; failures
   -- above still use vim.notify, where demanding attention is the point.
-  status.set(bufnr, 'clean', '保存しました')
+  if result.keptTitle then
+    status.set(bufnr, 'dirty', '本文を保存しました')
+  else
+    status.set(bufnr, 'clean', '保存しました')
+  end
   -- What was the reader's own unsaved text a moment ago is now the server's, with a
   -- timestamp to match.
   require('chatora.telomere').refresh(bufnr)
 
-  if result.titleChanged then
-    -- Reopened under the new URI rather than renamed in place: the server renamed the page
-    -- on its side, and a fresh open is what fetches what it made of that. (Renaming in
-    -- place is possible, see name_untitled, but there is nothing to refetch there.)
-    local project = uri.parse(uri_str)
-    local new_uri = uri.format(project, result.titleChanged.to)
-    vim.notify(
-      '[chatora] title changed: ' .. result.titleChanged.from .. ' -> ' .. result.titleChanged.to,
-      vim.log.levels.INFO
-    )
-    local winid = vim.fn.bufwinid(bufnr)
-    if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
-      vim.api.nvim_win_call(winid, function()
-        -- magic.file=false: the URI contains %XX escapes that :edit would
-        -- otherwise expand as the "current file" special character.
-        vim.cmd({ cmd = 'edit', args = { new_uri }, magic = { file = false } })
-      end)
-      if vim.api.nvim_buf_is_valid(bufnr) then
-        pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-      end
+  if renamed and result.titleChanged then
+    local from = result.titleChanged.from ~= '' and result.titleChanged.from or current
+    vim.notify(('[chatora] タイトルを変えました: %s → %s'):format(from, result.title))
+    if opts.rewrite_links then
+      rename.rewrite_links(project, from, result.title)
     end
   end
 end
 
 --- Send the buffer to Cosense. `on_done()` runs once the reply has been applied.
-function send_save(bufnr, on_done)
+--- `opts.keep_title` sends the body under the title the server has; `opts.rewrite_links`
+--- points the links that named the old title at the new one once the rename is through.
+function send_save(bufnr, on_done, opts)
+  opts = opts or {}
   local uri_str = vim.api.nvim_buf_get_name(bufnr)
   local tick = vim.b[bufnr].changedtick
   status.set(bufnr, 'saving', '保存中…')
-  lsp.request('chatora/savePage', { uri = uri_str }, function(err, result)
-    apply_save(bufnr, uri_str, err, result, tick)
+  lsp.request('chatora/savePage', { uri = uri_str, keepTitle = opts.keep_title or nil }, function(err, result)
+    apply_save(bufnr, uri_str, err, result, tick, opts)
     if on_done then
       on_done()
     end
   end)
 end
 
---- Ask the server and wait for the answer, for the write path, which has to be synchronous
---- (see handle_write). nil when the request failed or timed out.
-local function await_request(method, params)
-  local reply, done = nil, false
-  lsp.request(method, params, function(err, result)
-    reply = (not err) and result or nil
-    done = true
-  end)
-  vim.wait(SAVE_TIMEOUT_MS, function()
-    return done
-  end, 10)
-  return reply
+--- Give bufnr the name `new_uri`, and keep everything that hangs off the name in step.
+function M.rename_buffer(bufnr, new_uri)
+  local project, title = uri.parse(new_uri)
+  -- A leftover buffer of the same name (a page opened before it existed) would block it;
+  -- one with unsaved edits is left alone.
+  local other = vim.fn.bufnr(new_uri)
+  if other ~= -1 and other ~= bufnr then
+    pcall(vim.api.nvim_buf_delete, other, {})
+  end
+  -- The LSP document stays under the old name unless the client is detached first and
+  -- attached again under the new one.
+  for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
+    vim.lsp.buf_detach_client(bufnr, client.id)
+  end
+  local ok, why = pcall(vim.api.nvim_buf_set_name, bufnr, new_uri)
+  if not ok then
+    vim.notify('[chatora] バッファ名を変えられませんでした: ' .. tostring(why), vim.log.levels.ERROR)
+  end
+  vim.b[bufnr].chatora_title = title
+  lsp.ensure_start(bufnr)
+  related.on_page_opened(project, title)
+  refresh_sidebar_marks()
 end
 
 --- Give an untitled buffer the name its first line says, and have the server know the page
---- under it. False when it cannot be saved yet: no title, or one a page already has, which
---- the web would open rather than overwrite.
+--- under it. False when the save is not to go ahead: no title yet, or a title a page already
+--- has, in which case the reader has been offered a merge into that page instead.
 local function name_untitled(bufnr)
   local project = uri.parse(vim.api.nvim_buf_get_name(bufnr))
   local title = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ''
@@ -437,57 +461,76 @@ local function name_untitled(bufnr)
     return false
   end
   local new_uri = uri.format(project, title)
-  local opened = await_request('chatora/openPage', { project = project, title = title })
+  local opened = lsp.request_wait('chatora/openPage', { project = project, title = title }, SAVE_TIMEOUT_MS)
   if not opened or opened.ok == false then
     local why = (opened and opened.message) or 'サーバーが応答しません'
     vim.notify('[chatora] ページを作れませんでした: ' .. why, vim.log.levels.ERROR)
     return false
   end
-  if opened.exists or vim.fn.bufnr(new_uri) ~= -1 then
+  if opened.exists then
+    -- The web opens the existing page and offers to fold the new one into it; here the
+    -- question comes at the save, since that is when the title is known.
+    local existing = opened.title or title
+    local choice = vim.fn.confirm(
+      ('「%s」というページは既にあります。このページの内容をそこに統合しますか？'):format(existing),
+      '統合する(&Y)\nやめる(&N)',
+      2,
+      'Question'
+    )
+    if choice == 1 then
+      rename.merge(bufnr, existing)
+    else
+      vim.notify('[chatora] 保存しませんでした。タイトルを変えるか、統合してください', vim.log.levels.WARN)
+    end
+    return false
+  end
+  local other = vim.fn.bufnr(new_uri)
+  if other ~= -1 and other ~= bufnr then
     vim.notify(
-      '[chatora] 「' .. title .. '」というページは既にあります。別のタイトルにしてください',
+      '[chatora] 「' .. title .. '」はもう別のバッファで開いています。別のタイトルにしてください',
       vim.log.levels.WARN
     )
     return false
   end
-  -- The LSP client opened the document under the stand-in name, and a rename alone would
-  -- leave it there: detach first, so the close goes out under the old name, and attach
-  -- again under the new one before anything is asked about it.
-  for _, client in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
-    vim.lsp.buf_detach_client(bufnr, client.id)
-  end
-  vim.api.nvim_buf_set_name(bufnr, new_uri)
   vim.b[bufnr].chatora_untitled = nil
-  lsp.ensure_start(bufnr)
-  related.on_page_opened(project, title)
+  M.rename_buffer(bufnr, new_uri)
   return true
 end
 
---- BufWriteCmd. The reply is awaited synchronously because `:wq` and `:x` check 'modified'
---- the moment this returns — an async write would read as unsaved and demand a second
---- `:wq`. vim.wait pumps the main loop, which is what lets the reply land while we block.
---- Autosave does not come through here for exactly that reason: see schedule_autosave.
-local function handle_write(ev)
-  if vim.b[ev.buf].chatora_read_only then
+--- Save bufnr and wait for the reply: `:wq` and `:x` check 'modified' the moment
+--- BufWriteCmd returns, so an async write would read as unsaved. Autosave does not come
+--- through here for exactly that reason (schedule_autosave).
+function M.save(bufnr)
+  if vim.b[bufnr].chatora_read_only then
     vim.notify(
       '[chatora] このプロジェクトには書き込めません（読み取り専用で開いています）',
       vim.log.levels.WARN
     )
     return
   end
-  if vim.b[ev.buf].chatora_untitled and not name_untitled(ev.buf) then
+  if vim.b[bufnr].chatora_untitled and not name_untitled(bufnr) then
+    return
+  end
+  local verdict, rewrite_links = rename.resolve(bufnr)
+  if verdict ~= 'save' then
     return
   end
   local done = false
-  send_save(ev.buf, function()
+  send_save(bufnr, function()
     done = true
-  end)
+  end, { rewrite_links = rewrite_links })
   if not vim.wait(SAVE_TIMEOUT_MS, function()
     return done
-  end, 10) and vim.api.nvim_buf_is_valid(ev.buf) then
-    status.set(ev.buf, 'error')
+  end, 10) and vim.api.nvim_buf_is_valid(bufnr) then
+    status.set(bufnr, 'error')
     vim.notify('[chatora] 保存がタイムアウトしました', vim.log.levels.ERROR)
   end
+end
+
+--- BufWriteCmd. An explicit write asks again about a title the reader backed out of.
+local function handle_write(ev)
+  vim.b[ev.buf].chatora_rename_held = nil
+  M.save(ev.buf)
 end
 
 --- Titles of loaded cosense buffers with unsaved changes.
@@ -520,37 +563,6 @@ vim.api.nvim_create_autocmd('BufWriteCmd', {
   end,
 })
 
--- Under 'hidden', :q on an unsaved page closes the window and leaves the buffer
--- modified in the background, with no prompt of any kind — so ask here. An
--- error thrown from QuitPre aborts the quit, which is what makes "cancel" work.
-vim.api.nvim_create_autocmd('QuitPre', {
-  group = augroup,
-  pattern = 'cosense://*',
-  callback = function(ev)
-    if not vim.bo[ev.buf].modified or vim.v.exiting ~= vim.NIL then
-      return
-    end
-    local _, title = uri.parse(vim.api.nvim_buf_get_name(ev.buf))
-    local choice = vim.fn.confirm(
-      '未保存の変更があります: ' .. (title or '?'),
-      '保存して閉じる(&W)\n保存せず閉じる(&D)\nキャンセル(&C)',
-      1
-    )
-    if choice == 1 then
-      vim.api.nvim_buf_call(ev.buf, function()
-        vim.cmd('write')
-      end)
-      -- A failed save leaves the buffer modified; closing anyway would be the
-      -- one outcome the user did not pick.
-      if vim.bo[ev.buf].modified then
-        error('chatora: 保存に失敗したため閉じません')
-      end
-    elseif choice ~= 2 then
-      error('chatora: 閉じるのをキャンセルしました')
-    end
-  end,
-})
-
 local function page_windows()
   local wins = {}
   for _, w in ipairs(vim.api.nvim_list_wins()) do
@@ -561,13 +573,58 @@ local function page_windows()
   return wins
 end
 
--- chatora's chrome (sidebar, related panel) is only there to serve a page, so
--- closing the last page window takes it along. Without this, :q leaves the
--- panels behind and has to be repeated once per window to get out.
+--- Keep bufnr on screen through the :q in progress: a second window over it, made where
+--- the closing one is, means that window abandons nothing and Neovim closes it without a
+--- word, and the split takes its place, view and all. Nothing looks to have happened,
+--- which is what Cancel means. (An error thrown from the callback would print a
+--- traceback; a refusal from Neovim, its E37 and a wait for Enter.)
+local function keep_open(bufnr)
+  if vim.api.nvim_get_current_buf() == bufnr then
+    vim.cmd('split')
+  end
+end
+
+-- :q on a page. Asked here, in Neovim's own words, rather than left to Neovim: under
+-- 'hidden' it asks nothing and keeps the buffer, modified, out of sight; and chatora's
+-- panels (sidebar, related) have to go with the last page window for :q to quit rather
+-- than leave them behind, which can only be decided once the answer is known.
 vim.api.nvim_create_autocmd('QuitPre', {
   group = augroup,
   pattern = 'cosense://*',
-  callback = function()
+  callback = function(ev)
+    if vim.v.exiting ~= vim.NIL then
+      return
+    end
+    if vim.bo[ev.buf].modified then
+      local choice = vim.fn.confirm(
+        ('Save changes to "%s"?'):format(vim.api.nvim_buf_get_name(ev.buf)),
+        '&Yes\n&No\n&Cancel',
+        1,
+        'Question'
+      )
+      if choice == 1 then
+        -- The same save as :w, questions included: a title another page has asks whether
+        -- to merge, and declining that is a save that did not happen. Called directly:
+        -- a :write from inside an autocommand fires no BufWriteCmd (E676 instead).
+        M.save(ev.buf)
+        if vim.bo[ev.buf].modified then
+          keep_open(ev.buf)
+          return
+        end
+      elseif choice == 2 then
+        -- Discarded for real: the flag alone would leave the edits in a hidden buffer that
+        -- the next open finds and shows as if they were the page.
+        vim.bo[ev.buf].modified = false
+        vim.schedule(function()
+          if vim.api.nvim_buf_is_valid(ev.buf) then
+            pcall(vim.api.nvim_buf_delete, ev.buf, { force = true })
+          end
+        end)
+      else
+        keep_open(ev.buf)
+        return
+      end
+    end
     if #page_windows() > 1 then
       return
     end
@@ -598,6 +655,30 @@ local UNTITLED = '無題'
 --- Open an empty page for `project`, the way the web does: the reader writes the title on
 --- line 1 and the page comes to exist on the first save. Until then the buffer wears a
 --- stand-in name, since a `cosense://` URI cannot go without a title.
+--- Name an untitled buffer by its first line once the cursor has left it, keeping it
+--- untitled. Anything that names the buffer, Neovim's own "Save changes to ...?" first
+--- of all, then says the title rather than the stand-in.
+local function follow_title(bufnr)
+  if not vim.b[bufnr].chatora_untitled then
+    return
+  end
+  local winid = vim.fn.bufwinid(bufnr)
+  if winid == -1 or vim.api.nvim_win_get_cursor(winid)[1] == 1 then
+    return
+  end
+  local first = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ''
+  if vim.trim(first) == '' then
+    return
+  end
+  local project = uri.parse(vim.api.nvim_buf_get_name(bufnr))
+  local wanted = uri.format(project, first)
+  -- A buffer already holding that title keeps it; the save is what says so.
+  if vim.api.nvim_buf_get_name(bufnr) == wanted or vim.fn.bufnr(wanted) ~= -1 then
+    return
+  end
+  M.rename_buffer(bufnr, wanted)
+end
+
 function M.open_untitled(project, target_win)
   if target_win and vim.api.nvim_win_is_valid(target_win) then
     vim.api.nvim_set_current_win(target_win)
@@ -613,6 +694,13 @@ function M.open_untitled(project, target_win)
   prepare_buffer(bufnr)
   vim.api.nvim_win_set_buf(0, bufnr)
   finalize_buffer(bufnr, project, title)
+  vim.api.nvim_create_autocmd({ 'CursorMoved', 'InsertLeave' }, {
+    group = vim.api.nvim_create_augroup('ChatoraUntitled' .. bufnr, { clear = true }),
+    buffer = bufnr,
+    callback = function()
+      follow_title(bufnr)
+    end,
+  })
   vim.cmd('startinsert')
 end
 

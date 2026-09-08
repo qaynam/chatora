@@ -32,7 +32,7 @@ import { computeQuoteRanges, type QuoteRange } from './quote'
 import { ReadState } from './readState'
 import { type BasePageState, SessionState } from './state'
 import { computeTokens, type RawToken } from './tokens'
-import { formatUri } from './uriScheme'
+import { formatUri, parseUri } from './uriScheme'
 
 export type ErrCode = 'unauthorized' | 'notFastForward' | 'error'
 export interface ErrEnvelope {
@@ -583,6 +583,8 @@ const toPageMeta = (page: PageDetail): PageMeta => ({
 export interface OpenPageResult {
   readonly ok: true
   readonly uri: string
+  /** The title as Cosense spells it, which a link that reached the page may not have. */
+  readonly title: string
   readonly text: string
   readonly exists: boolean
   readonly pageId?: string
@@ -645,6 +647,7 @@ export const openPage = (params: {
         return {
           ok: true as const,
           uri,
+          title: page.title,
           text,
           exists: true as const,
           pageId: page.id,
@@ -666,6 +669,7 @@ export const openPage = (params: {
       return {
         ok: true as const,
         uri,
+        title: params.title,
         text: params.title,
         exists: false as const,
         readOnly: yield* isReadOnly(params.project),
@@ -686,6 +690,8 @@ export interface SyncPageResult {
   readonly changed: boolean
   readonly text: string
   readonly conflicts: readonly MergeConflict[]
+  /** Absent when the page is gone, and then the buffer is the only copy of its title too. */
+  readonly title?: string
   readonly meta?: PageMeta
 }
 
@@ -744,6 +750,7 @@ export const syncPage = (
         changed: text !== before,
         text,
         conflicts,
+        title: page.title,
         meta: yield* toPageMetaWithAuthors(base.project, page),
       }
     }),
@@ -986,6 +993,10 @@ export const emptyLinks = (
 export interface SavePageResult {
   readonly ok: true
   readonly commitId: string
+  /** What the page is called after the save, suffix and all when Cosense had to add one. */
+  readonly title: string
+  /** The buffer's title line was withheld: the page keeps the title it had. */
+  readonly keptTitle?: true
   readonly noop?: true
   readonly text?: string
   readonly titleChanged?: { readonly from: string; readonly to: string }
@@ -1021,6 +1032,7 @@ const isNotFastForward = (error: unknown): boolean =>
 export const savePage = (
   uri: string,
   docText: string | undefined,
+  opts?: { readonly keepTitle?: boolean },
 ): Effect.Effect<
   SavePageResult | SaveConflictResult | ErrEnvelope,
   never,
@@ -1051,6 +1063,10 @@ export const savePage = (
         })
 
       let nextLines: readonly string[] = textToLines(docText)
+      // A title the buffer changed but nobody has confirmed yet stays local: the body goes
+      // under the title the server has.
+      const keptTitle = opts?.keepTitle === true && nextLines.length > 0
+      if (keptTitle) nextLines = [base.baseLines[0]?.text ?? base.title, ...nextLines.slice(1)]
       let attempt = yield* Effect.either(push(base.baseLines, nextLines))
       // A merged save wrote something the buffer does not hold, so its text has to travel
       // back whatever the refetch says; without it the buffer would keep the pre-merge
@@ -1094,7 +1110,13 @@ export const savePage = (
 
       const submitted = attempt.right
       if (Option.isNone(submitted)) {
-        return { ok: true as const, commitId: base.commitId ?? '', noop: true as const }
+        return {
+          ok: true as const,
+          commitId: base.commitId ?? '',
+          title: base.title,
+          ...(keptTitle ? { keptTitle: true as const } : {}),
+          noop: true as const,
+        }
       }
       const submit = submitted.value
 
@@ -1147,8 +1169,169 @@ export const savePage = (
       return {
         ok: true as const,
         commitId: newBase.commitId ?? '',
+        title: finalTitle,
+        ...(keptTitle ? { keptTitle: true as const } : {}),
         ...(responseText !== undefined ? { text: responseText } : {}),
         ...(submit.titleChanged !== undefined ? { titleChanged: submit.titleChanged } : {}),
+      }
+    }),
+  )
+
+// ---------------------------------------------------------------------------
+// rename: titleTaken / mergePage / replaceLinks
+// ---------------------------------------------------------------------------
+
+export interface TitleTakenResult {
+  readonly ok: true
+  readonly taken: boolean
+  /** The title as the other page spells it, when there is one. */
+  readonly title?: string
+}
+
+/**
+ * Whether renaming the page at `uri` to `title` would land on another page.
+ *
+ * Cosense keeps one page per title, compared the way `titleKey` folds it, and answers a
+ * collision by suffixing the newcomer (`title_1`) rather than refusing. The web asks first
+ * whether to merge instead, and this is the check that lets chatora ask the same.
+ *
+ * A page's own title is never a collision, nor is an old title of its own that the lookup
+ * follows back to it; an old title of some *other* page is not one either, since the
+ * redirect is an alias, not a page.
+ */
+export const titleTaken = (params: {
+  readonly uri: string
+  readonly title: string
+}): Effect.Effect<TitleTakenResult | ErrEnvelope, never, SessionState | HttpClient> =>
+  handle(
+    Effect.gen(function* () {
+      const session = yield* SessionState
+      const baseOpt = yield* session.getPage(params.uri)
+      if (Option.isNone(baseOpt)) return err('error', 'page state not found; reopen the page')
+      const base = baseOpt.value
+
+      const apiOpt = yield* session.getApi()
+      if (Option.isNone(apiOpt)) return noCredential()
+      const pageOpt = yield* apiOpt.value.getPage(base.project, params.title)
+      if (Option.isNone(pageOpt)) return { ok: true as const, taken: false }
+      const page = pageOpt.value
+      const taken = page.id !== base.pageId && titleKey(page.title) === titleKey(params.title)
+      return taken ? { ok: true as const, taken, title: page.title } : { ok: true as const, taken }
+    }),
+  )
+
+export interface MergePageResult {
+  readonly ok: true
+  /** The surviving page, spelled as Cosense has it. */
+  readonly title: string
+  readonly appended: number
+}
+
+/**
+ * Fold the page at `uri` into the page titled `into`: the buffer's lines below the title go
+ * to the end of that page, and the page at `uri`, when Cosense has one, is deleted. This is
+ * the web's answer to a rename that lands on an existing title. `docText` is what a save
+ * would have sent, so unsaved edits travel with the merge instead of going down with the
+ * page.
+ *
+ * Two commits, in this order: the delete runs only once the lines are on the other page,
+ * so a failure between the two leaves both pages standing, with the text twice, which a
+ * person can tidy, rather than a page gone with its text.
+ */
+export const mergePage = (
+  uri: string,
+  into: string,
+  docText: string | undefined,
+): Effect.Effect<MergePageResult | ErrEnvelope, never, SessionState | HttpClient> =>
+  handle(
+    Effect.gen(function* () {
+      if (docText === undefined) return err('error', 'document not synced')
+      const session = yield* SessionState
+      const baseOpt = yield* session.getPage(uri)
+      const parsed = parseUri(uri)
+      if (Option.isNone(baseOpt) && parsed === null) {
+        return err('error', 'page state not found; reopen the page')
+      }
+      // An untitled page has no state under its stand-in name: it exists nowhere but in the
+      // buffer, so once its lines are on the other page there is nothing left to delete.
+      const base: BasePageState = Option.getOrElse(
+        baseOpt,
+        (): BasePageState => ({
+          project: parsed?.project ?? '',
+          title: parsed?.title ?? '',
+          baseLines: [],
+          exists: false,
+        }),
+      )
+
+      const apiOpt = yield* session.getApi()
+      if (Option.isNone(apiOpt)) return noCredential()
+      const api = apiOpt.value
+
+      const targetOpt = yield* api.getPage(base.project, into)
+      if (Option.isNone(targetOpt)) return err('error', `「${into}」というページはありません`)
+      const target = targetOpt.value
+      if (target.id === base.pageId) return err('error', '同じページには統合できません')
+
+      const body = textToLines(docText).slice(1)
+      if (body.length > 0) {
+        const changes = body.map((text) => ({
+          _insert: '_end',
+          lines: { id: createNewLineId(), text },
+        }))
+        const preview = yield* api.previewEdit(base.project, { pageId: target.id, changes })
+        yield* api.submitEdit(base.project, preview.previewId)
+      }
+      if (base.exists && base.pageId !== undefined) {
+        const preview = yield* api.previewEdit(base.project, {
+          pageId: base.pageId,
+          changes: [{ deleted: true }],
+        })
+        if (preview.pageDelete !== true) {
+          return err(
+            'error',
+            '統合先には書き込みましたが、元のページの削除がサーバーに受理されませんでした',
+          )
+        }
+        yield* api.submitEdit(base.project, preview.previewId)
+      }
+
+      yield* session.deletePage(uri)
+      yield* session.noteTitle(base.project, base.title, false)
+      // A buffer that has the target open is left to sync: its base still says what it
+      // opened with, so the merge brings the appended lines in as the server's change.
+      // Moving the base forward here instead would read the buffer as having deleted them.
+      return { ok: true as const, title: target.title, appended: body.length }
+    }),
+  )
+
+export interface ReplaceLinksResult {
+  readonly ok: true
+  readonly message: string
+  /** Pages rewritten, when the message says how many. */
+  readonly pages?: number
+}
+
+// The endpoint answers in prose ("3 pages have been successfully updated!"), and the count
+// is the one part of it worth showing in the user's language.
+const PAGES_UPDATED_RE = /^(\d+) pages?\b/
+
+export const replaceLinks = (params: {
+  readonly project: string
+  readonly from: string
+  readonly to: string
+}): Effect.Effect<ReplaceLinksResult | ErrEnvelope, never, SessionState | HttpClient> =>
+  handle(
+    Effect.gen(function* () {
+      const session = yield* SessionState
+      const apiOpt = yield* session.getApi()
+      if (Option.isNone(apiOpt)) return noCredential()
+      const { message } = yield* apiOpt.value.replaceLinks(params.project, params.from, params.to)
+      const count = PAGES_UPDATED_RE.exec(message)
+      return {
+        ok: true as const,
+        message,
+        ...(count?.[1] !== undefined ? { pages: Number(count[1]) } : {}),
       }
     }),
   )

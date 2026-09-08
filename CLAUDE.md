@@ -62,4 +62,8 @@ bun run verify   # typecheck + bun test + build + biome + smoke + E2E
   本文からずれます
 - バッファ名を付け替えても、LSP クライアントは古い名前で文書を開いたままです。名前を変える前に
   `vim.lsp.buf_detach_client`、変えたあとに付け直さないと、新しい名前への要求が
-  `document not synced` になります（`page.lua` の `name_untitled`）
+  `document not synced` になります（`page.lua` の `rename_buffer`）
+- 自動コマンドの中で `:edit` や `:write` をしても、その自動コマンドに `nested = true` が無いと
+  BufReadCmd / BufWriteCmd は走りません（`:write` は E676 になります）。応答を `vim.wait` で
+  待っているあいだも自動コマンドの中です。バッファを開き直す処理は `vim.schedule` で外に出し
+  （`rename.lua` の `merge`）、保存は `:write` ではなく `page.save` を直接呼びます（QuitPre）

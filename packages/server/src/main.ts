@@ -291,8 +291,12 @@ connection.onRequest('chatora/logPath', async () => ({
   ok: true as const,
   path: activeLogPath() ?? null,
 }))
-connection.onRequest('chatora/savePage', (params: { uri: string }) =>
-  runtime.runPromise(handlers.savePage(params.uri, documents.get(params.uri)?.getText())),
+connection.onRequest('chatora/savePage', (params: { uri: string; keepTitle?: boolean }) =>
+  runtime.runPromise(
+    handlers.savePage(params.uri, documents.get(params.uri)?.getText(), {
+      keepTitle: params.keepTitle === true,
+    }),
+  ),
 )
 connection.onRequest('chatora/syncPage', (params: { uri: string }) =>
   runtime.runPromise(handlers.syncPage(params.uri, documents.get(params.uri)?.getText())),
@@ -302,6 +306,19 @@ connection.onRequest('chatora/telomere', (params: { uri: string; lines: string[]
 )
 connection.onRequest('chatora/deletePage', (params: { uri: string }) =>
   runtime.runPromise(handlers.deletePage(params.uri)),
+)
+connection.onRequest('chatora/titleTaken', (params: { uri: string; title: string }) =>
+  runtime.runPromise(handlers.titleTaken(params)),
+)
+connection.onRequest('chatora/mergePage', (params: { uri: string; into: string }) =>
+  runtime.runPromise(
+    handlers.mergePage(params.uri, params.into, documents.get(params.uri)?.getText()),
+  ),
+)
+connection.onRequest(
+  'chatora/replaceLinks',
+  (params: { project: string; from: string; to: string }) =>
+    runtime.runPromise(handlers.replaceLinks(params)),
 )
 connection.onRequest('chatora/emptyLinks', (params: { uri: string }) =>
   runtime.runPromise(handlers.emptyLinks(params.uri, documents.get(params.uri)?.getText())),

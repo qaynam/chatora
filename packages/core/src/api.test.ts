@@ -230,6 +230,18 @@ describe('CosenseApi happy paths', () => {
     }
     expect(calls[1]?.init.body).toBe(JSON.stringify({ previewId: 'pv1' }))
   })
+
+  test('replaceLinks() POSTs {from, to} to the project-level replace endpoint', async () => {
+    const { layer, calls } = testHttpClient(() =>
+      json({ message: '3 pages have been successfully updated!' }),
+    )
+    const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+    const result = await run(api.replaceLinks('myproject', 'old title', 'new title'), layer)
+    expect(result).toEqual({ message: '3 pages have been successfully updated!' })
+    expect(calls[0]?.url).toBe('https://scrapbox.io/api/pages/myproject/replace/links')
+    expect(calls[0]?.init.method).toBe('POST')
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ from: 'old title', to: 'new title' }))
+  })
 })
 
 describe('CosenseApi error handling', () => {

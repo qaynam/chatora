@@ -1751,10 +1751,18 @@ local ok, err = pcall(function()
       elseif method == 'chatora/savePage' then
         asked[#asked + 1] = 'save ' .. params.uri
         cb(nil, { ok = true })
+      elseif method == 'chatora/mergePage' then
+        asked[#asked + 1] = 'merge ' .. params.uri .. ' into ' .. params.into
+        cb(nil, { ok = true, title = params.into, appended = 1 })
       end
     end
-    local orig_notify = vim.notify
+    local orig_notify, orig_confirm = vim.notify, vim.fn.confirm
     vim.notify = function() end
+    local answers, prompts = {}, {}
+    vim.fn.confirm = function(msg, _, default)
+      prompts[#prompts + 1] = msg
+      return table.remove(answers, 1) or default
+    end
     -- Opening a page can open the related panel beside it, a window later tests would
     -- land in; this test is about the page alone.
     local config = require('chatora.config')
@@ -1784,11 +1792,70 @@ local ok, err = pcall(function()
     end)
     assert(synced == false and #asked == 0, 'an untitled page is not synced')
 
+    -- :q on an unsaved page asks in Neovim's words. Cancel keeps the page on screen, with
+    -- no error and no message; a save that was declined keeps it too; No throws the edits
+    -- away with the buffer.
+    do
+      local wins_before = #vim.api.nvim_list_wins()
+      local scratch = vim.api.nvim_create_buf(false, true)
+      vim.cmd('vsplit')
+      vim.api.nvim_win_set_buf(0, scratch)
+      vim.cmd('wincmd p')
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '', '消えては困る' })
+      vim.api.nvim_win_set_cursor(0, { 2, 3 })
+      answers = { 3 }
+      vim.v.errmsg = ''
+      local ok = pcall(vim.cmd, 'q')
+      assert(
+        ok and vim.v.errmsg == '' and #vim.api.nvim_list_wins() == wins_before + 1 and vim.api.nvim_get_current_buf() == buf,
+        'Cancel keeps the page on screen without a word: ' .. vim.inspect({ ok, vim.v.errmsg, #vim.api.nvim_list_wins() })
+      )
+      assert(vim.deep_equal(vim.api.nvim_win_get_cursor(0), { 2, 3 }), 'and where the cursor was')
+      assert(prompts[#prompts]:find('^Save changes to "cosense://proj/'), 'asked as Neovim asks: ' .. vim.inspect(prompts[#prompts]))
+      answers = { 1 }
+      ok = pcall(vim.cmd, 'q')
+      assert(
+        ok and vim.api.nvim_get_current_buf() == buf and vim.api.nvim_buf_get_lines(buf, 1, 2, false)[1] == '消えては困る',
+        'Yes on a page that cannot be saved yet keeps everything, quietly: ' .. vim.inspect({ ok, #vim.api.nvim_list_wins() })
+      )
+      answers = { 2 }
+      ok = pcall(vim.cmd, 'q')
+      vim.wait(200, function()
+        return not vim.api.nvim_buf_is_valid(buf)
+      end)
+      assert(ok and not vim.api.nvim_buf_is_valid(buf), 'No closes the window and drops the edits with the buffer')
+      assert(#vim.api.nvim_list_wins() == wins_before, 'and the window is gone')
+      for _, w in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_buf(w) == scratch then
+          vim.api.nvim_win_close(w, true)
+        end
+      end
+      -- The rest of this block works on a fresh untitled page.
+      vim.cmd('new')
+      vim.wo.winfixbuf = false
+      page.open_untitled('proj', vim.api.nvim_get_current_win())
+      buf = vim.api.nvim_get_current_buf()
+      vim.cmd('stopinsert')
+    end
+
+    -- Once the cursor leaves the first line, the buffer is named by it while still
+    -- untitled, and nothing is asked of the server for that.
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, { '新しいページ', '本文' })
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.cmd('doautocmd CursorMoved')
+    assert(
+      vim.api.nvim_buf_get_name(buf) == 'cosense://proj/新しいページ' and vim.b[buf].chatora_untitled and #asked == 0,
+      'the name follows the first line: ' .. vim.api.nvim_buf_get_name(buf) .. ' ' .. vim.inspect(asked)
+    )
+
+    -- A title a page already has asks whether to fold this page into it; declining saves
+    -- nothing and leaves the page as it was.
     exists = true
+    answers = { 2 }
     vim.cmd('write')
-    assert(vim.b[buf].chatora_untitled, 'a title a page already has is refused')
+    assert(vim.b[buf].chatora_untitled and vim.bo[buf].modified, 'declining the merge saves nothing')
     assert(vim.deep_equal(asked, { 'open 新しいページ' }), 'and nothing is saved: ' .. vim.inspect(asked))
+    assert(prompts[#prompts]:find('「新しいページ」というページは既にあります', 1, true), vim.inspect(prompts))
 
     exists = false
     asked = {}
@@ -1806,11 +1873,302 @@ local ok, err = pcall(function()
       'the LSP client is attached again under the new name, got ' .. vim.inspect(attached)
     )
 
+    -- Accepting the merge sends this page's lines to the existing one, by the stand-in
+    -- name, and the buffer is done with: :q after it has nothing left to ask.
+    asked = {}
+    page.open_untitled('proj', vim.api.nvim_get_current_win())
+    local second = vim.api.nvim_get_current_buf()
+    vim.cmd('stopinsert')
+    vim.api.nvim_buf_set_lines(second, 0, -1, false, { '新しいページ', '足す本文' })
+    exists = true
+    answers = { 1 }
+    vim.cmd('write')
+    assert(
+      asked[1] == 'open 新しいページ' and #asked == 2 and asked[2]:match('^merge cosense://proj/無題.* into 新しいページ$'),
+      'accepting merges by the stand-in name: ' .. vim.inspect(asked)
+    )
+    assert(not vim.bo[second].modified, 'and the buffer is no longer unsaved')
+    vim.wait(500, function()
+      return not vim.api.nvim_buf_is_valid(second)
+    end)
+    assert(not vim.api.nvim_buf_is_valid(second), 'the merged page is gone')
+    buf = vim.api.nvim_get_current_buf()
+
+    vim.fn.confirm = orig_confirm
     vim.notify = orig_notify
     config.options.related_auto_open = orig_related
     lsp.request, lsp.request_ok, lsp.ensure_start = orig_request, orig_ok, orig_start
     vim.cmd('close!')
     vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
+  -- Renaming a page is editing its title line. The rename is settled when the cursor leaves
+  -- the line (or on :w): a free title is saved and the buffer renamed in place, a title
+  -- another page has is offered as a merge or a numbered name, and a page others link to
+  -- gets the offer to rewrite those links.
+  do
+    local page = require('chatora.page')
+    local rename = require('chatora.rename')
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_request, orig_ok, orig_start = lsp.request, lsp.request_ok, lsp.ensure_start
+    local orig_confirm, orig_notify = vim.fn.confirm, vim.notify
+    local orig_related, orig_autosave = config.options.related_auto_open, config.options.autosave
+    config.options.related_auto_open = false
+    vim.notify = function() end
+
+    local asked, prompts, answers, attached = {}, {}, {}, {}
+    -- Titles other pages have, as Cosense spells them.
+    local taken = {}
+    vim.fn.confirm = function(msg, _, default)
+      prompts[#prompts + 1] = msg
+      asked[#asked + 1] = 'ask'
+      return table.remove(answers, 1) or default
+    end
+    lsp.ensure_start = function(b)
+      attached[#attached + 1] = vim.api.nvim_buf_get_name(b)
+      return true
+    end
+    lsp.request_ok = function(method, params, cb)
+      if method == 'chatora/openPage' then
+        cb({ ok = true, exists = true, title = params.title, text = params.title .. '\n本文', meta = { linked = 2 } })
+      end
+    end
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/titleTaken' then
+        asked[#asked + 1] = 'taken? ' .. params.title
+        cb(nil, { ok = true, taken = taken[params.title] ~= nil, title = taken[params.title] })
+      elseif method == 'chatora/savePage' then
+        local b = vim.fn.bufnr(params.uri)
+        local _, title = require('chatora.uri').parse(params.uri)
+        local lines = vim.api.nvim_buf_get_lines(b, 0, -1, false)
+        if params.keepTitle then
+          asked[#asked + 1] = 'body under ' .. title
+          cb(nil, { ok = true, commitId = 'c', title = title, keptTitle = true })
+          return
+        end
+        asked[#asked + 1] = 'save ' .. title
+        -- Cosense numbers a title another page has, and reports the rename either way.
+        local final = taken[lines[1]] and (lines[1] .. '_1') or lines[1]
+        local reply = { ok = true, commitId = 'c', title = final }
+        if final ~= title then
+          reply.titleChanged = { from = title, to = final }
+        end
+        if final ~= lines[1] then
+          lines[1] = final
+          reply.text = table.concat(lines, '\n')
+        end
+        cb(nil, reply)
+      elseif method == 'chatora/replaceLinks' then
+        asked[#asked + 1] = ('links %s -> %s'):format(params.from, params.to)
+        cb(nil, { ok = true, message = '2 pages have been successfully updated!', pages = 2 })
+      elseif method == 'chatora/mergePage' then
+        asked[#asked + 1] = 'merge into ' .. params.into
+        cb(nil, { ok = true, title = params.into, appended = 1 })
+      end
+    end
+
+    vim.cmd('new')
+    vim.wo.winfixbuf = false
+    local win = vim.api.nvim_get_current_win()
+    page.open('proj', '古い題')
+    local buf = vim.api.nvim_get_current_buf()
+    assert(vim.b[buf].chatora_title == '古い題' and not rename.pending(buf), 'an opened page knows its title')
+
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { '新しい題' })
+    assert(rename.pending(buf), 'a changed title line is a pending rename')
+    vim.api.nvim_win_set_cursor(win, { 1, 0 })
+    rename.settle(buf)
+    assert(#asked == 0, 'nothing is asked while the cursor is on the title line: ' .. vim.inspect(asked))
+
+    -- The autosave goes on, with the body under the title the server has; the typed title
+    -- stays in the buffer, unsaved.
+    config.options.autosave = 1
+    vim.api.nvim_buf_set_lines(buf, 1, 2, false, { '本文を直した' })
+    vim.wait(1400, function()
+      return #asked > 0
+    end)
+    assert(vim.deep_equal(asked, { 'body under 古い題' }), 'the autosave keeps the old title: ' .. vim.inspect(asked))
+    assert(
+      rename.pending(buf) and vim.bo[buf].modified and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == '新しい題',
+      'and the typed title stays, unsaved'
+    )
+    config.options.autosave = false
+    asked = {}
+
+    -- Leaving the line settles it: the links question comes first, then the save with the
+    -- new title, then the rewrite; the buffer takes the name in place.
+    answers = { 1 }
+    vim.api.nvim_win_set_cursor(win, { 2, 0 })
+    vim.cmd('doautocmd CursorMoved')
+    assert(
+      vim.deep_equal(asked, { 'taken? 新しい題', 'ask', 'save 古い題', 'links 古い題 -> 新しい題' }),
+      'free title: ' .. vim.inspect(asked)
+    )
+    assert(
+      vim.api.nvim_buf_get_name(buf) == 'cosense://proj/新しい題',
+      'the buffer is renamed in place, got ' .. vim.api.nvim_buf_get_name(buf)
+    )
+    assert(vim.b[buf].chatora_title == '新しい題' and not rename.pending(buf), 'and knows its new title')
+    assert(not vim.bo[buf].modified and vim.api.nvim_win_get_cursor(win)[1] == 2, 'saved, with the cursor where it was')
+    assert(attached[#attached] == 'cosense://proj/新しい題', 'the LSP client is attached again under the new name')
+    assert(
+      #prompts == 1 and prompts[1]:find('2 個のページが「古い題」にリンクしています', 1, true),
+      'the link rewrite is offered with the count: ' .. vim.inspect(prompts)
+    )
+
+    -- A title another page has: declining saves nothing, and the question is not repeated
+    -- on the next cursor movement, only on an explicit :w.
+    asked, prompts = {}, {}
+    taken['既存'] = '既存'
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { '既存' })
+    answers = { 3 }
+    vim.cmd('doautocmd CursorMoved')
+    assert(
+      vim.deep_equal(asked, { 'taken? 既存', 'ask' }) and vim.api.nvim_buf_get_name(buf) == 'cosense://proj/新しい題',
+      'declining saves nothing: ' .. vim.inspect(asked)
+    )
+    assert(prompts[1]:find('「既存」というページは既にあります', 1, true), vim.inspect(prompts))
+    vim.cmd('doautocmd CursorMoved')
+    assert(#asked == 2, 'a declined title is not asked about again on the next move: ' .. vim.inspect(asked))
+
+    -- Letting Cosense number the title renames the buffer to what it chose, text and all;
+    -- the links are left alone when the reader says so.
+    answers = { 2, 2 }
+    vim.cmd('write')
+    assert(
+      vim.deep_equal(asked, { 'taken? 既存', 'ask', 'taken? 既存', 'ask', 'ask', 'save 新しい題' }),
+      ':w asks again: ' .. vim.inspect(asked)
+    )
+    assert(
+      vim.api.nvim_buf_get_name(buf) == 'cosense://proj/既存_1'
+        and vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1] == '既存_1',
+      'the numbered title comes back into the buffer, got ' .. vim.api.nvim_buf_get_name(buf)
+    )
+
+    -- Merging: the body goes to the page that has the title, this page goes away, and that
+    -- page is what the window shows.
+    asked, prompts = {}, {}
+    taken['統合先'] = '統合先'
+    vim.api.nvim_buf_set_lines(buf, 0, 1, false, { '統合先' })
+    answers = { 1 }
+    vim.cmd('doautocmd CursorMoved')
+    assert(vim.deep_equal(asked, { 'taken? 統合先', 'ask', 'merge into 統合先' }), 'merge: ' .. vim.inspect(asked))
+    vim.wait(500, function()
+      return not vim.api.nvim_buf_is_valid(buf)
+    end)
+    assert(not vim.api.nvim_buf_is_valid(buf), 'the merged page is gone')
+    local shown = vim.api.nvim_win_get_buf(win)
+    assert(
+      vim.api.nvim_buf_get_name(shown) == 'cosense://proj/統合先',
+      'and the page it went into is shown, got ' .. vim.api.nvim_buf_get_name(shown)
+    )
+
+    vim.fn.confirm, vim.notify = orig_confirm, orig_notify
+    config.options.related_auto_open, config.options.autosave = orig_related, orig_autosave
+    lsp.request, lsp.request_ok, lsp.ensure_start = orig_request, orig_ok, orig_start
+    vim.cmd('close!')
+    pcall(vim.api.nvim_buf_delete, shown, { force = true })
+  end
+
+  -- Pasted text gets the web's adjustments: on a blank line the lines after the first take
+  -- the whitespace up to the cursor, so a block pasted into a code block stays inside it;
+  -- in a quote they take the marker; anywhere else the paste goes in as it is.
+  do
+    local paste = require('chatora.paste')
+    assert(
+      vim.deep_equal(paste.prefixed({ 'a', 'b', '' }, '  ', false), { 'a', '  b', '  ' }),
+      'every line but the first is prefixed'
+    )
+    assert(paste.line_prefix('    ', 4, true) == '    ', 'a blank line in a code block: its indent')
+    assert(paste.line_prefix('\t\t', 2, true) == '\t\t', 'tabs stay tabs')
+    assert(paste.line_prefix('    ', 2, false) == '  ', 'up to the cursor, not the whole indent')
+    assert(paste.line_prefix('  text', 6, false) == nil, 'a line with text is left alone')
+    assert(paste.line_prefix(' code', 5, true) == ' ', 'a line of a block keeps what follows in the block')
+    assert(paste.line_prefix(' > 引用', 4, false) == ' > ', 'a quote takes the marker')
+    assert(paste.line_prefix(' > code', 4, true) == ' ', 'inside a code block it is the block indent, not a quote')
+    assert(
+      vim.deep_equal(paste.prefixed({ 'a', '', 'b' }, '> ', true), { 'a', '> b' }),
+      'a quote loses its blank lines'
+    )
+
+    vim.cmd('new')
+    vim.bo.buftype = 'nofile'
+    vim.bo.filetype = 'cosense'
+    local page_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:sample.py', ' ' })
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    vim.paste({ 'def f():', '    return 1', '' }, -1)
+    local got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'code:sample.py', ' def f():', '     return 1', ' ' }),
+      'a paste on a blank line inside a code block stays inside it: ' .. vim.inspect(got)
+    )
+
+    -- Pasting after text inside a block still keeps the rest of the paste in the block,
+    -- blank lines included: on the web those lines would fall out and end it.
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:x', ' first' })
+    vim.api.nvim_win_set_cursor(0, { 3, 5 })
+    vim.paste({ ' tail', '', 'more', '' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'code:x', ' first tail', ' ', ' more', ' ' }),
+      'a paste after text in a block stays in the block: ' .. vim.inspect(got)
+    )
+
+    -- `p` from a register gets the same treatment: charwise continues the line, linewise
+    -- takes the block's indent on every line, a single line is Vim's own put.
+    vim.fn.setreg('a', { 'x', '', 'y' }, 'v')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:x', ' first' })
+    vim.api.nvim_win_set_cursor(0, { 3, 5 })
+    paste.put(true, 'a')
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', 'code:x', ' firstx', ' ', ' y' }), 'charwise p in a block: ' .. vim.inspect(got))
+    vim.fn.setreg('a', { 'x', '', 'y' }, 'V')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:x', '  first' })
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    paste.put(true, 'a')
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', 'code:x', '  first', '  x', '  ', '  y' }), 'linewise p in a block: ' .. vim.inspect(got))
+    vim.fn.setreg('a', { 'one' }, 'v')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', ' ab' })
+    vim.api.nvim_win_set_cursor(0, { 2, 1 })
+    paste.put(true, 'a')
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', ' aoneb' }), "a single line is Vim's own p: " .. vim.inspect(got))
+
+    -- A line with text: the paste goes in as it is, after the character under the cursor.
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', ' 本文' })
+    vim.api.nvim_win_set_cursor(0, { 2, 1 })
+    vim.paste({ 'x', 'y' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', ' 本x', 'y文' }), 'a line with text is left alone: ' .. vim.inspect(got))
+
+    -- Streamed: the first chunk decides, and a later chunk continues the line it ended on.
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:x', '  ' })
+    vim.api.nvim_win_set_cursor(0, { 3, 1 })
+    vim.paste({ 'one', 'tw' }, 1)
+    vim.paste({ 'o', 'three', '' }, 3)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'code:x', '  one', '  two', '  three', '  ' }),
+      'a streamed paste is prefixed chunk by chunk: ' .. vim.inspect(got)
+    )
+
+    -- Not a page: Neovim's own paste, untouched.
+    vim.cmd('new')
+    vim.bo.buftype = 'nofile'
+    local plain_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { '  ' })
+    vim.api.nvim_win_set_cursor(0, { 1, 1 })
+    vim.paste({ 'a', 'b' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { '  a', 'b' }), 'other buffers paste as before: ' .. vim.inspect(got))
+
+    vim.cmd('close!')
+    vim.cmd('close!')
+    vim.api.nvim_buf_delete(plain_buf, { force = true })
+    vim.api.nvim_buf_delete(page_buf, { force = true })
   end
 
   -- The sidebar follows the page the reader moves to, and a project it has listed before
