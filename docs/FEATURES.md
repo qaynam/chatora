@@ -744,10 +744,13 @@ chatora 自身がブラウザで開く操作（外部リンクの `gd` や、ペ
 `scrapbox.io`）。今どうなっているかは `chatora-url-handler status` で見え、元に戻すのは
 `chatora-url-handler uninstall` です。
 
-Cosense 以外のリンクを渡すブラウザは、インストール時に控えたものです。変えるときは
-`chatora-url-handler browser 'Google Chrome'` のようにアプリ名か bundle id で指定します
-（`install --browser <app>` でも同じです）。無いアプリを指定すると、そう言って何も変えません。
-控えたブラウザがあとで消えていても、Safari に渡すので、リンクが開かないことはありません。
+Cosense 以外のリンクを渡すブラウザは、`install` のときにターミナルで一覧から番号で選びます
+（今の既定ブラウザに印が付いていて、Enter でそのままです）。あとから変えるのは
+`chatora-url-handler browser` で、同じ一覧が出ます。一覧は、https の URL を受け取って HTML を開く
+アプリ、つまりシステム設定がブラウザとして出すものと Safari です。スクリプトから使うときは
+`browser 'Google Chrome'` や `install --browser com.google.Chrome` のように、アプリ名か bundle id を
+直接渡せます。無いアプリを指定すると、そう言って何も変えません。控えたブラウザがあとで消えて
+いても、Safari に渡すので、リンクが開かないことはありません。
 
 配布物をダウンロードしないので、署名も公証も要りません。ダウンロードしていないアプリには
 Gatekeeper が見る quarantine 属性が付かず、`osacompile` が ad-hoc 署名まで済ませるからです。
