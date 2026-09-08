@@ -573,12 +573,34 @@ local function page_windows()
   return wins
 end
 
+-- Options put aside while a quit is being refused, and restored once the command is over.
+local quit_refusal = nil
+
+--- Make the :q in progress fail the way Neovim fails one itself: for the length of the
+--- command the buffer counts as abandoned rather than hidden, and 'confirm' is off so
+--- Neovim does not ask again. The result is its own one-line E37, where an error thrown
+--- from the callback would print a traceback and wait for Enter.
+local function refuse_quit(bufnr)
+  if not quit_refusal then
+    quit_refusal = { confirm = vim.o.confirm }
+    vim.schedule(function()
+      vim.o.confirm = quit_refusal.confirm
+      quit_refusal = nil
+    end)
+  end
+  vim.bo[bufnr].bufhidden = 'wipe'
+  vim.o.confirm = false
+  vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      vim.bo[bufnr].bufhidden = ''
+    end
+  end)
+end
+
 -- :q on a page. Asked here, in Neovim's own words, rather than left to Neovim: under
 -- 'hidden' it asks nothing and keeps the buffer, modified, out of sight; and chatora's
 -- panels (sidebar, related) have to go with the last page window for :q to quit rather
--- than leave them behind, which can only be decided once the answer is known. An error
--- thrown from QuitPre aborts the quit, which is what makes "Cancel", and a save that did
--- not happen, keep everything as it was.
+-- than leave them behind, which can only be decided once the answer is known.
 vim.api.nvim_create_autocmd('QuitPre', {
   group = augroup,
   pattern = 'cosense://*',
@@ -600,7 +622,8 @@ vim.api.nvim_create_autocmd('QuitPre', {
           vim.cmd('write')
         end)
         if vim.bo[ev.buf].modified then
-          error('chatora: 保存していないので閉じません')
+          refuse_quit(ev.buf)
+          return
         end
       elseif choice == 2 then
         -- Discarded for real: the flag alone would leave the edits in a hidden buffer that
@@ -612,7 +635,8 @@ vim.api.nvim_create_autocmd('QuitPre', {
           end
         end)
       else
-        error('chatora: 閉じるのをキャンセルしました')
+        refuse_quit(ev.buf)
+        return
       end
     end
     if #page_windows() > 1 then
