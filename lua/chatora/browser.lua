@@ -23,16 +23,25 @@ local function recorded_browser()
   return id ~= '' and id or nil
 end
 
+--- `open -b bundle url`, and whether LaunchServices took it. `open` exits as soon as it
+--- has, so the wait is short; a browser removed since it was recorded makes it fail.
+local function open_with(bundle, url)
+  local ok, result = pcall(function()
+    return vim.system({ 'open', '-b', bundle, url }):wait(3000)
+  end)
+  return ok and result ~= nil and result.code == 0
+end
+
 --- Open `url` in the reader's browser. Errors propagate, so a caller can tell the reader.
 function M.open(url)
   local bundle = recorded_browser()
   if bundle then
-    -- `open` exits as soon as LaunchServices has taken the URL, so the wait is short. A
-    -- browser removed since it was recorded makes it fail, and the default is next.
-    local ok, result = pcall(function()
-      return vim.system({ 'open', '-b', bundle, url }):wait(3000)
-    end)
-    if ok and result and result.code == 0 then
+    if open_with(bundle, url) then
+      return
+    end
+    -- With the handler installed the system default is the handler, and a Cosense URL
+    -- handed to it would come straight back here; Safari is always there to take it.
+    if open_with('com.apple.Safari', url) then
       return
     end
   end

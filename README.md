@@ -113,7 +113,7 @@ bin/chatora-url-handler install
 
 URL を受け取る小さなアプリを作って登録します。あとは**システム設定 → デスクトップとDock →
 デフォルトのWebブラウザ**で `Chatora Open` を選んでください。Cosense 以外のリンクは、それまで
-使っていたブラウザにそのまま流れます。詳しくは
+使っていたブラウザにそのまま流れます（`chatora-url-handler browser 'Google Chrome'` で変えられます）。詳しくは
 [Slack や Chrome のリンクを chatora で開く](docs/FEATURES.md#slack-や-chrome-のリンクを-chatora-で開くmacos)
 を見てください。
 

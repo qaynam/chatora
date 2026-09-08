@@ -55,4 +55,53 @@ describe('bin/chatora', () => {
     expect(run.stderr).toContain('needs a project name')
     expect(run.argv).toEqual([])
   })
+
+  test('`open <url>` is the URL form spelled like :Chatora open', () => {
+    const url = 'https://scrapbox.io/proj/Page'
+    expect(launch('open', url).argv).toEqual([`+Chatora open ${url}`])
+    expect(launch('-p', 'other', 'open', url).argv).toEqual([`+Chatora open ${url}`])
+  })
+
+  test('`open` with no URL after it is refused', () => {
+    for (const args of [['open'], ['open', 'notes.md']]) {
+      const run = launch(...args)
+      expect(run.status).toBe(2)
+      expect(run.stderr).toContain('URL')
+      expect(run.argv).toEqual([])
+    }
+  })
+
+  test('a word that is neither a URL nor a file is refused, not handed to nvim as a file', () => {
+    for (const word of ['toggle', 'search', 'project']) {
+      const run = launch(word)
+      expect(run.status).toBe(2)
+      expect(run.stderr).toContain(word)
+      expect(run.argv).toEqual([])
+    }
+    // A path is nvim's, whether or not it exists yet.
+    expect(launch('notes.md').argv).toEqual(['+Chatora', 'notes.md'])
+    expect(launch('./notes').argv).toEqual(['+Chatora', './notes'])
+    expect(launch('+10', 'notes.md').argv).toEqual(['+Chatora', '+10', 'notes.md'])
+  })
+
+  test('a URL anywhere but first is refused, since nvim would open it as a file', () => {
+    const url = 'https://scrapbox.io/proj/Page'
+    for (const args of [
+      ['-o', url],
+      ['notes.md', url],
+    ]) {
+      const run = launch(...args)
+      expect(run.status).toBe(2)
+      expect(run.stderr).toContain(url)
+      expect(run.argv).toEqual([])
+    }
+  })
+
+  test('--help prints the usage and starts nothing', () => {
+    const run = Bun.spawnSync([LAUNCHER, '--help'], {
+      env: { ...process.env, PATH: `${stubDir}:${process.env.PATH ?? ''}` },
+    })
+    expect(run.exitCode).toBe(0)
+    expect(run.stdout.toString()).toContain('使い方')
+  })
 })

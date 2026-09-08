@@ -1655,10 +1655,33 @@ local ok, err = pcall(function()
       'with the handler, the recorded browser gets it, got ' .. vim.inspect(spawned)
     )
 
-    code = 1
+    -- The recorded browser is gone: the default would be the handler, so Safari is asked
+    -- before it, and the default only when even Safari refuses.
+    local tried = {}
+    vim.system = function(cmd)
+      tried[#tried + 1] = cmd[3]
+      return {
+        wait = function()
+          return { code = cmd[3] == 'com.apple.Safari' and 0 or 1 }
+        end,
+      }
+    end
     spawned, opened = nil, nil
     browser.open('https://example.com')
-    assert(opened == 'https://example.com', 'a recorded browser that cannot open falls back to the default')
+    assert(
+      vim.deep_equal(tried, { 'com.example.Browser', 'com.apple.Safari' }) and opened == nil,
+      'a recorded browser that cannot open hands over to Safari, got ' .. vim.inspect(tried)
+    )
+    vim.system = function()
+      return {
+        wait = function()
+          return { code = 1 }
+        end,
+      }
+    end
+    opened = nil
+    browser.open('https://example.com')
+    assert(opened == 'https://example.com', 'and to the default when Safari refuses too')
 
     vim.env.CHATORA_URL_HANDLER_DIR, vim.system, vim.ui.open = orig_dir, orig_system, orig_open
     vim.fn.delete(dir, 'rf')

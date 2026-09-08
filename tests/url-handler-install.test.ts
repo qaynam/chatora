@@ -10,9 +10,9 @@ import { join } from 'node:path'
 const INSTALLER = join(import.meta.dir, '..', 'bin', 'chatora-url-handler')
 const darwin = process.platform === 'darwin'
 
-const install = () => {
+const install = (...args: string[]) => {
   const root = mkdtempSync(join(tmpdir(), 'chatora-install-'))
-  const run = Bun.spawnSync([INSTALLER, 'install'], {
+  const run = Bun.spawnSync([INSTALLER, 'install', ...args], {
     env: {
       ...process.env,
       CHATORA_URL_HANDLER_DIR: join(root, 'data'),
@@ -72,5 +72,84 @@ describe.skipIf(!darwin)('chatora-url-handler install', () => {
     } finally {
       installed.cleanup()
     }
+  })
+
+  test('--browser names the fallback, by name or by bundle id', () => {
+    const installed = install('--browser', 'Safari')
+    try {
+      expect(installed.status).toBe(0)
+      expect(installed.dataFile('fallback')).toBe('com.apple.Safari')
+    } finally {
+      installed.cleanup()
+    }
+  })
+
+  test('an argument install does not know is refused', () => {
+    const installed = install('--browsr', 'Safari')
+    try {
+      expect(installed.status).toBe(2)
+    } finally {
+      installed.cleanup()
+    }
+  })
+})
+
+const handler = (...args: string[]) => {
+  const root = mkdtempSync(join(tmpdir(), 'chatora-handler-'))
+  const run = Bun.spawnSync([INSTALLER, ...args], {
+    env: {
+      ...process.env,
+      CHATORA_URL_HANDLER_DIR: join(root, 'data'),
+      CHATORA_URL_HANDLER_APPS: join(root, 'apps'),
+    },
+  })
+  const fallback = (() => {
+    try {
+      return readFileSync(join(root, 'data', 'fallback'), 'utf8').trim()
+    } catch {
+      return null
+    }
+  })()
+  rmSync(root, { recursive: true, force: true })
+  return {
+    status: run.exitCode,
+    stdout: run.stdout.toString(),
+    stderr: run.stderr.toString(),
+    fallback,
+  }
+}
+
+describe.skipIf(!darwin)('chatora-url-handler browser', () => {
+  test('records the browser the reader names, as a bundle id', () => {
+    expect(handler('browser', 'Safari').fallback).toBe('com.apple.Safari')
+    expect(handler('browser', 'com.apple.Safari').fallback).toBe('com.apple.Safari')
+  })
+
+  test('an application that is not there is refused, and nothing is recorded', () => {
+    const run = handler('browser', 'No Such Browser')
+    expect(run.status).toBe(1)
+    expect(run.stderr).toContain('No Such Browser')
+    expect(run.fallback).toBeNull()
+  })
+
+  test('the handler itself cannot be the fallback', () => {
+    expect(handler('browser', 'dev.qaynam.chatora.open').status).toBe(1)
+  })
+})
+
+describe.skipIf(!darwin)('chatora-url-handler arguments', () => {
+  test.each([[[]], [['bogus']], [['status', 'extra']], [['browser']]])(
+    '%j is a usage error',
+    (args) => {
+      const run = handler(...args)
+      expect(run.status).toBe(2)
+      expect(run.stderr).toContain('使い方')
+    },
+  )
+
+  test('--help prints the usage', () => {
+    const run = handler('--help')
+    expect(run.status).toBe(0)
+    expect(run.stdout).toContain('browser <app>')
   })
 })
