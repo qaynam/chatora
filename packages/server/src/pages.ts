@@ -56,7 +56,7 @@ const TOO_MANY_REQUESTS = 429
 const fromCosenseApiError = (error: CosenseApiError): ErrEnvelope => {
   if (UNAUTHORIZED_STATUSES.has(error.status)) return err('unauthorized', 'authentication failed')
   if (error.status === TOO_MANY_REQUESTS) {
-    return err('error', 'Cosense がリクエストの多さを断りました。少し待ってからやり直してください')
+    return err('error', 'HTTP リクエストが多すぎます。少し待ってからやり直してください')
   }
   if (error.code === 'NotFastForward') {
     return err('notFastForward', 'remote page has changed; reload and try again')
