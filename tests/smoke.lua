@@ -1196,8 +1196,9 @@ local ok, err = pcall(function()
     vim.notify = orig_notify
   end
 
-  -- The flat layout of v0.1 still works: each key is moved to where it lives now, the
-  -- values that changed spelling with it, and one message says what to rewrite.
+  -- A key setup() does not know is called out once and does nothing — at the top, inside
+  -- a group, and in keymaps — naming the new key when it is one of v0.1's flat ones, so a
+  -- configuration from then says where to move each line rather than quietly losing it.
   do
     local config = require('chatora.config')
     local orig_notify = vim.notify
@@ -1205,32 +1206,29 @@ local ok, err = pcall(function()
     vim.notify = function(msg)
       warned[#warned + 1] = msg
     end
-    local tabs = { { name = 'x' } }
     chatora.setup({
-      project = 'my-project',
-      sidebar_tabs = tabs,
-      sidebar_poll = false,
-      autosave = 3,
-      external_link = 'open',
-      video = false,
-      images = 'auto',
-      keymaps = { toggle = 'gk', autopair = false, date_format = '%Y' },
-      view = { pads = false },
+      sidebar_width = 10,
+      colour = 'red',
+      sidebar = { widht = 10 },
+      keymaps = { toggle = 'gk', autopair = false },
+      edit = { autosave = 3 },
     })
     local o = config.options
-    assert(o.default_project == 'my-project' and o.sidebar.tabs == tabs and o.sidebar.refresh_interval == false, 'flat keys land in their groups')
-    assert(o.edit.autosave == 3 and o.view.pads == false, 'next to what was already nested')
-    assert(o.open_external_link == 'always' and o.open_video == 'browser' and o.image.enabled == true, 'values are respelled: ' .. vim.inspect({ o.open_external_link, o.open_video, o.image.enabled }))
-    assert(o.keymaps.sidebar == 'gk' and o.keymaps.toggle == nil, 'keymaps.toggle is keymaps.sidebar')
-    assert(o.edit.autopair == false and o.edit.date_format == '%Y', 'the behaviours leave keymaps for edit')
-    local note = warned[#warned]
-    assert(note:find('setup() のキーが変わりました', 1, true), 'one message says so: ' .. tostring(note))
-    for _, line in ipairs({ 'project → default_project', 'sidebar_tabs → sidebar.tabs', 'keymaps.toggle → keymaps.sidebar', 'open_external_link = "open" → "always"', 'open_video = false → "browser"' }) do
-      assert(note:find(line, 1, true), 'listing ' .. line .. ' in: ' .. note)
+    assert(o.sidebar.width == 32 and o.edit.autosave == 3, 'an unknown key is not applied, a known one is')
+    assert(o.edit.autopair == true and o.keymaps.sidebar == nil, 'nor is an old keymaps key')
+    local joined = table.concat(warned, '\n')
+    for _, line in ipairs({
+      '知らないキー `sidebar_width` があります（`sidebar.width` になりました）',
+      '知らないキー `colour` があります',
+      '知らないキー `sidebar.widht` があります',
+    }) do
+      assert(joined:find(line, 1, true), 'expected: ' .. line .. '\nin: ' .. joined)
     end
-    -- A nested key given alongside its flat twin wins.
-    chatora.setup({ autosave = 3, edit = { autosave = 9 } })
-    assert(config.options.edit.autosave == 9, 'the new key wins over the old one')
+    assert(not joined:find('`colour` があります（', 1, true), 'a key that never existed gets no new name')
+    require('chatora.keymaps').attach(vim.api.nvim_create_buf(false, true))
+    joined = table.concat(warned, '\n')
+    assert(joined:find('keymaps に知らないキー `toggle` があります（`keymaps.sidebar` になりました）', 1, true), 'keymaps.toggle names keymaps.sidebar: ' .. joined)
+    assert(joined:find('keymaps に知らないキー `autopair` があります（`edit.autopair` になりました）', 1, true), 'keymaps.autopair names edit.autopair: ' .. joined)
     chatora.setup({})
     vim.notify = orig_notify
   end
@@ -2849,15 +2847,15 @@ local ok, err = pcall(function()
     lsp.ensure_start, lsp.request_ok, lsp.request = orig_start, orig_ok, orig_request
   end
 
-  -- The key names v0.1 shipped with still work, each saying once what it is now. Two keys
-  -- that decide a list's contents in one spec are called out: only one of them can win.
+  -- Two keys that decide a list's contents in one spec are called out: only one of them
+  -- can win. A key a tab does not have (v0.1's `label`, say) is an unknown key like any.
   do
     local sidebar = require('chatora.sidebar')
     local lsp = require('chatora.lsp')
     local config = require('chatora.config')
     local orig_start, orig_ok, orig_request = lsp.ensure_start, lsp.request_ok, lsp.request
     local orig_tabs, orig_notify = config.options.sidebar.tabs, vim.notify
-    local warned, params = {}, {}
+    local warned = {}
     vim.notify = function(msg)
       warned[#warned + 1] = msg
     end
@@ -2865,24 +2863,21 @@ local ok, err = pcall(function()
     lsp.request = function(_, _, cb)
       cb('no client', nil)
     end
-    lsp.request_ok = function(method, p, cb)
+    lsp.request_ok = function(method, _, cb)
       if method == 'chatora/listPages' then
-        params[#params + 1] = p
         cb({ ok = true, count = 0, scanned = 0, pages = {} })
       end
     end
     sidebar.close()
     config.options.sidebar.tabs = {
-      { label = '古い', unread_only = true },
+      { label = '古い' },
       { name = '二つ', filter = 'taro', related = 'memo' },
     }
     sidebar.open('proj')
     local win = vim.fn.bufwinid('chatora://sidebar')
-    assert(vim.wo[win].winbar:find(' 古い ', 1, true), 'label still names the tab: ' .. vim.wo[win].winbar)
-    assert(params[1] and params[1].unreadOnly == true, 'unread_only still narrows to unread: ' .. vim.inspect(params[1]))
+    assert(vim.wo[win].winbar:find(' #1 ', 1, true), 'label does not name a tab any more: ' .. vim.wo[win].winbar)
     local joined = table.concat(warned, '\n')
-    assert(joined:find('1 番目の `label` は `name` になりました', 1, true), 'label is said to be name now: ' .. joined)
-    assert(joined:find('1 番目の `unread_only` は `unread` になりました', 1, true), 'unread_only is said to be unread now: ' .. joined)
+    assert(joined:find('1 番目に知らないキー `label` があります', 1, true), 'label is an unknown key: ' .. joined)
     assert(
       joined:find('2 番目の中身を決めるキーは 1 つだけです（filter, related が一緒にあります）', 1, true),
       'two sources are called out: ' .. joined

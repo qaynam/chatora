@@ -261,11 +261,18 @@ local function validate_notations(notations)
 end
 
 -- ---------------------------------------------------------------------------
--- the flat layout of v0.1
+-- keys setup() does not know
 -- ---------------------------------------------------------------------------
 
--- Where each top-level key of the flat layout went, as a dotted path.
-local MOVED = {
+-- Keys a group may carry beyond its defaults, whose default is nil.
+local OPTIONAL = {
+  [''] = { default_project = true, server_cmd = true },
+  image = { height_large = true },
+}
+
+-- The keys of v0.1's flat layout, and where each went. Only named in the warning: the old
+-- key does nothing, since carrying it over would keep every old name alive for good.
+local RENAMED = {
   project = 'default_project',
   external_link = 'open_external_link',
   video = 'open_video',
@@ -300,95 +307,31 @@ local MOVED = {
   image_border = 'image.border',
 }
 
--- Keys that lived in `keymaps` without being keys, and the one key that was renamed.
-local MOVED_KEYMAPS = {
-  autopair = 'edit.autopair',
-  table_tab = 'edit.table_tab',
-  date_format = 'edit.date_format',
-  toggle = 'keymaps.sidebar',
-}
-
--- Values whose spelling changed along with their key.
-local RENAMED_VALUES = {
-  open_external_link = { open = 'always', ignore = 'never', [false] = 'never' },
-  open_video = { [false] = 'browser' },
-  ['image.enabled'] = { auto = true },
-}
-
-local function shallow_copy(tbl)
-  local out = {}
-  for k, v in pairs(tbl) do
-    out[k] = v
-  end
-  return out
-end
-
---- Set `path` in `tbl`, copying each table on the way rather than writing into the
---- reader's own: the values themselves (a tab list, say) are kept as they are, since the
---- sidebar carries fetched pages over by their identity.
-local function set_path(tbl, path, value)
-  local keys = vim.split(path, '.', { plain = true })
-  for i = 1, #keys - 1 do
-    local inner = tbl[keys[i]]
-    inner = type(inner) == 'table' and shallow_copy(inner) or {}
-    tbl[keys[i]] = inner
-    tbl = inner
-  end
-  tbl[keys[#keys]] = value
-end
-
-local function get_path(tbl, path)
-  for _, key in ipairs(vim.split(path, '.', { plain = true })) do
-    if type(tbl) ~= 'table' then
-      return nil
+--- Say once which keys of `opts` mean nothing, at the top and inside each group: a
+--- misspelled key would otherwise leave the default in place without a word.
+local function warn_unknown(opts)
+  local function check(given, known, extra, prefix)
+    if type(given) ~= 'table' then
+      return
     end
-    tbl = tbl[key]
-  end
-  return tbl
-end
-
---- `opts` with the flat layout's keys moved to where they live now, saying once which
---- ones. A key given in both places keeps the new one.
-local function migrate(opts)
-  local out = shallow_copy(opts)
-  local notes = {}
-  local function move(from, to, value)
-    if get_path(out, to) == nil then
-      set_path(out, to, value)
-    end
-    notes[#notes + 1] = from .. ' → ' .. to
-  end
-  for key, to in pairs(MOVED) do
-    if out[key] ~= nil then
-      move(key, to, out[key])
-      out[key] = nil
-    end
-  end
-  if type(out.keymaps) == 'table' then
-    out.keymaps = shallow_copy(out.keymaps)
-    for key, to in pairs(MOVED_KEYMAPS) do
-      if out.keymaps[key] ~= nil then
-        move('keymaps.' .. key, to, out.keymaps[key])
-        out.keymaps[key] = nil
+    for key in pairs(given) do
+      if known[key] == nil and not (extra and extra[key]) then
+        local moved = prefix == '' and RENAMED[key] or nil
+        vim.notify_once(
+          ('[chatora] setup() に知らないキー `%s%s` があります%s'):format(
+            prefix,
+            key,
+            moved and ('（`' .. moved .. '` になりました）') or ''
+          ),
+          vim.log.levels.WARN
+        )
       end
     end
   end
-  for path, renames in pairs(RENAMED_VALUES) do
-    local value = get_path(out, path)
-    if value ~= nil and renames[value] ~= nil then
-      set_path(out, path, renames[value])
-      notes[#notes + 1] = ('%s = %s → %s'):format(path, vim.inspect(value), vim.inspect(renames[value]))
-    end
+  check(opts, defaults, OPTIONAL[''], '')
+  for _, group in ipairs({ 'sidebar', 'related', 'edit', 'view', 'image' }) do
+    check(opts[group], defaults[group], OPTIONAL[group], group .. '.')
   end
-  if #notes > 0 then
-    table.sort(notes)
-    vim.notify_once(
-      '[chatora] setup() のキーが変わりました。今のままでも動きますが、書き換えてください:\n  '
-        .. table.concat(notes, '\n  '),
-      vim.log.levels.WARN
-    )
-  end
-  return out
 end
 
 -- Absolute path of the repo/plugin root, derived from this file's location:
@@ -435,7 +378,8 @@ local function resolve(project)
     end
     opts = ret
   end
-  local options = vim.tbl_deep_extend('force', vim.deepcopy(defaults), migrate(opts or {}))
+  warn_unknown(opts or {})
+  local options = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
   options.notations = validate_notations(options.notations)
   return options
 end

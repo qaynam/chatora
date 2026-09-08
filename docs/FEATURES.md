@@ -589,7 +589,6 @@ sidebar = { tabs = {
 `filter` は `{ type = 'icon', value = 'sakura' }` の形でも書けます。`sidebar.tabs = false` で、
 タブなしの単一リストになります。知らないキーがあると、起動時にそう言います。中身を決めるキー
 （`filter` / `mine` / `related` / `pages` / `folders`）は 1 つだけ書きます。2 つ以上あるときも、そう言います。
-以前の `label` と `unread_only` はそのまま動きますが、`name` と `unread` になったと 1 回だけ言います。
 
 設定のあとから足すこともできます。
 

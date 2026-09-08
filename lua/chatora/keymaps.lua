@@ -53,6 +53,15 @@ for _, action in ipairs(ACTIONS) do
   KNOWN_KEYS[action.name] = true
 end
 
+-- What v0.1 kept in this table under another name, or as a behaviour that is now `edit`'s.
+-- Named in the warning only; the old key does nothing.
+local RENAMED = {
+  toggle = 'keymaps.sidebar',
+  autopair = 'edit.autopair',
+  table_tab = 'edit.table_tab',
+  date_format = 'edit.date_format',
+}
+
 --- Each action's keys as configured, or nil for `keymaps = false`. An action set to
 --- `false` has none. A name not in the table is called out once: misspelled, it would
 --- leave the default in place without a word.
@@ -66,7 +75,13 @@ local function resolve()
   end
   for key in pairs(raw) do
     if not KNOWN_KEYS[key] then
-      vim.notify_once(('[chatora] keymaps に知らないキー `%s` があります'):format(key), vim.log.levels.WARN)
+      vim.notify_once(
+        ('[chatora] keymaps に知らないキー `%s` があります%s'):format(
+          key,
+          RENAMED[key] and ('（`' .. RENAMED[key] .. '` になりました）') or ''
+        ),
+        vim.log.levels.WARN
+      )
     end
   end
   local prefix = raw.prefix

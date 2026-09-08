@@ -64,8 +64,9 @@ bun run verify   # typecheck + bun test + build + biome + smoke + E2E
   `vim.lsp.buf_detach_client`、変えたあとに付け直さないと、新しい名前への要求が
   `document not synced` になります（`page.lua` の `rename_buffer`）
 - 設定は `sidebar` / `related` / `edit` / `view` / `image` の入れ子です。オプションを足すときは
-  `config.lua` の型（`chatora.Config` など）と README の表の両方に足します。v0.1 の平らなキーは
-  `config.lua` の `MOVED` で移していて、警告つきで動きます
+  `config.lua` の型（`chatora.Config` など）と README の表の両方に足します。知らないキーは
+  警告して無視します。古い名前は `config.lua` の `RENAMED` で新しい名前を案内するだけで、
+  移しません（公開して使う人が増えるまでは移行の層を持たない方針です）
 - キーは `keymaps.lua` の `ACTIONS` が唯一の表です。ページのキーを `page.lua` などに直接
   `vim.keymap.set` しないでください。アクションは `actions.lua` に置き、`<Plug>(chatora-…)` が
   自動で付きます
