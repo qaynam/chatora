@@ -154,6 +154,13 @@ export const notationSpecs = (): readonly NotationSpec[] => currentSpecs
 export const notationName = (marker: string): string | undefined => markerToName.get(marker)
 
 /**
+ * True for a character Cosense would read as part of a `[<run> body]` marker run: one of the
+ * documented set above, or a marker the user configured (which may be outside it).
+ */
+export const isDecorationMarker = (char: string): boolean =>
+  DECORATION_CHARS.has(char) || markerToName.has(char)
+
+/**
  * The user-defined notations a decoration node wears, in the order they were written —
  * empty for the official ones (`[* x]`, `[-_ x]`, `[[x]]`), whose markers are never
  * configurable.

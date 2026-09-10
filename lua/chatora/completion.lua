@@ -7,8 +7,85 @@ local M = {}
 local uv = vim.uv or vim.loop
 local REOPEN_DEBOUNCE_MS = 120
 
+-- Cosense reads a run of these as a decoration marker (help-jp/文字装飾記法); the server keeps
+-- the same set in notations.ts, and the two have to agree or the menu re-opens where the
+-- server stays quiet.
+local DECORATION_CHARS = {}
+for ch in ([[!"#%&'()*+,-./{|}<>_~]]):gmatch('.') do
+  DECORATION_CHARS[ch] = true
+end
+
+local IMAGE_EXTS = {
+  png = true,
+  jpg = true,
+  jpeg = true,
+  gif = true,
+  webp = true,
+  svg = true,
+  bmp = true,
+  avif = true,
+}
+
+local function is_marker(ch, notations)
+  return DECORATION_CHARS[ch] == true or notations[ch] ~= nil
+end
+
+--- The UTF-8 character of `s` starting at byte `i`, and where the next one starts: a
+--- configured marker is not necessarily ASCII.
+local function utf8_char(s, i)
+  local b = s:byte(i)
+  local len = (b < 0x80 and 1) or (b < 0xE0 and 2) or (b < 0xF0 and 3) or 4
+  return s:sub(i, i + len - 1), i + len
+end
+
+--- A marker run, then whitespace — or nothing after it yet, as while `[* ]` is being typed.
+local function starts_decoration(inner)
+  local notations = require('chatora.config').options.notations or {}
+  local i = 1
+  while i <= #inner do
+    local ch, next_i = utf8_char(inner, i)
+    if not is_marker(ch, notations) then
+      break
+    end
+    i = next_i
+  end
+  if i == 1 then
+    return false
+  end
+  local rest = inner:sub(i)
+  -- `%s` only knows the ASCII spaces, and 　 is the one a Japanese keyboard puts there.
+  return rest == '' or rest:match('^%s') ~= nil or rest:match('^　') ~= nil
+end
+
+--- True when the bracket content is a page link, or on its way to one — the only bracket
+--- completion answers in. Mirrors `isLinkBracket` in packages/server/src/completion.ts;
+--- tests/completion-parity.test.ts holds the two together.
+function M.is_link_bracket(inner)
+  if inner == '' then
+    return true
+  end
+  if inner:sub(1, 1) == '$' then -- [$ x^2]
+    return false
+  end
+  if starts_decoration(inner) then -- [* 見出し]
+    return false
+  end
+  if inner:match('^.+%.icon$') or inner:match('^.+%.icon%*%d+$') then -- [taro.icon*5]
+    return false
+  end
+  if inner:lower():find('https?://') then -- [ラベル https://example.com]
+    return false
+  end
+  local ext = inner:match('%.(%a+)$')
+  if ext and IMAGE_EXTS[ext:lower()] then -- [a.png]
+    return false
+  end
+  return inner:sub(1, 1) ~= '/' -- [/my-project/page]
+end
+
 --- The `[...]` the cursor sits inside, as the 1-based byte positions of its brackets, or
---- nil. Mirrors the server's detectLink: the pair has to be closed, and `[[` is not one.
+--- nil. Mirrors the server's detectLink: the pair has to be closed, `[[` is not one, and the
+--- content has to be a link rather than some other notation.
 function M.link_range(line, col)
   local open = nil
   for i = col, 1, -1 do
@@ -33,6 +110,9 @@ function M.link_range(line, col)
       return nil
     end
     if ch == ']' then
+      if not M.is_link_bracket(line:sub(open + 1, j - 1)) then
+        return nil
+      end
       return open, j
     end
   end
