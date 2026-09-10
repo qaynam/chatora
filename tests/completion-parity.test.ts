@@ -1,7 +1,7 @@
-// Which bracket completion answers in is decided twice: by isLinkBracket for the server's
-// answer, and by link_range for the client's re-opening of the menu. A client that re-opens
-// where the server stays quiet is the flicker both rules exist to stop, so the same cases go
-// through both sides here.
+// Where completion is offered is decided twice: by detectCompletion for the server's answer,
+// and by completion_range for the client's re-opening of the menu. A client that re-opens
+// where the server stays quiet flickers, and one that stays quiet where the server answers
+// leaves the menu empty on a Japanese query — so the same cases go through both sides here.
 import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -58,8 +58,21 @@ const GROUPS: readonly Group[] = [
       ['[ab', ' [cd]'],
       ['', '[foo]'],
       ['plain text', ''],
-      // The client has no hashtag rule at all: the server answers, the menu is not re-opened.
+      // Hashtags: the run reaches back to a `#` that opens a tag.
+      ['#ta', 'g'],
       ['see #ta', 'g'],
+      ['#ページ', ''],
+      ['#', ''],
+      ['a #', ''],
+      ['#tag', ' more'],
+      ['タグの前に　#ta', 'g'],
+      // Not a tag: no boundary before the `#`, and a run that a space already ended.
+      ['foo#ba', 'r'],
+      ['#tag　の', 'あと'],
+      ['#tag もう', '一つ'],
+      // A bracket wins over a tag, and a tag still stands inside a decoration.
+      ['[#ta', 'g]'],
+      ['[* 見出し #ta', 'g]'],
     ],
   },
   {
@@ -88,7 +101,7 @@ for _, group in ipairs(groups) do
   config.setup({ notations = group.notations })
   for _, case in ipairs(group.cases) do
     local before = case[1]
-    local open, close = completion.link_range(before .. case[2], #before)
+    local open, close = completion.completion_range(before .. case[2], #before)
     out[#out + 1] = { open = open or vim.NIL, close = close or vim.NIL }
   end
 end
@@ -131,12 +144,10 @@ describe('completion trigger parity between completion.lua and completion.ts', (
     setNotations(c.specs)
     try {
       const detection = detectCompletion(line, c.before.length)
-      // Hashtags are the server's alone: the client only ever re-opens inside a bracket.
-      const link = detection?.kind === 'link' ? detection : null
       expect(lua[i]).toEqual(
-        link === null
+        detection === null
           ? { open: null, close: null }
-          : asLuaRange(line, link.replaceStart, link.replaceEnd),
+          : asLuaRange(line, detection.replaceStart, detection.replaceEnd),
       )
     } finally {
       setNotations([])
