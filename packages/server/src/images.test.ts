@@ -117,6 +117,14 @@ describe('computeImageTargets', () => {
     ])
   })
 
+  test('a Gyazo thumb URL stays as written, so its own size is what is fetched', () => {
+    const hash = '0123456789abcdef0123456789abcdef01234567'
+    const text = `タイトル\n[https://gyazo.com/${hash}/thumb/60#.png]`
+    const targets = computeImageTargets(text)
+    expect(targets[0]?.src).toBe(`https://gyazo.com/${hash}/thumb/60`)
+    expect(targets[0]?.standalone).toBe(true)
+  })
+
   test('an already-resolved i.gyazo.com URL passes through unchanged', () => {
     const text = 'タイトル\n[https://i.gyazo.com/abc.png]'
     const targets = computeImageTargets(text)

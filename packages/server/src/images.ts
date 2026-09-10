@@ -1,7 +1,7 @@
 import type { AnyNode } from '@cosense-toolbox/parser'
 import { asImageSrc, parse } from '@cosense-toolbox/parser'
 import { visit } from '@cosense-toolbox/parser/utils'
-import { isGyazoUrl } from './gyazo'
+import { isGyazoThumbUrl, isGyazoUrl } from './gyazo'
 import { parseOptions } from './notations'
 
 /**
@@ -144,7 +144,11 @@ export const computeImageTargets = (text: string): ImageTarget[] => {
       return
     }
     if (node.type === 'image') {
-      const src = asImageSrc(node.src) ?? node.src
+      // asImageSrc turns any Gyazo URL into the capture's own file; a thumb names a picture
+      // of its own size and stays as written, less the `#.png` that marks it an image.
+      const src = isGyazoThumbUrl(node.src)
+        ? node.src.replace(/#.*$/, '')
+        : (asImageSrc(node.src) ?? node.src)
       if (isFetchableImage(src)) {
         out.push({
           line,

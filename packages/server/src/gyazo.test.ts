@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { Effect, Option } from 'effect'
-import { isGyazoUrl, resolveGyazo } from './gyazo'
+import { isGyazoThumbUrl, isGyazoUrl, resolveGyazo } from './gyazo'
 
 const ORIGIN = 'https://scrapbox.io'
 
@@ -40,7 +40,29 @@ describe('isGyazoUrl', () => {
   })
 })
 
+describe('isGyazoThumbUrl', () => {
+  test.each([
+    ['https://gyazo.com/de6bcae95b3fda5cce264f738531dac9/thumb/60', true],
+    ['https://gyazo.com/de6bcae95b3fda5cce264f738531dac9/thumb/60#.png', true],
+    ['https://thumb.gyazo.com/thumb/700_w/eyJhbGciOiJIUzI1NiJ9-gif.jpg', true],
+    ['https://gyazo.com/de6bcae95b3fda5cce264f738531dac9', false],
+    ['https://i.gyazo.com/de6bcae95b3fda5cce264f738531dac9.png', false],
+    ['https://example.com/x/thumb/60', false],
+  ])('%s -> %s', (url, expected) => {
+    expect(isGyazoThumbUrl(url)).toBe(expected)
+  })
+})
+
 describe('resolveGyazo', () => {
+  test('a thumb names its own picture: the proxy is not asked, and the URL is fetched as it is', async () => {
+    const { fetch, calls } = testFetch(() =>
+      oembed({ type: 'photo', url: 'https://i.gyazo.com/x.png' }),
+    )
+    const thumb = 'https://gyazo.com/cccccccccccccccccccccccc/thumb/60'
+    expect(await run(resolveGyazo(fetch, ORIGIN, thumb))).toEqual(Option.none())
+    expect(calls).toEqual([])
+  })
+
   test('a photo resolves to the URL the proxy names, team hosts included', async () => {
     const url = 'https://myteam.gyazo.com/d5a22192d87effa875686051a0c5a179'
     const picture = 'https://t.gyazo.com/teams/myteam/d5a22192d87effa875686051a0c5a179.png'

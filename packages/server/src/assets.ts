@@ -10,7 +10,7 @@ import { HttpClient } from '@chatora/core'
 import { Data, Effect, Option } from 'effect'
 import { AssetCache } from './assetCache'
 import { cacheKey, extensionFor, findCached, resolveCacheDir, writeAtomic } from './assetStore'
-import { resolveGyazo } from './gyazo'
+import { isGyazoThumbUrl, resolveGyazo } from './gyazo'
 import {
   type BorderParams,
   borderArgs,
@@ -279,7 +279,8 @@ export const fetchAsset = (params: {
     const cache = yield* AssetCache
     const http = yield* HttpClient
     const cacheDir = resolveCacheDir()
-    const hash = cacheKey(params.url)
+    // A thumb fetched as it is must not be answered by an entry holding the full capture.
+    const hash = cacheKey(isGyazoThumbUrl(params.url) ? `thumb\0${params.url}` : params.url)
     const border = params.border === undefined ? null : sanitizeBorder(params.border)
 
     // The bordered/rasterized variants are derived from the plain cached original, so the

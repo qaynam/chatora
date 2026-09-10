@@ -69,8 +69,18 @@ const playable = (url: string, html: string | undefined): string | undefined => 
 }
 
 /**
+ * A Gyazo URL naming a picture of a chosen size: a `/thumb/<px>` path, or the thumb host.
+ * Asked about one, the proxy answers with the full capture instead.
+ */
+export const isGyazoThumbUrl = (url: string): boolean => {
+  if (!isGyazoUrl(url)) return false
+  const { hostname, pathname } = new URL(url)
+  return hostname === 'thumb.gyazo.com' || /\/thumb\/\d+/.test(pathname)
+}
+
+/**
  * What Gyazo holds behind a URL, or `Option.none` for a URL the proxy names nothing for —
- * anything that is not Gyazo's, and anything it refuses.
+ * anything that is not Gyazo's, a thumb that is its own picture, and anything it refuses.
  */
 export const resolveGyazo = (
   fetch: HttpClientShape['fetch'],
@@ -78,7 +88,7 @@ export const resolveGyazo = (
   url: string,
 ): Effect.Effect<Option.Option<GyazoMedia>> =>
   Effect.gen(function* () {
-    if (!isGyazoUrl(url)) return Option.none()
+    if (!isGyazoUrl(url) || isGyazoThumbUrl(url)) return Option.none()
     const cached = resolved.get(url)
     if (cached !== undefined) return Option.some(cached)
 
