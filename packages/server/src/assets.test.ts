@@ -1,12 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Credential } from '@chatora/core'
 import { CredentialStore, HttpClient } from '@chatora/core'
 import { Effect, Layer, Option, TestClock, TestContext } from 'effect'
 import { cacheKey, findCached } from './assetStore'
-import { type AssetCache, AssetCacheLive, composeAssets, fetchAsset, thumbnailFile } from './assets'
+import {
+  AssetCache,
+  AssetCacheLive,
+  clearAssets,
+  composeAssets,
+  fetchAsset,
+  thumbnailFile,
+} from './assets'
 import { makeSessionStateLayer, type SessionState } from './state'
 
 const ORIGIN = 'https://scrapbox.io'
@@ -611,6 +618,33 @@ describe('a Gyazo thumb', () => {
     // An entry under the URL's own hash would be the full capture the URL resolves to
     // through the proxy; this fetch neither reads nor writes that entry.
     expect(await Effect.runPromise(findCached(cacheDir, cacheKey(url)))).toEqual(Option.none())
+  })
+})
+
+describe('clearAssets', () => {
+  test('empties the cache directory and forgets the failures it remembered', async () => {
+    const gone = 'https://cdn.example.com/gone.png'
+    const { layer: httpLayer } = testHttpClient((url) =>
+      url === gone ? new Response('', { status: 404 }) : png(1),
+    )
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const out = await runOnce(
+      Effect.gen(function* () {
+        yield* fetchAsset({ project: 'p', url: 'https://cdn.example.com/keep.png' })
+        yield* fetchAsset({ project: 'p', url: gone })
+        const cache = yield* AssetCache
+        const remembered = Option.isSome(yield* cache.recallFailure(gone))
+        const cleared = yield* clearAssets()
+        const after = Option.isSome(yield* cache.recallFailure(gone))
+        return { remembered, cleared, after }
+      }),
+      httpLayer,
+      credLayer,
+    )
+    expect(out.remembered).toBe(true)
+    expect(out.cleared).toEqual({ ok: true, removed: 1 })
+    expect(existsSync(cacheDir)).toBe(false)
+    expect(out.after).toBe(false)
   })
 })
 

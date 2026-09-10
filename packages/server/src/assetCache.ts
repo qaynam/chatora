@@ -30,6 +30,9 @@ export interface AssetCacheShape {
 
   /** Forget `key`'s failures — it answered. */
   readonly noteSuccess: (key: string) => Effect.Effect<void>
+
+  /** Forget every failure, so that everything may be asked for again right away. */
+  readonly forgetFailures: Effect.Effect<void>
 }
 
 /**
@@ -141,6 +144,8 @@ export const AssetCacheLive: Layer.Layer<AssetCache> = Layer.effect(
         return yield* Deferred.await(deferred)
       })
 
-    return AssetCache.of({ dedupe, recallFailure, noteFailure, noteSuccess })
+    const forgetFailures: AssetCacheShape['forgetFailures'] = Ref.set(failuresRef, new Map())
+
+    return AssetCache.of({ dedupe, recallFailure, noteFailure, noteSuccess, forgetFailures })
   }),
 )

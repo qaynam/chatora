@@ -1656,6 +1656,28 @@ local ok, err = pcall(function()
     )
     healthy = true
 
+    -- `clear` throws the fetched files away, on the server and here, and draws every page
+    -- again from the network: the same URL is asked for once more.
+    local stub = lsp.request
+    local fetched, cleared = 0, nil
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/clearAssets' then
+        cb(nil, { ok = true, removed = 2 })
+        return
+      end
+      if method == 'chatora/fetchAsset' then
+        fetched = fetched + 1
+      end
+      return stub(method, params, cb)
+    end
+    images.refresh(buf)
+    assert(fetched == 0, 'a URL fetched before is not asked for again on its own')
+    images.clear(function(removed)
+      cleared = removed
+    end)
+    assert(cleared == 2, 'the count of removed files comes back: ' .. tostring(cleared))
+    assert(fetched == 1, 'after a clear the picture is fetched again, got ' .. fetched)
+
     images.backend, lsp.request = orig_backend, orig_request
     vim.cmd('close')
     vim.api.nvim_buf_delete(buf, { force = true })

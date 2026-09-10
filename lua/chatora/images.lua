@@ -887,6 +887,26 @@ function M.redraw(bufnr)
   M.refresh(bufnr)
 end
 
+--- Drop every fetched picture, on the server and here, and draw every page again.
+--- `cb(removed)`, or `cb(nil, why)`.
+function M.clear(cb)
+  lsp.request('chatora/clearAssets', {}, function(err, result)
+    if err or not result or result.ok == false then
+      cb(nil, (result and result.message) or tostring(err))
+      return
+    end
+    path_by_key = {}
+    members_by_key = {}
+    failure_by_key = {}
+    for bufnr in pairs(project_by_bufnr) do
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        M.redraw(bufnr)
+      end
+    end
+    cb(result.removed or 0)
+  end)
+end
+
 local function cleanup_timer(bufnr)
   local timer = timers_by_bufnr[bufnr]
   if timer then
