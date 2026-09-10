@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { CompletionItemKind } from 'vscode-languageserver/node'
 import {
+  asTagName,
   buildCandidateIndex,
   type Candidate,
+  type CompletionDetection,
   candidateItemFields,
   detectCompletion,
   detectCompletionInDocument,
   isLinkBracket,
+  isTaggable,
   mergeCandidates,
   normalizeForMatch,
   rankCandidates,
@@ -326,6 +329,28 @@ describe('normalizeForMatch', () => {
   })
 })
 
+describe('asTagName / isTaggable', () => {
+  test('a space is written as an underscore, and still names the same page', () => {
+    expect(asTagName('Side Kanban')).toBe('Side_Kanban')
+    expect(normalizeForMatch(asTagName('Side Kanban'))).toBe(normalizeForMatch('Side Kanban'))
+  })
+
+  test('each space becomes one underscore, so nothing is collapsed', () => {
+    expect(asTagName('a  b')).toBe('a__b')
+  })
+
+  const TAGGABLE = ['ふつうのページ', 'Side Kanban', 'a-b_c', '100%', 'next.js']
+  test.each(TAGGABLE)('%j can be written as a tag', (title) => {
+    expect(isTaggable(title)).toBe(true)
+  })
+
+  // A tag ends at these, so the page can only be reached as a link.
+  const NOT_TAGGABLE = ['C#入門', 'a [b]', 'a]b', '全角　空白', 'tab\there']
+  test.each(NOT_TAGGABLE)('%j cannot', (title) => {
+    expect(isTaggable(title)).toBe(false)
+  })
+})
+
 describe('rankCandidates', () => {
   const c = (title: string, opts: Partial<Candidate> = {}): Candidate => ({
     title,
@@ -361,9 +386,17 @@ describe('rankCandidates', () => {
     expect(result.map((t) => t.title)).toEqual(['app_store'])
   })
 
-  test('hashtag mode excludes titles containing spaces', () => {
-    const result = rankCandidates(titles, 'app', { noSpaces: true })
-    expect(result.map((t) => t.title)).toEqual(['Application', 'app_store', 'pineapple'])
+  test('tag mode keeps a title with spaces, which a tag writes with underscores', () => {
+    expect(rankCandidates(titles, 'app', { tagsOnly: true }).map((t) => t.title)).toEqual(
+      rankCandidates(titles, 'app').map((t) => t.title),
+    )
+  })
+
+  test('tag mode drops the titles no tag can name', () => {
+    const pool = [c('C#入門'), c('a [b]'), c('全角　空白'), c('ふつうのページ')]
+    expect(rankCandidates(pool, '', { tagsOnly: true }).map((t) => t.title)).toEqual([
+      'ふつうのページ',
+    ])
   })
 
   test('caps results at 50', () => {
@@ -522,6 +555,17 @@ describe('toCompletionItems', () => {
     expect(item?.textEdit).toEqual({
       range: { start: { line: 2, character: 4 }, end: { line: 2, character: 15 } },
       newText: '[foo bar]',
+    })
+  })
+
+  test('a hashtag is inserted with underscores, while the menu shows the title', () => {
+    const tag = detectCompletion('#foo', 4)
+    expect(tag).not.toBeNull()
+    const [item] = toCompletionItems([candidates[0] as Candidate], 2, tag as CompletionDetection)
+    expect(item?.label).toBe('foo bar')
+    expect(item?.textEdit).toEqual({
+      range: { start: { line: 2, character: 0 }, end: { line: 2, character: 4 } },
+      newText: '#foo_bar',
     })
   })
 })

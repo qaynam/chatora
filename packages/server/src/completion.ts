@@ -156,6 +156,18 @@ export const detectCompletionInDocument = (
 export const normalizeForMatch = (s: string): string =>
   s.normalize('NFKC').toLowerCase().replace(/[_ ]/g, ' ')
 
+/**
+ * The title as a tag writes it. Cosense folds a space to `_` in a title (the same folding
+ * `titleKey` does in links.ts), so `#side_kanban` and `[Side Kanban]` reach one page.
+ */
+export const asTagName = (title: string): string => title.replace(/ /g, '_')
+
+/**
+ * True when a tag can name the page at all: a tag ends at whitespace, `[`, `]` or `#`, and
+ * only the space among those has a written form that survives it.
+ */
+export const isTaggable = (title: string): boolean => !/[\s[\]#]/.test(asTagName(title))
+
 const MAX_COMPLETION_ITEMS = 50
 
 /** Results below which the fuzzy tier is worth its full scan of the pool. */
@@ -224,13 +236,15 @@ export const buildCandidateIndex = (titles: readonly TitleEntryLike[]): Candidat
  * key and capped. Tiers stop once the cap is reached — fuzzy has a stricter condition of its
  * own, below. Within a tier, most recently updated first when the pool carries `updated` at
  * all, else API order. An empty query is the whole pool in that same order.
+ *
+ * @param options - `tagsOnly` keeps only the pages a `#tag` can name.
  */
 export const rankCandidates = (
   candidates: readonly Candidate[],
   query: string,
-  options: { noSpaces?: boolean } = {},
+  options: { tagsOnly?: boolean } = {},
 ): Candidate[] => {
-  const pool = options.noSpaces ? candidates.filter((c) => !/\s/.test(c.title)) : candidates
+  const pool = options.tagsOnly ? candidates.filter((c) => isTaggable(c.title)) : candidates
   const hasUpdated = pool.some((c) => c.updated !== undefined)
   const byRecency = (a: Candidate, b: Candidate): number =>
     hasUpdated ? (b.updated ?? 0) - (a.updated ?? 0) : 0
@@ -284,7 +298,7 @@ const buildTextEdit = (
     start: { line, character: detection.replaceStart },
     end: { line, character: detection.replaceEnd },
   },
-  newText: detection.kind === 'link' ? `[${title}]` : `#${title}`,
+  newText: detection.kind === 'link' ? `[${title}]` : `#${asTagName(title)}`,
 })
 
 /** An existing page is a Reference; a link target with no page yet is a Text item marked `(new)`. */
@@ -374,9 +388,9 @@ export const buildCompletionItems = (
 ): Effect.Effect<CompletionItem[], never, SessionState | HttpClient> =>
   Effect.gen(function* () {
     const session = yield* SessionState
-    const noSpaces = detection.kind === 'hashtag'
+    const tagsOnly = detection.kind === 'hashtag'
     const titles = yield* session.getTitles(project).pipe(Effect.catchAll(() => Effect.succeed([])))
-    const local = rankCandidates(candidateIndex(titles), detection.query, { noSpaces })
+    const local = rankCandidates(candidateIndex(titles), detection.query, { tagsOnly })
 
     let matches = local
     if (detection.query !== '') {
@@ -394,7 +408,7 @@ export const buildCompletionItems = (
         Effect.catchAll(() => Effect.succeed([] as readonly VectorPageLike[])),
       )
       let vector = vectorCandidates(vectorPages)
-      if (noSpaces) vector = vector.filter((c) => !/\s/.test(c.title))
+      if (tagsOnly) vector = vector.filter((c) => isTaggable(c.title))
       if (vector.length > 0) matches = mergeCandidates(vector, local)
     }
 
