@@ -10,7 +10,7 @@ import {
   type TextEdit,
 } from 'vscode-languageserver/node'
 import { Asearch } from './asearch'
-import { parseOptions } from './notations'
+import { isDecorationMarker, parseOptions } from './notations'
 import { SessionState } from './state'
 
 export interface CompletionDetection {
@@ -20,6 +20,46 @@ export interface CompletionDetection {
   readonly replaceEnd: number
   /** `replaceStart` up to the cursor — what the client sees as already typed. */
   readonly typedText: string
+}
+
+const ICON_RE = /^.+\.icon(?:\*\d+)?$/
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i
+const URL_RE = /https?:\/\//i
+
+const isFormula = (inner: string): boolean => inner.startsWith('$')
+const isProjectLink = (inner: string): boolean => inner.startsWith('/')
+
+/**
+ * A marker run followed by whitespace, or by nothing at all: the parser waits for a body,
+ * but a menu that opens between `[* ` and its text is the flicker this rule exists to stop.
+ */
+const startsDecoration = (inner: string): boolean => {
+  const chars = [...inner]
+  let i = 0
+  while (i < chars.length && isDecorationMarker(chars[i] as string)) i++
+  if (i === 0) return false
+  const rest = chars.slice(i).join('')
+  return rest === '' || /^\s/.test(rest)
+}
+
+/**
+ * True when the bracket holds a page link, or is on its way to one — the only bracket
+ * completion answers in.
+ *
+ * The other notations (`[* 見出し]`, `[$ x^2]`, `[taro.icon]`, `[ラベル https://…]`,
+ * `[a.png]`, `[/my-project/page]`) are left alone, because accepting a candidate replaces
+ * the whole bracket and would take the notation with it.
+ */
+export const isLinkBracket = (inner: string): boolean => {
+  if (inner === '') return true
+  return !(
+    isFormula(inner) ||
+    startsDecoration(inner) ||
+    ICON_RE.test(inner) ||
+    URL_RE.test(inner) ||
+    IMAGE_EXT_RE.test(inner) ||
+    isProjectLink(inner)
+  )
 }
 
 // Only inside a *closed* pair, matching Cosense, whose editor closes the bracket as soon as
@@ -34,12 +74,13 @@ const detectLink = (lineText: string, character: number): CompletionDetection | 
         const cj = lineText[j]
         if (cj === '[') return null
         if (cj === ']') {
+          // The whole bracket content, not just up to the cursor: Cosense treats the link
+          // text as one unit, so the candidates are the same wherever the cursor sits.
+          const inner = lineText.slice(i + 1, j)
+          if (!isLinkBracket(inner)) return null
           return {
             kind: 'link',
-            // The whole bracket content, not just up to the cursor: Cosense
-            // treats the link text as one unit, so the candidates are the
-            // same wherever the cursor sits inside the pair.
-            query: lineText.slice(i + 1, j),
+            query: inner,
             replaceStart: i,
             replaceEnd: j + 1,
             typedText: lineText.slice(i, character),

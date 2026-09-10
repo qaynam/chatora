@@ -431,6 +431,42 @@ local ok, err = pcall(function()
     assert(completion.link_range('no brackets', 5) == nil, 'expected nil outside a pair')
     assert(completion.link_range('a [unclosed', 5) == nil, 'an unclosed pair is not a link context')
 
+    -- Only a plain link is a completion context, so the menu stays away while a decoration
+    -- is being written — but the link nested inside one still has its own.
+    assert(completion.link_range('[* 見出し]', 3) == nil, 'a decoration is not a link context')
+    local nested_open, nested_close = completion.link_range('[* [foo]]', 7)
+    assert(nested_open == 4 and nested_close == 8, 'a link inside a decoration is still a link')
+
+    for _, case in ipairs({
+      { '', true },
+      { 'foo', true },
+      { '*foo', true },
+      { '.icon', true },
+      { 'next.js', true },
+      { '*', false },
+      { '* ', false },
+      { '* 見出し', false },
+      { '*　全角スペース', false },
+      { '! 重要', false },
+      { '$ x^2', false },
+      { 'taro.icon', false },
+      { 'https://example.com/a', false },
+      { 'foo.png', false },
+      { '/my-project/page', false },
+    }) do
+      assert(
+        completion.is_link_bracket(case[1]) == case[2],
+        ('is_link_bracket(%q) should be %s'):format(case[1], tostring(case[2]))
+      )
+    end
+
+    -- A marker Cosense knows nothing about counts as soon as the user configures it.
+    local notations = require('chatora.config').options.notations
+    assert(completion.is_link_bracket('^ メモ'), 'an unconfigured ^ is just a title')
+    notations['^'] = { name = 'note' }
+    assert(not completion.is_link_bracket('^ メモ'), 'a configured marker makes it a notation')
+    notations['^'] = nil
+
     -- title_of: whatever shape the engine hands an entry over in.
     assert(completion.title_of({ label = 'ページ' }) == 'ページ', 'label should win')
     assert(completion.title_of({ word = '[ページ]' }) == 'ページ', 'the inserted form is bracketed')

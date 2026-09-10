@@ -57,6 +57,9 @@ bun run verify   # typecheck + bun test + build + biome + smoke + E2E
   機能ごとに食い違います
 - `cosense://` の URI 規則は `lua/chatora/uri.lua` と `packages/server/src/uriScheme.ts` の両方に
   あります。片方を変えたら両方を変えます。`tests/uri-parity.test.ts` が一致を確かめます
+- 補完を出す括弧の判定も両方にあります（`completion.ts` の `isLinkBracket` と `completion.lua` の
+  `is_link_bracket`）。素のリンク以外の記法では出しません。`tests/completion-parity.test.ts` が
+  一致を確かめます
 - 折り返した行の字下げ（`breakindent`）は、インデントの文字と固定の shift しか数えません。inline の
   仮想テキストは数えないので、pads が 1 行に足すセルは常に 1（中点）でなければ、折り返した行が
   本文からずれます

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 import { CompletionItemKind } from 'vscode-languageserver/node'
 import {
   buildCandidateIndex,
@@ -6,6 +6,7 @@ import {
   candidateItemFields,
   detectCompletion,
   detectCompletionInDocument,
+  isLinkBracket,
   mergeCandidates,
   normalizeForMatch,
   rankCandidates,
@@ -13,6 +14,7 @@ import {
   toCompletionItems,
   vectorCandidates,
 } from './completion'
+import { setNotations } from './notations'
 
 const cand = (title: string, exists = true): Candidate => ({
   title,
@@ -130,6 +132,117 @@ describe('detectCompletion — link', () => {
   test('[[ is not a link trigger (bold/large-image syntax)', () => {
     const line = '[[foo'
     expect(detectCompletion(line, line.length)).toBeNull()
+  })
+})
+
+describe('isLinkBracket — a plain link, and nothing else', () => {
+  const LINKS = [
+    ['', 'the pair Cosense just closed for you'],
+    ['   ', 'spaces alone are still an empty link'],
+    ['foo', 'a title'],
+    ['sakura プロモーション', 'a title with a space in it'],
+    ['*foo', 'no space after the marker, so it is part of the title'],
+    ['-foo', 'the same for a strike marker'],
+    ['_private', 'and for an underscore'],
+    ['#tag', 'a title that opens with a hash'],
+    ['C#入門', 'a hash inside the title'],
+    ['100%', 'a percent at the end'],
+    ['a/b', 'a slash that is not the first character'],
+    ['.icon', 'nothing for .icon to hang on, so it is a title'],
+    ['taro.icons', 'not the icon notation'],
+    ['next.js', 'an extension that is not an image'],
+    ['foo.jpeg?w=1', 'the image extension is not at the end'],
+  ] as const
+  test.each(LINKS)('%j completes — %s', (inner) => {
+    expect(isLinkBracket(inner)).toBe(true)
+  })
+
+  const NOTATIONS = [
+    ['*', 'a marker with nothing after it yet'],
+    ['* ', 'the marker and its space, before the body is typed'],
+    ['* 見出し', 'bold'],
+    ['*** 大きく', 'a size'],
+    ['*-/ 混ぜる', 'a combined run'],
+    ['/ 斜体', 'italic'],
+    ['- 打ち消し', 'strike'],
+    ['_ 下線', 'underline'],
+    ['*　全角スペース', 'a full-width space after the run'],
+    ['! 重要', 'a Cosense decoration character with no notation configured'],
+    ['| 見出し', 'the same for a bar'],
+    ['$', 'a formula, before its body'],
+    ['$ x^2', 'a formula'],
+    ['taro.icon', 'an icon'],
+    ['taro.icon*5', 'a repeated icon'],
+    ['https://example.com/a', 'a bare URL'],
+    ['ラベル https://example.com/a', 'a labelled URL'],
+    ['HTTPS://EXAMPLE.COM/A', 'an upper-case scheme'],
+    ['foo.png', 'an image named by its extension'],
+    ['foo.PNG', 'the extension in upper case'],
+    ['/my-project/page', 'a page in another project'],
+    ['/my-project', 'another project itself'],
+  ] as const
+  test.each(NOTATIONS)('%j does not complete — %s', (inner) => {
+    expect(isLinkBracket(inner)).toBe(false)
+  })
+})
+
+describe('isLinkBracket — configured notation markers', () => {
+  afterEach(() => setNotations([]))
+
+  test('a marker outside Cosense set counts only once it is configured', () => {
+    expect(isLinkBracket('@ メモ')).toBe(true)
+    setNotations([{ marker: '@', name: 'note' }])
+    expect(isLinkBracket('@ メモ')).toBe(false)
+  })
+
+  test('a configured marker still needs the space that makes it a run', () => {
+    setNotations([{ marker: '@', name: 'note' }])
+    expect(isLinkBracket('@メモ')).toBe(true)
+  })
+})
+
+describe('detectCompletion — notations do not trigger', () => {
+  test('the reported case: [* ] with the cursor after the marker', () => {
+    expect(detectCompletion('[* ]', 3)).toBeNull()
+  })
+
+  test('anywhere inside a decoration, not just after the marker', () => {
+    const line = '[* 見出し]'
+    for (const character of [1, 2, 3, 4, 5]) {
+      expect(detectCompletion(line, character)).toBeNull()
+    }
+  })
+
+  test('a link nested in a decoration completes on its own pair', () => {
+    const line = '[* [foo]]'
+    expect(detectCompletion(line, 7)).toEqual({
+      kind: 'link',
+      query: 'foo',
+      replaceStart: 3,
+      replaceEnd: 8,
+      typedText: '[foo',
+    })
+  })
+
+  test('an empty pair nested in a decoration is where typing starts', () => {
+    expect(detectCompletion('[* []]', 4)).toEqual({
+      kind: 'link',
+      query: '',
+      replaceStart: 3,
+      replaceEnd: 5,
+      typedText: '[',
+    })
+  })
+
+  test('the cursor between the decoration and its nested link does not trigger', () => {
+    // "[* |[foo]]" — inside the decoration, which is not a link.
+    expect(detectCompletion('[* [foo]]', 3)).toBeNull()
+  })
+
+  test('a decoration on a line that also holds a link leaves the link alone', () => {
+    const line = '[* 太字] と [ページ]'
+    const character = line.indexOf('ページ') + 3
+    expect(detectCompletion(line, character)?.query).toBe('ページ')
   })
 })
 
