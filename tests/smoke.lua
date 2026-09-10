@@ -1507,6 +1507,50 @@ local ok, err = pcall(function()
     config.options.image.backend = orig_backend
   end
 
+  -- image.nvim takes a size, not a cap: a picture is drawn at its own size in cells, or at
+  -- the cap where that is smaller, so a small thumb stays small and a big capture stops at
+  -- `image.height` rows instead of at half the window.
+  do
+    local images = require('chatora.images')
+    local config = require('chatora.config')
+    local orig_backend, orig_image, orig_term = config.options.image.backend, package.loaded['image'], package.loaded['image.utils.term']
+    local rendered = {}
+    package.loaded['image.utils.term'] = {
+      get_size = function()
+        return { cell_width = 10, cell_height = 20 }
+      end,
+    }
+    local pixels = { width = 2500, height = 2500 }
+    package.loaded['image'] = {
+      from_file = function(_, opts)
+        return {
+          image_width = pixels.width,
+          image_height = pixels.height,
+          geometry = { x = opts.x, y = opts.y, width = opts.width, height = opts.height },
+          render = function(self)
+            rendered[#rendered + 1] = { width = self.geometry.width, height = self.geometry.height }
+          end,
+          clear = function() end,
+        }
+      end,
+    }
+    config.options.image.backend = 'image_nvim'
+    vim.cmd('new')
+    local buf = vim.api.nvim_get_current_buf()
+    local geom = { row = 1, byte_col = 0, byte_end = 0, screen_col = 0, indent_col = 0, indent_screen_col = 0 }
+    local backend = images.backend()
+    assert(backend and backend.place(buf, '/dev/null', geom, { max_height = 20, max_width = 80 }), 'image.nvim is placed')
+    assert(vim.deep_equal(rendered[1], { width = 80, height = 20 }), 'a big capture is cut to the cap: ' .. vim.inspect(rendered[1]))
+    pixels = { width = 60, height = 60 }
+    backend.place(buf, '/dev/null', geom, { max_height = 20, max_width = 80 })
+    assert(vim.deep_equal(rendered[2], { width = 6, height = 3 }), 'a thumb keeps its own size: ' .. vim.inspect(rendered[2]))
+    backend.place(buf, '/dev/null', geom, { height = 1 })
+    assert(vim.deep_equal(rendered[3], { width = nil, height = 1 }), 'an inline row is one row, as asked: ' .. vim.inspect(rendered[3]))
+    vim.cmd('close')
+    vim.api.nvim_buf_delete(buf, { force = true })
+    config.options.image.backend, package.loaded['image'], package.loaded['image.utils.term'] = orig_backend, orig_image, orig_term
+  end
+
   -- images: a page that changes one line keeps the pictures that did not move, redraws the
   -- one that did, and tries again when the backend accepted a placement that never arrived.
   do
