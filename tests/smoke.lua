@@ -460,6 +460,15 @@ local ok, err = pcall(function()
       )
     end
 
+    -- The tag half of the same rule. Without it a Japanese query closes the menu after the
+    -- first keystroke, because engines only re-trigger on their own ASCII keyword characters.
+    local tag_open, tag_close = completion.tag_range('#ページ', 10)
+    assert(tag_open == 1 and tag_close == 10, 'a tag is a completion context')
+    assert(completion.tag_range('foo#bar', 7) == nil, 'a # inside a word opens no tag')
+    assert(completion.tag_range('#tag　の', 10) == nil, 'a full-width space ends the run')
+    assert(completion.completion_range('a [foo] b', 5) == 3, 'a bracket answers before a tag')
+    assert(completion.completion_range('plain text', 5) == nil, 'neither, so no menu')
+
     -- A marker Cosense knows nothing about counts as soon as the user configures it.
     local notations = require('chatora.config').options.notations
     assert(completion.is_link_bracket('^ メモ'), 'an unconfigured ^ is just a title')

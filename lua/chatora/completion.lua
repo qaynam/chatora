@@ -1,7 +1,8 @@
--- Keeps link completion alive through multi-word queries: clients end their
--- menu at a space, so re-open it whenever the cursor is inside a link bracket
--- and nothing is showing. (The other half of the problem — clients re-filtering
--- the server's fuzzy ranking away — is handled server-side in completion.ts.)
+-- Keeps completion alive where the client would not ask again: engines re-trigger
+-- on their own keyword characters, which are ASCII, so a Japanese query stops the
+-- menu after the first keystroke. Re-open it whenever the cursor is somewhere the
+-- server would answer. (The other half of the problem — clients re-filtering the
+-- server's fuzzy ranking away — is handled server-side in completion.ts.)
 local M = {}
 
 local uv = vim.uv or vim.loop
@@ -132,8 +133,49 @@ function M.link_range(line, col)
   return nil
 end
 
-local function in_link_context(line, col)
-  return M.link_range(line, col) ~= nil
+local IDEOGRAPHIC_SPACE = '　'
+
+--- True when the character *ending* at byte `i` is whitespace. Scanning backwards always
+--- meets a character's last byte first, so the 3-byte 　 is recognised where `%s` stops.
+local function space_ends_at(line, i)
+  if line:sub(i, i):match('%s') then
+    return true
+  end
+  return line:sub(i - #IDEOGRAPHIC_SPACE + 1, i) == IDEOGRAPHIC_SPACE
+end
+
+--- The `#tag` the cursor sits in, as the 1-based byte position of the `#` and of the cursor,
+--- or nil. Mirrors the server's detectHashtag: the run stops at whitespace or a bracket, and
+--- a `#` only opens a tag at the start of the line or after whitespace.
+function M.tag_range(line, col)
+  local i = col
+  while i >= 1 do
+    local ch = line:sub(i, i)
+    if ch == '#' then
+      break
+    end
+    if ch == '[' or ch == ']' or space_ends_at(line, i) then
+      return nil
+    end
+    i = i - 1
+  end
+  if i < 1 then
+    return nil
+  end
+  if i > 1 and not space_ends_at(line, i - 1) then
+    return nil
+  end
+  return i, col
+end
+
+--- The range a completion would replace at the cursor, or nil where none would be offered.
+--- Both halves of the server's detectCompletion, in the order it tries them.
+function M.completion_range(line, col)
+  local open, close = M.link_range(line, col)
+  if open then
+    return open, close
+  end
+  return M.tag_range(line, col)
 end
 
 local function show_menu(bufnr)
@@ -244,7 +286,7 @@ function M.attach(bufnr)
         return
       end
       local col = vim.api.nvim_win_get_cursor(0)[2]
-      if col == 0 or not in_link_context(vim.api.nvim_get_current_line(), col) then
+      if col == 0 or M.completion_range(vim.api.nvim_get_current_line(), col) == nil then
         stop()
         return
       end
