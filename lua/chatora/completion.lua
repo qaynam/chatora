@@ -1,7 +1,7 @@
 -- Keeps link completion alive through multi-word queries: clients end their
--- menu at a space, so re-open it whenever the cursor is inside a bracket and
--- nothing is showing. (The other half of the problem — clients re-filtering the
--- server's fuzzy ranking away — is handled server-side in completion.ts.)
+-- menu at a space, so re-open it whenever the cursor is inside a link bracket
+-- and nothing is showing. (The other half of the problem — clients re-filtering
+-- the server's fuzzy ranking away — is handled server-side in completion.ts.)
 local M = {}
 
 local uv = vim.uv or vim.loop
@@ -38,7 +38,8 @@ local function utf8_char(s, i)
   return s:sub(i, i + len - 1), i + len
 end
 
---- A marker run, then whitespace — or nothing after it yet, as while `[* ]` is being typed.
+--- A marker run followed by whitespace, or by nothing at all: the parser waits for a body,
+--- but a menu that opens between `[* ` and its text is the flicker this rule exists to stop.
 local function starts_decoration(inner)
   local notations = require('chatora.config').options.notations or {}
   local i = 1
@@ -57,30 +58,42 @@ local function starts_decoration(inner)
   return rest == '' or rest:match('^%s') ~= nil or rest:match('^　') ~= nil
 end
 
+local function is_formula(inner)
+  return inner:sub(1, 1) == '$'
+end
+
+local function is_icon(inner)
+  return inner:match('^.+%.icon$') ~= nil or inner:match('^.+%.icon%*%d+$') ~= nil
+end
+
+local function has_url(inner)
+  return inner:lower():find('https?://') ~= nil
+end
+
+local function is_image(inner)
+  local ext = inner:match('%.(%a+)$')
+  return ext ~= nil and IMAGE_EXTS[ext:lower()] == true
+end
+
+local function is_project_link(inner)
+  return inner:sub(1, 1) == '/'
+end
+
 --- True when the bracket content is a page link, or on its way to one — the only bracket
---- completion answers in. Mirrors `isLinkBracket` in packages/server/src/completion.ts;
---- tests/completion-parity.test.ts holds the two together.
+--- completion answers in. Mirrors `isLinkBracket` in packages/server/src/completion.ts, which
+--- carries the reasoning; tests/completion-parity.test.ts holds the two together.
 function M.is_link_bracket(inner)
   if inner == '' then
     return true
   end
-  if inner:sub(1, 1) == '$' then -- [$ x^2]
-    return false
-  end
-  if starts_decoration(inner) then -- [* 見出し]
-    return false
-  end
-  if inner:match('^.+%.icon$') or inner:match('^.+%.icon%*%d+$') then -- [taro.icon*5]
-    return false
-  end
-  if inner:lower():find('https?://') then -- [ラベル https://example.com]
-    return false
-  end
-  local ext = inner:match('%.(%a+)$')
-  if ext and IMAGE_EXTS[ext:lower()] then -- [a.png]
-    return false
-  end
-  return inner:sub(1, 1) ~= '/' -- [/my-project/page]
+  return not (
+    is_formula(inner)
+    or starts_decoration(inner)
+    or is_icon(inner)
+    or has_url(inner)
+    or is_image(inner)
+    or is_project_link(inner)
+  )
 end
 
 --- The `[...]` the cursor sits inside, as the 1-based byte positions of its brackets, or

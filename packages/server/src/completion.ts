@@ -26,7 +26,13 @@ const ICON_RE = /^.+\.icon(?:\*\d+)?$/
 const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i
 const URL_RE = /https?:\/\//i
 
-/** A marker run, then whitespace — or nothing after it yet, as while `[* ]` is being typed. */
+const isFormula = (inner: string): boolean => inner.startsWith('$')
+const isProjectLink = (inner: string): boolean => inner.startsWith('/')
+
+/**
+ * A marker run followed by whitespace, or by nothing at all: the parser waits for a body,
+ * but a menu that opens between `[* ` and its text is the flicker this rule exists to stop.
+ */
 const startsDecoration = (inner: string): boolean => {
   const chars = [...inner]
   let i = 0
@@ -37,22 +43,23 @@ const startsDecoration = (inner: string): boolean => {
 }
 
 /**
- * True when the bracket holds a page link or is on its way to one — the only bracket
- * completion answers in. The other notations are left alone: their candidates would be
- * nonsense, and accepting one replaces the whole bracket, taking the notation with it.
+ * True when the bracket holds a page link, or is on its way to one — the only bracket
+ * completion answers in.
  *
- * The cases mirror the parser's bracket rules, with one addition: an empty body still counts
- * as a decoration (`[* ]`), because waiting for the body would flash the menu open between
- * the marker and the text — the flicker this rule exists to stop.
+ * The other notations (`[* 見出し]`, `[$ x^2]`, `[taro.icon]`, `[ラベル https://…]`,
+ * `[a.png]`, `[/my-project/page]`) are left alone, because accepting a candidate replaces
+ * the whole bracket and would take the notation with it.
  */
 export const isLinkBracket = (inner: string): boolean => {
   if (inner === '') return true
-  if (inner.startsWith('$')) return false // [$ x^2]
-  if (startsDecoration(inner)) return false // [* 見出し]
-  if (ICON_RE.test(inner)) return false // [taro.icon*5]
-  if (URL_RE.test(inner)) return false // [ラベル https://example.com]
-  if (IMAGE_EXT_RE.test(inner)) return false // [a.png]
-  return !inner.startsWith('/') // [/my-project/page]
+  return !(
+    isFormula(inner) ||
+    startsDecoration(inner) ||
+    ICON_RE.test(inner) ||
+    URL_RE.test(inner) ||
+    IMAGE_EXT_RE.test(inner) ||
+    isProjectLink(inner)
+  )
 }
 
 // Only inside a *closed* pair, matching Cosense, whose editor closes the bracket as soon as

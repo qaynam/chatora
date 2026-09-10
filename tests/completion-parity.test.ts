@@ -1,8 +1,7 @@
-// Which bracket completion answers in is decided twice: the server refuses everything but a
-// plain link (isLinkBracket in packages/server/src/completion.ts), and the client re-opens the
-// menu on the same rule (link_range in lua/chatora/completion.lua). If the two drift apart the
-// client re-opens a menu the server will not fill, which is the flicker both rules exist to
-// stop — so the same cases are run through both here.
+// Which bracket completion answers in is decided twice: by isLinkBracket for the server's
+// answer, and by link_range for the client's re-opening of the menu. A client that re-opens
+// where the server stays quiet is the flicker both rules exist to stop, so the same cases go
+// through both sides here.
 import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -52,7 +51,7 @@ const GROUPS: readonly Group[] = [
       ['[ラベル https://exa', 'mple.com/a]'],
       ['[foo.pn', 'g]'],
       ['[/my-project/pa', 'ge]'],
-      // Pairs that are not pairs.
+      // No closed pair around the cursor.
       ['[[fo', 'o]]'],
       ['[unclosed', ''],
       ['[foo]', ' bar'],
