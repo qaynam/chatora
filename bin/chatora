@@ -5,17 +5,47 @@
 #   chatora -p my-project                          # sidebar on that project, switching to
 #                                                  # whichever stored account has it
 #   chatora https://scrapbox.io/proj/Page_Title    # straight to that page
+#   chatora open https://scrapbox.io/proj/Page     # the same, spelled like :Chatora open
 #
-# A leading Cosense URL is handed to :Chatora; anything else passes through to nvim.
+# Whatever is left passes through to nvim (`chatora -p proj notes.md`). A word that is
+# neither a URL nor a file is refused rather than handed to nvim as a file name, which is
+# what `chatora toggle` used to do, silently.
 set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+使い方: chatora [-p <project>] [open] [<url>] [nvim の引数...]
+
+  chatora                                    サイドバー（設定のプロジェクト）
+  chatora -p my-project                      そのプロジェクトのサイドバー
+  chatora https://scrapbox.io/proj/Page      そのページ（open を前に付けても同じ）
+  chatora -p my-project notes.md             残りの引数は nvim へ
+USAGE
+}
+
+die() {
+  echo "chatora: $1" >&2
+  echo 'chatora: 使い方は chatora --help で見られます' >&2
+  exit 2
+}
+
+is_url() {
+  case "$1" in
+    http://* | https://* | cosense://*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 project=
 while :; do
   case "${1-}" in
+    -h | --help)
+      usage
+      exit 0
+      ;;
     -p | --project)
       if [ $# -lt 2 ] || [ -z "$2" ]; then
-        echo "chatora: $1 needs a project name" >&2
-        exit 2
+        die "$1 needs a project name"
       fi
       project=$2
       shift 2
@@ -34,12 +64,34 @@ while :; do
   esac
 done
 
+if [ "${1-}" = open ]; then
+  if [ $# -lt 2 ] || ! is_url "$2"; then
+    die 'open のあとに Cosense のページの URL を書いてください'
+  fi
+  shift
+fi
+
+# A URL is only ever the first thing after the options: further along, nvim would open it
+# as a file named after it, and `-o` (nvim's own horizontal split) makes that easy to do.
+for arg in "${@:2}"; do
+  if is_url "$arg"; then
+    die "URL はオプションのすぐあとに 1 つだけ置いてください: chatora ${project:+-p $project }$arg"
+  fi
+done
+
+if is_url "${1-}"; then
+  # The URL names its own project (and so its account); -p has nothing left to say.
+  url=$1
+  shift
+  exec nvim "+Chatora open $url" "$@"
+fi
+
 case "${1-}" in
-  http://* | https://* | cosense://*)
-    # The URL names its own project (and so its account); -p has nothing left to say.
-    url=$1
-    shift
-    exec nvim "+Chatora open $url" "$@"
+  '' | -* | +* | */* | *.*) ;;
+  *)
+    if [ ! -e "$1" ]; then
+      die "'$1' は URL でもファイルでもありません。ページなら chatora <url>、ファイルなら ./$1 と書いてください"
+    fi
     ;;
 esac
 

@@ -723,6 +723,7 @@ alias chatora='/path/to/chatora/bin/chatora'
 chatora                                       # サイドバー（設定のプロジェクト）
 chatora -p my-project                         # そのプロジェクトを開く
 chatora https://scrapbox.io/proj/Page_Title   # そのページを開く
+chatora open https://scrapbox.io/proj/Page    # 同じ（:Chatora open と同じ綴り）
 ```
 
 `-p`（`--project`）で渡したプロジェクトが今のアカウントに無ければ、保存済みの他アカウントを順に
@@ -730,7 +731,10 @@ chatora https://scrapbox.io/proj/Page_Title   # そのページを開く
 プロジェクト名からアカウントを決めます。どのアカウントにも無いプロジェクトはそのまま開きます。
 公開プロジェクトなら、読み取り専用で読めます。
 
-残りの引数は、そのまま nvim に渡ります（`chatora -p proj notes.md`）。
+残りの引数は、そのまま nvim に渡ります（`chatora -p proj notes.md`）。ただし URL でもファイルでも
+ない単語（`chatora toggle` など）は、nvim にファイル名として渡さずに断ります。URL はオプションの
+すぐあとに 1 つだけで、後ろに置いても断ります（`-o` は nvim の横分割なので、`chatora -o <url>` は
+URL をファイルとして開いてしまうためです）。`chatora --help` で使い方が出ます。
 
 ### Slack や Chrome のリンクを chatora で開く（macOS）
 
@@ -758,6 +762,14 @@ chatora 自身がブラウザで開く操作（外部リンクの `gd` や、ペ
 対象にする origin は `~/.local/share/chatora/url-handler/origins` に 1 行 1 件で書きます（既定は
 `scrapbox.io`）。今どうなっているかは `chatora-url-handler status` で見え、元に戻すのは
 `chatora-url-handler uninstall` です。
+
+Cosense 以外のリンクを渡すブラウザは、`install` のときにターミナルで一覧から番号で選びます
+（今の既定ブラウザに印が付いていて、Enter でそのままです）。あとから変えるのは
+`chatora-url-handler browser` で、同じ一覧が出ます。一覧は、https の URL を受け取って HTML を開く
+アプリ、つまりシステム設定がブラウザとして出すものと Safari です。スクリプトから使うときは
+`browser 'Google Chrome'` や `install --browser com.google.Chrome` のように、アプリ名か bundle id を
+直接渡せます。無いアプリを指定すると、そう言って何も変えません。控えたブラウザがあとで消えて
+いても、Safari に渡すので、リンクが開かないことはありません。
 
 配布物をダウンロードしないので、署名も公証も要りません。ダウンロードしていないアプリには
 Gatekeeper が見る quarantine 属性が付かず、`osacompile` が ad-hoc 署名まで済ませるからです。

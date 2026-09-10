@@ -1,7 +1,7 @@
 #!/bin/sh
 # Makes clicking a Cosense link open the page in chatora instead of a browser.
 #
-#   chatora-url-handler <install|status|uninstall>
+#   chatora-url-handler <install [--browser <app>]|status|uninstall|browser [<app>]>
 #
 # macOS routes links by application, so the handler is one: AppleScript that hands the URL to
 # `chatora-open`. See docs/FEATURES.md for why it needs no signing.
@@ -10,6 +10,8 @@ set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 data_dir=${CHATORA_URL_HANDLER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/chatora/url-handler}
 app_dir=${CHATORA_URL_HANDLER_APPS:-$HOME/Applications}
+# Where installed browsers are looked for, colon-separated.
+app_dirs=${CHATORA_URL_HANDLER_APP_DIRS:-/Applications:$HOME/Applications}
 app="$app_dir/Chatora Open.app"
 bundle_id=dev.qaynam.chatora.open
 lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
@@ -17,6 +19,92 @@ lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 die() {
   echo "chatora-url-handler: $1" >&2
   exit 1
+}
+
+usage() {
+  cat <<USAGE
+使い方: chatora-url-handler <install|status|uninstall|browser> [...]
+
+  install [--browser <app>]  Cosense のリンクを chatora で開くようにする
+  status                     今どうなっているか
+  uninstall                  元に戻す
+  browser [<app>]            Cosense 以外のリンクを渡すブラウザを、一覧から番号で選ぶ
+
+<app> を書くと一覧を出さずにそれにします。アプリ名か bundle id です
+（'Google Chrome' / com.google.Chrome）。
+USAGE
+}
+
+# A usage mistake, as opposed to something the machine refused.
+misuse() {
+  echo "chatora-url-handler: $1" >&2
+  usage >&2
+  exit 2
+}
+
+# The installed browsers, one per line as `<bundle id>\t<name>`: what takes an https URL
+# and opens HTML documents, which is what System Settings offers as a browser. Safari is
+# listed outright, since its bundle is not under /Applications on recent macOS, and the
+# handler leaves itself out.
+list_browsers() {
+  {
+    printf 'com.apple.Safari\tSafari\n'
+    printf '%s\n' "$app_dirs" | tr ':' '\n' | while read -r dir; do
+      for app in "$dir"/*.app; do
+        plist="$app/Contents/Info.plist"
+        [ -f "$plist" ] || continue
+        plutil -extract CFBundleURLTypes json -o - "$plist" 2>/dev/null | grep -q '"https"' || continue
+        plutil -extract CFBundleDocumentTypes json -o - "$plist" 2>/dev/null | grep -q 'public.html' || continue
+        id=$(plutil -extract CFBundleIdentifier raw -o - "$plist" 2>/dev/null) || continue
+        printf '%s\t%s\n' "$id" "$(basename "$app" .app)"
+      done
+    done
+  } | awk -F'\t' -v self="$bundle_id" '$1 != "" && $1 != self && !seen[$1]++'
+}
+
+# Show the installed browsers and read a number from stdin; `$1` is the one a bare Enter
+# keeps. The menu goes to stderr so the chosen id is all that comes back to the caller.
+pick_browser() {
+  browsers=$(list_browsers)
+  [ -n "$browsers" ] || die 'ブラウザが見つかりません'
+  tab=$(printf '\t')
+  n=0
+  default_n=
+  echo 'Cosense 以外のリンクを渡すブラウザを選んでください:' >&2
+  while IFS="$tab" read -r id name; do
+    n=$((n + 1))
+    mark=' '
+    if [ "$id" = "${1:-}" ]; then
+      mark='*'
+      default_n=$n
+    fi
+    printf '  %s %2d) %s  (%s)\n' "$mark" "$n" "$name" "$id" >&2
+  done <<BROWSERS
+$browsers
+BROWSERS
+  # Braced, and built apart from the printf: /bin/sh reads a multibyte character right after
+  # a parameter name as part of the name.
+  hint=
+  [ -z "$default_n" ] || hint="（Enter で ${default_n}）"
+  printf '番号%s: ' "$hint" >&2
+  read -r choice || choice=
+  [ -n "$choice" ] || choice=$default_n
+  case $choice in
+    '') misuse '番号を入力してください' ;;
+    *[!0-9]*) die "番号で答えてください: $choice" ;;
+  esac
+  picked=$(printf '%s\n' "$browsers" | sed -n "${choice}p" | cut -f1)
+  [ -n "$picked" ] || die "その番号はありません: $choice"
+  echo "$picked"
+}
+
+# The bundle id of an application named by its name or its id. AppleScript resolves it
+# through LaunchServices without launching it (measured: Calculator stays closed).
+resolve_browser() {
+  [ "$1" != "$bundle_id" ] || die 'Chatora Open 自身は選べません'
+  osascript -e "id of application \"$1\"" 2>/dev/null ||
+    osascript -e "id of application id \"$1\"" 2>/dev/null ||
+    die "ブラウザが見つかりません: $1（アプリ名か bundle id で書きます。例: 'Google Chrome'、com.google.Chrome）"
 }
 
 [ "$(uname -s)" = Darwin ] || die 'this only exists on macOS; elsewhere the browser is the way in'
@@ -30,15 +118,43 @@ current_browser() {
 }
 
 install_handler() {
+  browser_arg=
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --browser)
+        [ $# -ge 2 ] && [ -n "$2" ] || misuse '--browser にはアプリ名か bundle id が要ります'
+        browser_arg=$2
+        shift 2
+        ;;
+      --browser=*)
+        browser_arg=${1#--browser=}
+        shift
+        ;;
+      *) misuse "install に知らない引数があります: $1" ;;
+    esac
+  done
   mkdir -p "$data_dir" "$app_dir"
 
   # Never record an empty or self-referential fallback: the handler would then hand the URL
-  # to the system default, which by then is the handler itself.
-  previous=$(current_browser)
-  case $previous in
-    '' | "$bundle_id") previous=$(cat "$data_dir/fallback" 2>/dev/null || true) ;;
-  esac
-  [ -n "$previous" ] || previous=com.apple.Safari
+  # to the system default, which by then is the handler itself. One the reader chose, now
+  # or with `browser` before, is kept over whatever the system default happens to be; at a
+  # terminal the reader is shown the guess and asked, since a wrong one is only noticed
+  # when a link opens somewhere odd.
+  if [ -n "$browser_arg" ]; then
+    previous=$(resolve_browser "$browser_arg")
+  else
+    previous=$(cat "$data_dir/fallback" 2>/dev/null || true)
+    if [ -z "$previous" ]; then
+      previous=$(current_browser)
+      case $previous in
+        "$bundle_id") previous= ;;
+      esac
+    fi
+    [ -n "$previous" ] || previous=com.apple.Safari
+    if [ -t 0 ]; then
+      previous=$(pick_browser "$previous")
+    fi
+  fi
   printf '%s\n' "$previous" >"$data_dir/fallback"
   [ -f "$data_dir/origins" ] || printf 'scrapbox.io\n' >"$data_dir/origins"
 
@@ -87,7 +203,7 @@ APPLESCRIPT
 インストールしました。
 
   アプリ        $app
-  ブラウザ      $previous  （Cosense 以外のリンクはここへ）
+  ブラウザ      $previous  （Cosense 以外のリンクはここへ。chatora-url-handler browser <app> で変えられます）
   対象の origin $(tr '\n' ' ' <"$data_dir/origins")
 
 最後の 1 手だけ手動です（macOS が API を閉じているため）:
@@ -111,6 +227,18 @@ uninstall_handler() {
 MESSAGE
 }
 
+set_browser() {
+  [ $# -le 1 ] || misuse 'browser に渡せるアプリは 1 つです'
+  if [ $# -eq 1 ] && [ -n "$1" ]; then
+    id=$(resolve_browser "$1")
+  else
+    id=$(pick_browser "$(cat "$data_dir/fallback" 2>/dev/null || true)")
+  fi
+  mkdir -p "$data_dir"
+  printf '%s\n' "$id" >"$data_dir/fallback"
+  echo "ブラウザ      $id  （Cosense 以外のリンクはここへ。消えていたら Safari に行きます）"
+}
+
 status_handler() {
   if [ -d "$app" ]; then
     echo "アプリ        $app"
@@ -126,18 +254,20 @@ status_handler() {
   fi
 }
 
-case ${1:-} in
-  install) install_handler ;;
-  uninstall) uninstall_handler ;;
-  status) status_handler ;;
-  *)
-    cat <<USAGE
-使い方: chatora-url-handler <install|status|uninstall>
-
-  install    Cosense のリンクを chatora で開くようにする
-  status     今どうなっているか
-  uninstall  元に戻す
-USAGE
-    exit 2
+command=${1:-}
+[ $# -eq 0 ] || shift
+case $command in
+  install) install_handler "$@" ;;
+  uninstall)
+    [ $# -eq 0 ] || misuse "uninstall は引数を取りません: $1"
+    uninstall_handler
     ;;
+  status)
+    [ $# -eq 0 ] || misuse "status は引数を取りません: $1"
+    status_handler
+    ;;
+  browser) set_browser "$@" ;;
+  -h | --help) usage ;;
+  '') misuse 'サブコマンドを 1 つ書いてください' ;;
+  *) misuse "知らないサブコマンドです: $command" ;;
 esac
