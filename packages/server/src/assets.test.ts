@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { Credential } from '@chatora/core'
 import { CredentialStore, HttpClient } from '@chatora/core'
 import { Effect, Layer, Option, TestClock, TestContext } from 'effect'
+import { cacheKey, findCached } from './assetStore'
 import { type AssetCache, AssetCacheLive, composeAssets, fetchAsset, thumbnailFile } from './assets'
 import { makeSessionStateLayer, type SessionState } from './state'
 
@@ -596,6 +597,20 @@ describe('fetchAsset', () => {
     expect(first).toEqual(second)
     expect(first.ok).toBe(true)
     expect(calls).toHaveLength(1)
+  })
+})
+
+describe('a Gyazo thumb', () => {
+  test('is fetched as it is, under a cache key of its own', async () => {
+    const url = 'https://gyazo.com/dddddddddddddddddddddddd/thumb/60'
+    const { layer: httpLayer, calls } = testHttpClient(() => png(1))
+    const { layer: credLayer } = testCredentialStore(Option.some(PAT))
+    const result = await runOnce(fetchAsset({ project: 'p', url }), httpLayer, credLayer)
+    expect(result.ok).toBe(true)
+    expect(calls.map((call) => call.url)).toEqual([url])
+    // An entry under the URL's own hash would be the full capture the URL resolves to
+    // through the proxy; this fetch neither reads nor writes that entry.
+    expect(await Effect.runPromise(findCached(cacheDir, cacheKey(url)))).toEqual(Option.none())
   })
 })
 
