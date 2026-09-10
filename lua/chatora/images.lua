@@ -161,6 +161,27 @@ end
 -- `align_indent` asks for instead: stacked pictures placed under their own notation would
 -- step across the screen.
 
+--- image.nvim takes a size, not a cap. Hand it the picture's own size in cells, or the cap
+--- where that is smaller; it keeps the aspect ratio from there.
+local function fit_image_nvim(o, opts)
+  if not (opts and (opts.max_height or opts.max_width)) then
+    return
+  end
+  local ok, term = pcall(require, 'image.utils.term')
+  local size = ok and type(term) == 'table' and type(term.get_size) == 'function' and term.get_size() or nil
+  if not (size and (size.cell_width or 0) > 0 and (size.cell_height or 0) > 0) then
+    return
+  end
+  if not ((o.image_width or 0) > 0 and (o.image_height or 0) > 0) then
+    return
+  end
+  local scale = (o.global_state and o.global_state.options and o.global_state.options.scale_factor) or 1
+  local rows = math.max(1, math.ceil(o.image_height / size.cell_height * scale))
+  local cols = math.max(1, math.ceil(o.image_width / size.cell_width * scale))
+  o.geometry.height = opts.max_height and math.min(rows, opts.max_height) or nil
+  o.geometry.width = opts.max_width and math.min(cols, opts.max_width) or nil
+end
+
 --- 3rd/image.nvim. Geometry x/y are 0-based, and an inline placement only
 --- follows the buffer when bound to both a window and a buffer.
 local function image_nvim_backend()
@@ -185,12 +206,11 @@ local function image_nvim_backend()
         x = geom.align_indent and geom.indent_screen_col or geom.screen_col,
         y = geom.row - 1,
         height = opts and opts.height or nil,
-        max_height = opts and opts.max_height or nil,
-        max_width = opts and opts.max_width or nil,
       })
       if not ok_new or not o then
         return nil
       end
+      fit_image_nvim(o, opts)
       pcall(o.render, o)
       return {
         close = function()
