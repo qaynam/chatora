@@ -3,7 +3,7 @@
 // into a network call; what happens to the bytes afterwards lives in assetStore.ts (disk),
 // imageTools.ts (ImageMagick) and assetCache.ts (what the session remembers).
 
-import { stat } from 'node:fs/promises'
+import { readdir, rm, stat } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import type { Credential, HttpClientShape } from '@chatora/core'
 import { HttpClient } from '@chatora/core'
@@ -330,6 +330,36 @@ export const fetchAsset = (params: {
     )
     const cut = yield* applyThumb(cacheDir, hash, drawable, params.thumb)
     return yield* withSize(yield* applyBorder(cacheDir, hash, cut, border))
+  })
+
+// ---------------------------------------------------------------------------
+// chatora/clearAssets
+// ---------------------------------------------------------------------------
+
+export interface ClearAssetsResult {
+  readonly ok: true
+  /** Files removed from the cache directory. */
+  readonly removed: number
+}
+
+/**
+ * Empty the asset cache on disk and forget the failures remembered, so the next draw
+ * fetches everything anew. Pictures behind a URL do not change; this is for being sure.
+ */
+export const clearAssets = (): Effect.Effect<ClearAssetsResult, never, AssetCache> =>
+  Effect.gen(function* () {
+    const cache = yield* AssetCache
+    const cacheDir = resolveCacheDir()
+    const names = yield* Effect.tryPromise(() => readdir(cacheDir)).pipe(
+      Effect.orElseSucceed((): string[] => []),
+    )
+    // The directory goes with the files; writeAtomic makes it again on the next fetch.
+    yield* Effect.tryPromise(() => rm(cacheDir, { recursive: true, force: true })).pipe(
+      Effect.orElseSucceed(() => undefined),
+    )
+    yield* cache.forgetFailures
+    yield* log('info', 'asset cache cleared', { removed: names.length })
+    return { ok: true as const, removed: names.length }
   })
 
 // ---------------------------------------------------------------------------

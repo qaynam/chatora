@@ -344,7 +344,8 @@ ImageMagick（`brew install imagemagick`）、そして描画プラグインが�
 捨てるので、1 枚 50MB になる写真をそのまま渡すと、ページの画像が互いを押し出してしまうためです。
 
 出ていない画像があるときは、`:Chatora images` でどの画像がどうなっているかが見え、
-`:Chatora images redraw` で描き直せます。
+`:Chatora images redraw` で描き直せます。取得した画像は `~/.cache/chatora/assets` に置いたままにします
+（URL の先の画像は変わらないため）。`:Chatora images clear` で全部捨てて取り直します。
 
 `[[…]]`（大きい記法）は、画像にもアイコンにも効きます。`[[name.icon]]` が単独で行にあるときは
 `image.height_large` の大きさで描き、文中にあるときは 1 行のままです。

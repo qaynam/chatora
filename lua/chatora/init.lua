@@ -280,8 +280,19 @@ function M.logout()
   auth.logout()
 end
 
---- `:Chatora images` says what each picture of the page is doing; `redraw` draws them again.
+--- `:Chatora images`: what each picture of the page is doing. `redraw` draws them again,
+--- `clear` fetches everything anew.
 function M.images(args)
+  if args == 'clear' then
+    require('chatora.images').clear(function(removed, why)
+      if why then
+        vim.notify('[chatora] 画像のキャッシュを消せませんでした: ' .. why, vim.log.levels.ERROR)
+        return
+      end
+      vim.notify(('[chatora] 画像のキャッシュを消しました（%d ファイル）'):format(removed), vim.log.levels.INFO)
+    end)
+    return
+  end
   local bufnr = vim.api.nvim_get_current_buf()
   if not vim.api.nvim_buf_get_name(bufnr):match('^cosense://') then
     vim.notify('[chatora] ページのバッファで実行してください', vim.log.levels.WARN)

@@ -23,6 +23,7 @@ import {
   type AssetCache,
   AssetCacheLive,
   type BorderParams,
+  clearAssets,
   composeAssets,
   fetchAsset,
   type GalleryTile,
@@ -373,6 +374,7 @@ connection.onRequest(
 connection.onRequest('chatora/thumbnailFile', (params: { path: string; size: number }) =>
   runtime.runPromise(thumbnailFile(params)),
 )
+connection.onRequest('chatora/clearAssets', () => runtime.runPromise(clearAssets()))
 connection.onRequest(
   'chatora/composeAssets',
   (params: { project: string; urls: string[]; tile: GalleryTile; border?: BorderParams }) =>
