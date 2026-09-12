@@ -195,9 +195,215 @@ chatora-url-handler browser <browser_name>
 
 ## キーマップ
 
+キーは `keymaps` に、アクション名ごとに並んでいます。値はそのまま `vim.keymap.set` に渡すので、
+リストで書けば 2 つ以上に割り当てられますし、`false` にすればそのアクションだけ外せます。`prefix` は
+`<leader>c` 系の頭で、`prefix = false` にするとその系統がまとめて外れます。
+
+```lua
+require('chatora').setup({
+  keymaps = {
+    prefix = '<leader>c',      -- <prefix> 系の頭。false でこの系統を全部外す
+    sidebar = 'gk',            -- 既定を別のキーにする
+    follow = { 'gd', '<CR>' }, -- 2 つ以上に割り当てる
+    copy_url = false,          -- このアクションだけ外す
+  },
+})
+```
+
+`keymaps = false` を渡すと 1 つも入りません。ただし `<Plug>(chatora-<アクション名>)` はそれでも定義
+されるので、自分で全部書きたいときはこれを使います（アクション名の `_` は `-` になります）。
+`require('chatora.actions').<アクション名>()` を直接呼んでも同じです。ページバッファのキーはバッファ
+ごとに付くので、`FileType cosense` で設定してください。
+
+```lua
+require('chatora').setup({ keymaps = false })
+
+vim.keymap.set('n', '<leader>k', '<Plug>(chatora-sidebar)')
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'cosense',
+  callback = function(ev)
+    vim.keymap.set('n', 'gd', '<Plug>(chatora-follow)', { buffer = ev.buf })
+    vim.keymap.set('n', '<leader>p', require('chatora.actions').pull, { buffer = ev.buf })
+  end,
+})
+```
+
+### どこでも
+
+| 既定         | アクション | 動作                 |
+| ------------ | ---------- | -------------------- |
+| `<leader>ct` | `sidebar`  | サイドバーを開閉     |
+| `<leader>cs` | `search`   | ページを検索         |
+| `<leader>cn` | `new`      | 新規ページ           |
+| `<leader>cp` | `project`  | プロジェクト切り替え |
+| `<leader>ca` | `account`  | アカウント切り替え   |
+| `<leader>c?` | `help`     | ヘルプ               |
+
+### ページバッファ
+
+| 既定                | アクション                      | 動作                                                                  |
+| ------------------- | ------------------------------- | --------------------------------------------------------------------- |
+| `gd`                | `follow`                        | リンク先へジャンプ（`[ページ#行ID]` はその行へ、外部 URL はブラウザ） |
+| `<leader>cr` / `gR` | `related`                       | 関連ページパネルを開閉                                                |
+| `<leader>cR`        | `related_side`                  | 関連ページパネルを下／右に切り替え                                    |
+| `<leader>ci`        | `info`                          | ページ情報（作成者・更新者・被リンクなど）                            |
+| `<leader>cf`        | `pull`                          | サーバーの変更を取り込む（マージ）                                    |
+| `<leader>cc` / `]c` | `next_conflict`                 | 次の競合行へ                                                          |
+| `]u` / `[u`         | `next_updated` / `prev_updated` | 次 / 前の更新行へ（右端のマークが指している行）                       |
+| `<leader>cv`        | `paste_image`                   | クリップボードの画像を貼り付け                                        |
+| `<leader>cd`        | `delete`                        | ページを削除（確認あり）                                              |
+| `<leader>cI`        | `normalize_indent`              | インデントを半角スペースに揃える                                      |
+| `<leader>cy`        | `copy_url`                      | ページ URL をコピー                                                   |
+| `<leader>cY`        | `copy_link`                     | リンク記法 `[タイトル]` をコピー                                      |
+| `<leader>co`        | `open_in_browser`               | ブラウザで開く                                                        |
+| `:w` / `:wq`        |                                 | 保存（同期）                                                          |
+
+### insert モード
+
+| 既定              | アクション    | 動作                                                                          |
+| ----------------- | ------------- | ----------------------------------------------------------------------------- |
+| `<C-t>`           | `insert_date` | 日時を挿入（書式は `edit.date_format`）                                       |
+| `<C-i>` / `<M-i>` | `insert_icon` | アイコンを挿入（[アイコン挿入](docs/FEATURES.md#アイコン挿入)）               |
+| `[`               |               | `[]` を自動ペア（`edit.autopair`。リンク補完は閉じた `[...]` の中だけで発火） |
+| `<Tab>`           |               | テーブル行では本物のタブ、それ以外は元のマッピングに委譲（`edit.table_tab`）  |
+
+### サイドバー
+
+| キー                           | 動作                                                     |
+| ------------------------------ | -------------------------------------------------------- |
+| `<CR>` / `l`                   | 開く（フォルダーの見出しなら開閉）                       |
+| `<Tab>` / `<S-Tab>` / `1`..`9` | タブ切り替え（クリックも可）                             |
+| `R`                            | 再読込                                                   |
+| `s`                            | 検索                                                     |
+| `n`                            | 新規ページ                                               |
+| `P`                            | プロジェクト切り替え（他アカウントのプロジェクトも並ぶ） |
+| `A`                            | アカウント切り替え                                       |
+| `q`                            | 閉じる                                                   |
+
+行頭には保存状態（`✓` / `●`）と未読バー（`▍`）が出ます。未読バーは、最後に開いたあとに更新された
+ページに付きます。
+
+### visual モード
+
+選択したうえで記号を押すと、その範囲を囲みます。同じキーをもう一度押した場合は、入れ子にせず記号
+だけを書き換えます。
+
+| 押す                   | 結果                                                         |
+| ---------------------- | ------------------------------------------------------------ |
+| `*`                    | `[* 選択]`                                                   |
+| `*` `*` `*`            | `[*** 選択]`（`[*****]` で頭打ち）                           |
+| `_` / `-` / `/`        | `[_ 選択]` など（もう一度押すと外れる）                      |
+| `[`                    | `[選択]`。リンクは育てるものではないので normal モードに戻る |
+| ユーザー定義記法の記号 | `[<記号> 選択]`                                              |
+
+`edit = { surround = false }` を渡すとすべて無効になり、記号のリストを渡すと、その記号だけが有効に
+なります。
+
 ## 設定
 
+`setup()`（lazy.nvim なら `opts`）に渡します。書いたキーだけが上書きされるので、変えたいところだけ
+書けば残りは既定のままです。テーブルの代わりに関数を渡すと、プロジェクトごとに違う設定にできます
+（[プロジェクトごとの設定](docs/FEATURES.md#プロジェクトごとの設定)）。知らないキーがあったときは、
+起動時にそう知らせます。
+
+既定値は以下のとおりです。
+
+```lua
+require('chatora').setup({
+  origin = 'https://scrapbox.io', -- Cosense の origin
+  default_project = nil,          -- 最初に開くプロジェクト。nil なら起動時に選びます
+  server_cmd = nil,               -- LSP サーバーの起動コマンド。nil なら自分で探します
+  log = false,                    -- 診断ログ。true で既定のパス、文字列ならそのパスに書きます
+  notations = {},                 -- ユーザー定義の装飾記法。下の「カスタマイズアノテーションの書き方」
+  keymaps = true,                 -- 上の「キーマップ」。false で 1 つも入れません
+  open_external_link = 'confirm', -- 外部 URL を開くとき。'always' は確認なし、'never' は何もしません
+  open_video = 'browser',         -- 動く Gyazo キャプチャの行き先。コマンドのリストや関数も渡せます
+
+  sidebar = {
+    width = 32,            -- 幅
+    separator = true,      -- 行ごとの区切り線。'#RRGGBB' で色を指定、false で無し
+    thumbnails = false,    -- 各ページの最初の画像を行頭に出します（画像バックエンドが要ります）
+    refresh_interval = 60, -- 一覧を取り直す間隔（秒）。false で止まります（最短 5 秒）
+    tabs = {               -- 上部のタブ。フィルタやリンクで絞ったタブを足せます
+      { name = 'すべて' },
+      { name = '未読', mine = true, unread = true },
+    },
+  },
+
+  related = {
+    position = 'bottom', -- 関連ページパネルの位置。'right' なら全高の縦カラム
+    height = 8,          -- 'bottom' のときの高さ
+    width = 40,          -- 'right' のときの幅
+    auto_open = true,    -- ページを開いたら関連パネルも開きます
+  },
+
+  edit = {
+    autosave = false,                                         -- 編集が止まって n 秒後に保存。false で手動だけ
+    sync = { interval = 30, on_focus = true, notify = true }, -- 背後での同期
+    save_status = true,                                       -- 保存状態のアイコン。{ icons = {...}, echo = false } で調整
+    completion = 'auto',                                      -- 'auto' は外部エンジンが無いときだけ内蔵補完を使います
+    autopair = true,                                          -- `[` で `[]` を入れます
+    table_tab = true,                                         -- テーブル行の <Tab> は本物のタブ
+    surround = true,                                          -- visual モードの装飾キー。記号のリストで限定できます
+    paste_indent = true,                                      -- p / P で貼った行を、その行の字下げに揃えます
+    date_format = '%Y-%m-%d %H:%M:%S',                        -- insert_date が入れる書式（os.date）
+  },
+
+  view = {
+    conceal = true,                              -- 記法のマークアップを隠し、カーソル行だけ元に戻します
+    pads = true,                                 -- 箇条書きの中点
+    quote = true,                                -- `>` 行の縦棒と背景
+    telomere = { bar = true, scrollbar = true }, -- 行ごとの更新バーと、右端の一覧
+    tables = true,                               -- table: ブロックの罫線。{ border = false, header = false }
+    codeblock_numbers = true,                    -- コードブロックの行番号
+    file_icon = '󰈔',                             -- アップロード済みファイルへのリンクに付くアイコン
+    title_margin = 1,                            -- タイトル行の下に入れる仮想空行の数
+    spacing = { line = 0, code = 0 },            -- 行間に入れる仮想空行
+  },
+
+  image = {
+    enabled = true,     -- 描画バックエンドが使えるときに描きます
+    backend = 'auto',   -- 'auto' は image.nvim を優先し、無ければ snacks.nvim に落ちます
+    height = 20,        -- 単独行の画像の高さの上限（行数）。小さい画像はそのままです
+    height_large = nil, -- `[[…]]` の高さ。nil なら height の 2 倍
+    gallery = true,     -- 画像だけの行を、同じ大きさのタイルで横に並べます
+    border = true,      -- 画像に合成する枠。{ width = 1, color = '#8888', padding = 12 }
+  },
+})
+```
+
+`origin` `server_cmd` `log` `notations` の 4 つは LSP サーバーの起動時に渡すので、プロジェクトごとには
+変えられません。`sidebar.tabs` や `image.backend` のように中身のある値は
+[docs/FEATURES.md](docs/FEATURES.md) に節があります。
+
 ### カスタマイズアノテーションの書き方
+
+`notations` に記号を並べると、`[<記号> 本文]` を自分の記法として読ませられます。Cosense の web 版では
+記号ごとのクラスが付いた装飾になるので、見た目はプロジェクトの CSS 次第です。
+
+```lua
+require('chatora').setup({
+  notations = {
+    ['|'] = { name = 'highlight', hl = { bg = '#3a3a00', bold = true } },
+    ['='] = { name = 'boxed', hl = { link = 'WarningMsg' } },
+    ['@'] = { name = 'heading', icon = '📌', hl = { bold = true }, rule = true },
+  },
+})
+```
+
+| フィールド | 意味                                                                    |
+| ---------- | ----------------------------------------------------------------------- |
+| キー       | 1 文字の記号です。公式記法の記号（`* / - _ $ [`）とは衝突できません     |
+| `name`     | 英数字と `_` だけです。semantic token の型名になります                  |
+| `hl`       | `nvim_set_hl` にそのまま渡ります。文字色は `fg` です                    |
+| `icon`     | 開きマーカーの代わりに出す 1 文字です。カーソル行では元の記号が見えます |
+| `rule`     | `true` でその行の下に罫線を引きます。色は `rule_hl` です                |
+
+記号は連ねられます。`[|* 特徴]` なら highlight と太字の両方が効きます。属性がぶつかったときは先に
+書いた記号が勝ち、カスタム記法は公式記法（`*` `/` `-` `_`）より上です。
+
+設定を間違えてもプラグインは落ちません。おかしなエントリだけを無視して `vim.notify` で知らせます。
+詳しくは[カスタム装飾記法](docs/FEATURES.md#カスタム装飾記法)を見てください。
 
 ## トラブルシューティング
 
