@@ -3,154 +3,208 @@
 # Chatora
 
 <a href="https://gyazo.com/ffd4dd701f2241264fb6b5587f523480">
-  <img src="https://i.gyazo.com/ffd4dd701f2241264fb6b5587f523480.png" width="140" alt="Chatora" />
+  <img src="https://i.gyazo.com/ffd4dd701f2241264fb6b5587f523480.png" width="100" alt="Chatora" />
 </a>
 
-Cosense（旧 Scrapbox）を Neovim から読み書きするためのプラグイン
+Cosense（旧 Scrapbox）を Neovim から読み書きする非公式プラグイン
 
 </div>
 
+Chatora は、Cosense のページを Neovim のバッファとして開き、普段の編集操作で読んだり書いたり
+するためのプラグインです。ページの閲覧・編集だけでなく、リンクの移動、ページ検索、関連ページの
+表示、画像の貼り付けにも対応しています。
+
+> [!NOTE]
+> Chatora は Cosense の [Personal Access Token（PAT）](https://scrapbox.io/help-jp/Personal_Access_Token)
+> を使って API に接続します。リアルタイム通信ではないため、同じページを複数の場所で同時に編集する
+> ときは、競合に注意してください。
+
+詳しい機能は、[高度な機能](docs/advanced.md)、[設定ガイド](docs/configuration.md)、[外部連携](docs/integrations.md) に分けて説明しています。
+
+## 目次
+
+- [デモ](#デモ)
+- [名前の由来](#名前の由来)
+- [対応している機能](#対応している機能)
+- [動作環境](#動作環境)
+- [インストール](#インストール)
+- [基本操作](#基本操作)
+- [設定](#設定)
+- [コマンドラインから起動する](#コマンドラインから起動する)
+- [telescope.nvim と連携する](#telescopenvim-と連携する)
+- [macOS で Cosense のリンクを開く](#macos-で-cosense-のリンクを開く)
+- [トラブルシューティング](#トラブルシューティング)
+- [クレジット](#クレジット)
+- [ライセンス](#ライセンス)
+
 ## デモ
 
-[![Image from Gyazo](https://i.gyazo.com/37dd99cd83a884213a5d1422d93667d2.gif)](https://gyazo.com/37dd99cd83a884213a5d1422d93667d2)
+[![Chatora のデモ](https://i.gyazo.com/37dd99cd83a884213a5d1422d93667d2.gif)](https://gyazo.com/37dd99cd83a884213a5d1422d93667d2)
 
-**記法比較**
+## 名前の由来
 
-[![Image from Gyazo](https://gyazo.com/64a2afa81502a5152d53530239ae5950.png)](https://gyazo.com/64a2afa81502a5152d53530239ae5950)
-[![Image from Gyazo](https://gyazo.com/68b9ab61aebd4976a1ac66be235cc7ea.png)](https://gyazo.com/68b9ab61aebd4976a1ac66be235cc7ea)
-[![Image from Gyazo](https://gyazo.com/5424457517ae6a2f9cca2d5c7592c03b.png)](https://gyazo.com/5424457517ae6a2f9cca2d5c7592c03b)
+「Chatora」は、日本語の「茶トラ猫」に由来します。
 
-## 名前の由來
+[![Chatora の名前の由来](https://i.gyazo.com/53c8c22753ff50e183b6c0c9c69dc3a5.gif)](https://gyazo.com/53c8c22753ff50e183b6c0c9c69dc3a5)
 
-- 日本語の茶トラ猫から来ている
-- [![Image from Gyazo](https://i.gyazo.com/53c8c22753ff50e183b6c0c9c69dc3a5.gif)](https://gyazo.com/53c8c22753ff50e183b6c0c9c69dc3a5)
+## 対応している機能
 
-## 特長
+### プロジェクト
 
-- **編集はローカル、同期はマージ**
-  - 開いているページは、バックグラウンドでサーバーと同期します
-  - 取り込みは上書きではなく行 ID ベースの三方向マージなので、書きかけの内容が消えることはありません
-- **記法のハイライト**
-  - 装飾・リンク・コードブロック・テーブル・引用・画像を、LSP semantic tokens で描きます
-  - マークアップはカーソル行以外では隠すので、Cosense の web 版に近い見た目になります
-- **リンク補完と定義ジャンプ**
-  - Cosense の web 版と同じく、リンク補完も赤リンクも使えます
-  - `[` や `#` で候補が出て、`gd` でそのページへジャンプできます
-  - 候補が出るのは素のリンクの中だけなので、`[* 見出し]` のような記法を書いていても邪魔をしません
-- **テロメア**
-  - 行ごとの更新の新しさを、左端のバーで示します。誰かが書き換えた行も、まだ保存していない行も一目で分かります
-- **画像のインライン表示と貼り付け**
-  - 対応ターミナルなら本文中に描画します。クリップボードの画像は、`<leader>cv` でそのままアップロードできます
-- **Cosense のエディタ操作**
-  - `<C-t>` で日時挿入、`<C-i>` でアイコン挿入、`[` は自動でペアになり、visual モードでは `*` や `[` を押して選択を囲めます
-- **PAT 認証・複数アカウント**
-  - PAT は macOS Keychain に保存し、`:Chatora account` で切り替えられます
+- [x] プロジェクト一覧の取得
+- [x] プロジェクトの切り替え
+- [ ] プロジェクトの作成・削除
+- [ ] メンバー一覧の取得、メンバーの追加・削除
+- [ ] メンバー権限の変更、プロジェクト設定の変更
 
-## 必要なもの
+### ページ
 
-|         |                             |
-| ------- | --------------------------- |
-| Neovim  | >= 0.11                     |
-| Node.js | >= 20（LSP サーバーの実行） |
+- [x] ページ一覧の表示
+- [x] ページの作成・更新・削除
+- [x] ページ検索
+- [x] ページ情報の表示
+- [x] 関連ページの表示
+- [x] ページのリネームと、被リンクの更新
+- [ ] ページ履歴の取得
 
-このほか、[ImageMagick](https://imagemagick.org/) と画像描画プラグインがあれば画像を表示でき
-（[画像の表示](docs/FEATURES.md#画像の表示)）、クリップボード取り出しツールがあれば画像を貼り付け
-られます（[画像の貼り付け](docs/FEATURES.md#画像の貼り付け)）。どちらも任意です。
+### Cosense の記法
 
-PAT の保存先が macOS Keychain なので、**アカウントの追加と切り替えは macOS でしか動きません**。
-Linux や Windows でも、環境変数 `COSENSE_PAT` に PAT を入れておけば読み書きそのものは動きます。
-他の OS の資格情報ストアには対応していません。
+- [x] 基本的な記法
+  - [x] ページリンク <code>[ページ名]</code>
+  - [x] 行リンク <code>[ページ名#行ID]</code>
+  - [x] 別プロジェクトへのリンク <code>[/other-project/page]</code>
+  - [x] 外部リンク <code>[https://example.com]</code>
+  - [x] リンク文字を指定した外部リンク <code>[リンク文字 https://example.com]</code>
+  - [x] 強調 <code>[* 強調]</code>、<code>[[強調]]</code>
+  - [x] アイコン <code>[user.icon]</code>
+  - [x] 下線 <code>[_ 下線]</code>
+  - [x] 斜体 <code>[/ 斜体]</code>
+  - [x] 打ち消し線 <code>[- 打ち消し線]</code>
+  - [x] 引用 <code>&gt; </code>
+  - [x] コードブロック <code>code:&lt;言語&gt;:</code>、<code>code:</code>
+  - [x] インラインコード <code>&#96;code&#96;</code>
+  - [x] 画像 <code>[画像URL.png]</code>
+  - [x] Gyazo 動画 <code>[Gyazo動画URL]</code>
+  - [x] Cosense のファイルリンク <code>[https://scrapbox.io/file/&lt;プロジェクト名&gt;/&lt;ファイル名&gt;]</code>
+  - [ ] 数式 <code>[$ 数式]</code>
+  - [ ] Mermaid <code>mermaid:</code>
+  - [ ] Gyazo 以外の動画 <code>[動画URL]</code>
+- [x] テーブルの表示
+- [x] カスタム装飾記法
+- [x] 箇条書きの中点表示
 
-### ターミナル
+### その他
 
-テキストの読み書きはどのターミナルでも動きます。ターミナルによって変わるのは、画像を描けるか
-どうかだけです。
+- [x] ページリンクの補完
+- [x] 画像のアップロード（Cosense のファイル領域、Gyazo）
+- [x] テロメア（行ごとの更新表示）
+- [x] 既読・未読の表示
+- [x] アイコン・日時の挿入
+- [ ] ファイルのアップロード
+- [ ] <code>smart context</code>
+- [ ] <code>export for ai</code>
 
-| ターミナル               | 画像                                                                                            |
-| ------------------------ | ----------------------------------------------------------------------------------------------- |
-| Ghostty                  | 確認済み（作者が常用しているのはここ）                                                          |
-| kitty / WezTerm          | 同じ kitty graphics protocol なので動くはずですが、未確認です                                   |
-| VS Code の内蔵ターミナル | 設定すれば描けます。[VS Code で画像を出す](docs/FEATURES.md#vs-code-で画像を出す)を見てください |
-| そのほか                 | kitty graphics protocol か sixel のどちらかを話せば描けます                                     |
+## 動作環境
+
+| ソフトウェア | バージョン |
+| --- | --- |
+| Neovim | 0.11 以上 |
+| Node.js | 20 以上 |
+
+現在は macOS と Ghostty を主な動作確認環境としています。
+
+| ターミナル | 状況 |
+| --- | --- |
+| Ghostty | 確認済み |
+| kitty / WezTerm | kitty graphics protocol に対応していますが、未確認です |
+| VS Code の内蔵ターミナル | 設定が必要です。詳しくは [画像の表示](docs/advanced.md#画像の表示) を参照してください |
+
+画像を表示するには、kitty graphics protocol に対応したターミナル（kitty / Ghostty など）と、
+画像表示用のプラグイン（[3rd/image.nvim](https://github.com/3rd/image.nvim) など）が必要です。
 
 ## インストール
 
-[lazy.nvim](https://github.com/folke/lazy.nvim):
+lazy.nvim では、次のように設定します。
 
-```lua
+~~~lua
 {
   'qaynam/chatora',
   version = '*',
-  build = 'sh scripts/install-server.sh',
   cmd = 'Chatora',
-  -- 画像を出すなら（任意）。snacks.nvim を既に入れているなら、そちらでも描けます
-  dependencies = { { '3rd/image.nvim', opts = { processor = 'magick_cli' } } },
+  dependencies = {
+    { '3rd/image.nvim', opts = { processor = 'magick_cli' } },
+  },
   opts = {
-    project = 'your-project',  -- 省略すると起動時に選択モーダルが表示される
-    -- その他のオプションは下記を参照してください
+    default_project = 'my-project',
   },
 }
-```
+~~~
 
-`build` は必須です（LSP サーバーを用意します）。手元のリポジトリを使うなら、
-`'qaynam/chatora'` の代わりに `dir = '/path/to/chatora'` を指定してください。
+画像を表示する場合は、[ImageMagick](https://imagemagick.org/) もインストールしてください。
 
-## はじめかた
+~~~sh
+brew install imagemagick
+~~~
 
-1. `:Chatora` を実行します。初回は PAT の入力を求められるので、`<origin>/settings/personal-access-tokens`
-   で発行して貼り付けてください。入力された PAT は、検証したうえで macOS Keychain に保存します。
-   なお、環境変数 `COSENSE_PAT` があれば、そちらが優先されます
-2. サイドバーからページを選ぶと、`cosense://<project>/<title>` というバッファが開きます
-3. あとは普通に編集して `:w` で保存します。`:wq` なら、保存して閉じるところまで一度で済みます
+クリップボードから画像を貼り付ける場合は、macOS では [pngpaste](https://github.com/jcsalterego/pngpaste) が必要です。
 
-### Slack や Chrome のリンクを chatora で開く（macOS）
+~~~sh
+brew install pngpaste
+~~~
 
-Cosense のリンクをクリックしたとき、ブラウザではなく**今動いている chatora** でそのページを
-開けます。
+Linux で画像を貼り付ける場合は、環境に応じて <code>wl-paste</code> または <code>xclip</code> が利用されます。
 
-```sh
-bin/chatora-url-handler install
-```
+初回起動時に PAT の入力を求められます。macOS では、入力した PAT が Chatora の認証情報として保存
+され、以後の接続に使われます。複数の PAT を登録した場合は、<code>:Chatora account</code> で切り替えられます。
 
-URL を受け取る小さなアプリを作って登録します。あとは**システム設定 → デスクトップとDock →
-デフォルトのWebブラウザ**で `Chatora Open` を選んでください。Cosense 以外のリンクは、それまで
-使っていたブラウザにそのまま流れます（`chatora-url-handler browser 'Google Chrome'` で変えられます）。詳しくは
-[Slack や Chrome のリンクを chatora で開く](docs/FEATURES.md#slack-や-chrome-のリンクを-chatora-で開くmacos)
-を見てください。
+## 基本操作
 
-## コマンド
+### コマンド
 
-| コマンド                  | 動作                                                                               |
-| ------------------------- | ---------------------------------------------------------------------------------- |
-| `:Chatora`                | サイドバーを開く（初回は認証 → プロジェクト選択）                                  |
-| `:Chatora <url>`          | Cosense のページ URL をそのまま開く                                                |
-| `:Chatora toggle`         | サイドバーを開閉                                                                   |
-| `:Chatora new [title]`    | 新規ページ。title を省くと空のページが開き、1 行目がタイトルになる                 |
-| `:Chatora search [query]` | 全文検索（内蔵ピッカー）                                                           |
-| `:Chatora related`        | 関連ページパネルを開閉                                                             |
-| `:Chatora account`        | アカウントの切り替え・追加                                                         |
-| `:Chatora project [name]` | プロジェクトの切り替え。名前を渡すとそのプロジェクトを持つアカウントごと切り替える |
-| `:Chatora logout`         | 現在のアカウントを削除                                                             |
-| `:Chatora log`            | 診断ログを開く（`log` オプションが必要）                                           |
-| `:Chatora images [redraw\|clear]` | ページの画像の状態を表示する。`redraw` で描き直す、`clear` で取得した画像を全部捨てて取り直す |
-| `:Chatora reload`         | プラグインを再読み込み（開発用）                                                   |
-| `:Chatora help`           | チートシート                                                                       |
+| コマンド | 動作 |
+| --- | --- |
+| <code>:Chatora</code> | サイドバーを開く。初回は PAT 認証とプロジェクト選択を行います |
+| <code>:Chatora &lt;url&gt;</code> | Cosense のページ URL を開く |
+| <code>:Chatora open [url]</code> | サイドバー、または指定したページを開く |
+| <code>:Chatora toggle</code> | サイドバーを開閉する |
+| <code>:Chatora new [title]</code> | 新しいページを開く。タイトルを省略すると、1 行目がタイトルになります |
+| <code>:Chatora search [query]</code> | ページを検索する。検索語を省略すると入力欄が開きます |
+| <code>:Chatora related</code> | 関連ページパネルを開閉する |
+| <code>:Chatora project [name]</code> | プロジェクトを切り替える |
+| <code>:Chatora account</code> | アカウントを切り替える、または追加する |
+| <code>:Chatora logout</code> | 現在のアカウントの PAT を削除する |
+| <code>:Chatora images [redraw&#124;clear]</code> | 画像の状態を表示する。<code>redraw</code> で再描画し、<code>clear</code> でキャッシュを削除して再取得します |
+| <code>:Chatora help</code> | 操作一覧を表示する |
+| <code>:Chatora log</code> | 診断ログを開く。<code>log</code> オプションを有効にしている場合に使えます |
+| <code>:Chatora reload</code> | Neovim を再起動せずにプラグインを再読み込みする |
 
-## キーマップ
+### キーマップ
 
-キーは `keymaps` に、アクション名ごとに全部並んでいます。値はそのまま `vim.keymap.set` に渡すキーで、
-並びで書けば 2 つ以上、`false` で無しです。`prefix`（既定 `<leader>c`）は `<leader>c` 系の既定の頭で、
-`prefix = false` でその系統をまとめて外せます。`keymaps = false` で 1 つも入れません。
+既定のキーマップは <code>keymaps</code> にまとめられています。設定値はそのまま
+<code>vim.keymap.set</code> に渡されるため、配列を指定すれば複数のキーに割り当てられます。
+<code>false</code> を指定すると、そのアクションのキーマップを無効にできます。
 
-```lua
-keymaps = { sidebar = 'gk', follow = { 'gd', '<CR>' }, copy_url = false }
-```
+<code>prefix</code> は <code>&lt;leader&gt;c</code> 系の先頭部分です。<code>prefix = false</code> にすると、
+<code>&lt;leader&gt;c</code> 系のキーマップをまとめて無効にできます。
 
-自分で割り当てるなら、アクションごとの `<Plug>(chatora-<アクション名>)`（`_` は `-` になります）か、
-`require('chatora.actions').<アクション名>()` を使います。ページのキーは `FileType cosense` で付けます。
+~~~lua
+require('chatora').setup({
+  keymaps = {
+    prefix = '<leader>c',
+    sidebar = 'gk',
+    follow = { 'gd', '<CR>' },
+    copy_url = false,
+  },
+})
+~~~
 
-```lua
+<code>keymaps = false</code> を指定すると、既定のキーマップは登録されません。ただし、
+<code>&lt;Plug&gt;(chatora-&lt;アクション名&gt;)</code> は利用できるため、自分でキーマップを定義できます。
+アクション名に <code>_</code> が含まれる場合、<code>&lt;Plug&gt;</code> では <code>-</code> に置き換わります。
+
+~~~lua
 require('chatora').setup({ keymaps = false })
+
 vim.keymap.set('n', '<leader>k', '<Plug>(chatora-sidebar)')
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'cosense',
@@ -159,268 +213,278 @@ vim.api.nvim_create_autocmd('FileType', {
     vim.keymap.set('n', '<leader>p', require('chatora.actions').pull, { buffer = ev.buf })
   end,
 })
-```
+~~~
 
-### どこでも
+<code>require('chatora.actions').&lt;アクション名&gt;()</code> を直接呼び出すこともできます。ページバッファの
+キーマップはバッファごとに設定されるため、独自に設定する場合は <code>FileType cosense</code> を利用してください。
 
-| 既定         | アクション | 動作                 |
-| ------------ | ---------- | -------------------- |
-| `<leader>ct` | `sidebar`  | サイドバーを開閉     |
-| `<leader>cs` | `search`   | ページを検索         |
-| `<leader>cn` | `new`      | 新規ページ           |
-| `<leader>cp` | `project`  | プロジェクト切り替え |
-| `<leader>ca` | `account`  | アカウント切り替え   |
-| `<leader>c?` | `help`     | ヘルプ               |
+#### Neovim 全体
 
-### ページバッファ
+| 既定のキー | アクション | 動作 |
+| --- | --- | --- |
+| <code>&lt;leader&gt;ct</code> | <code>sidebar</code> | サイドバーを開閉 |
+| <code>&lt;leader&gt;cs</code> | <code>search</code> | ページを検索 |
+| <code>&lt;leader&gt;cn</code> | <code>new</code> | 新しいページを開く |
+| <code>&lt;leader&gt;cp</code> | <code>project</code> | プロジェクトを切り替える |
+| <code>&lt;leader&gt;ca</code> | <code>account</code> | アカウントを切り替える |
+| <code>&lt;leader&gt;c?</code> | <code>help</code> | ヘルプを開く |
 
-| 既定                | アクション                      | 動作                                                                  |
-| ------------------- | ------------------------------- | --------------------------------------------------------------------- |
-| `gd`                | `follow`                        | リンク先へジャンプ（`[ページ#行ID]` はその行へ、外部 URL はブラウザ） |
-| `<leader>cr` / `gR` | `related`                       | 関連ページパネルを開閉                                                |
-| `<leader>cR`        | `related_side`                  | 関連ページパネルを下／右に切り替え                                    |
-| `<leader>ci`        | `info`                          | ページ情報                                                            |
-| `<leader>cf`        | `pull`                          | サーバーの変更を取り込む                                              |
-| `<leader>cc` / `]c` | `next_conflict`                 | 次の競合行へ                                                          |
-| `]u` / `[u`         | `next_updated` / `prev_updated` | 次 / 前の更新行へ（右端のマークが指している行）                       |
-| `<leader>cv`        | `paste_image`                   | クリップボードの画像を貼り付け                                        |
-| `<leader>cd`        | `delete`                        | ページを削除（確認あり）                                              |
-| `<leader>cI`        | `normalize_indent`              | インデントを半角スペースに揃える                                      |
-| `<leader>cy`        | `copy_url`                      | ページ URL をコピー                                                   |
-| `<leader>cY`        | `copy_link`                     | リンク記法 `[タイトル]` をコピー                                      |
-| `<leader>co`        | `open_in_browser`               | ブラウザで開く                                                        |
-| `:w` / `:wq`        |                                 | 保存（同期）                                                          |
+#### ページバッファ
 
-### insert モード
+| 既定のキー | アクション | 動作 |
+| --- | --- | --- |
+| <code>gd</code> | <code>follow</code> | リンク先へ移動する。行リンクは該当行へ、外部 URL はブラウザで開きます |
+| <code>&lt;leader&gt;cr</code> / <code>gR</code> | <code>related</code> | 関連ページパネルを開閉 |
+| <code>&lt;leader&gt;cR</code> | <code>related_side</code> | 関連ページパネルの位置を下／右で切り替え |
+| <code>&lt;leader&gt;ci</code> | <code>info</code> | ページ情報を表示 |
+| <code>&lt;leader&gt;cf</code> | <code>pull</code> | サーバーの変更を取り込む |
+| <code>&lt;leader&gt;cc</code> / <code>]c</code> | <code>next_conflict</code> | 次の競合行へ移動 |
+| <code>]u</code> / <code>[u</code> | <code>next_updated</code> / <code>prev_updated</code> | 次／前の更新行へ移動 |
+| <code>&lt;leader&gt;cv</code> | <code>paste_image</code> | クリップボードの画像を貼り付け |
+| <code>&lt;leader&gt;cd</code> | <code>delete</code> | ページを削除（確認あり） |
+| <code>&lt;leader&gt;cI</code> | <code>normalize_indent</code> | インデントを半角スペースに揃える |
+| <code>&lt;leader&gt;cy</code> | <code>copy_url</code> | ページ URL をコピー |
+| <code>&lt;leader&gt;cY</code> | <code>copy_link</code> | <code>[タイトル]</code> の形式でリンクをコピー |
+| <code>&lt;leader&gt;co</code> | <code>open_in_browser</code> | ページをブラウザで開く |
+| <code>:w</code> / <code>:wq</code> | — | ページを保存する |
 
-| 既定              | アクション    | 動作                                                                                |
-| ----------------- | ------------- | ----------------------------------------------------------------------------------- |
-| `<C-t>`           | `insert_date` | 日時を挿入（書式は `edit.date_format`）                                             |
-| `<C-i>` / `<M-i>` | `insert_icon` | アイコンを挿入（[下記](docs/FEATURES.md#アイコン挿入)）                             |
-| `[`               |               | `[]` を自動ペア（`edit.autopair`。リンク補完は閉じた `[...]` の中だけで発火）       |
-| `<Tab>`           |               | テーブル行では本物のタブ、それ以外は元のマッピングに委譲（`edit.table_tab`）        |
+#### Insert モード
 
-### サイドバー
+| 既定のキー | 動作 |
+| --- | --- |
+| <code>&lt;C-t&gt;</code> | 日時を挿入 |
+| <code>&lt;C-i&gt;</code> / <code>&lt;M-i&gt;</code> | アイコンを挿入 |
+| <code>[</code> | <code>[]</code> を自動的に補完 |
+| <code>&lt;Tab&gt;</code> | テーブル行ではタブを入力し、それ以外では既存のマッピングに委譲 |
 
-| キー                           | 動作                                                     |
-| ------------------------------ | -------------------------------------------------------- |
-| `<CR>` / `l`                   | 開く（フォルダーの見出しなら開閉）                       |
-| `<Tab>` / `<S-Tab>` / `1`..`9` | タブ切り替え（クリックも可）                             |
-| `R`                            | 再読込                                                   |
-| `s`                            | 検索                                                     |
-| `n`                            | 新規ページ                                               |
-| `P`                            | プロジェクト切り替え（他アカウントのプロジェクトも並ぶ） |
-| `A`                            | アカウント切り替え                                       |
-| `q`                            | 閉じる                                                   |
+#### サイドバー
 
-行頭には保存状態（`✓` / `●`）と未読バー（`▍`）が出ます。未読バーは、最後に開いたあとに
-更新されたページに付きます。
+| キー | 動作 |
+| --- | --- |
+| <code>&lt;CR&gt;</code> / <code>l</code> | ページを開く。フォルダーの見出しでは開閉します |
+| <code>&lt;Tab&gt;</code> / <code>&lt;S-Tab&gt;</code> / <code>1</code>〜<code>9</code> | タブを切り替える |
+| <code>R</code> | 一覧を再読み込み |
+| <code>s</code> | ページを検索 |
+| <code>n</code> | 新しいページを開く |
+| <code>P</code> | プロジェクトを切り替える |
+| <code>A</code> | アカウントを切り替える |
+| <code>q</code> | サイドバーを閉じる |
 
-### visual モード
+サイドバーの行頭には、保存状態（<code>✓</code> / <code>●</code>）と未読マーク（<code>▍</code>）が表示されます。
+未読マークは、最後に開いてから更新されたページに付きます。
 
-選択したうえで記号を押すと、その範囲を囲みます。同じキーをもう一度押した場合は、入れ子にせず
-記号だけを書き換えます。
+#### Visual モード
 
-| 押す                   | 結果                                                         |
-| ---------------------- | ------------------------------------------------------------ |
-| `*`                    | `[* 選択]`                                                   |
-| `*` `*` `*`            | `[*** 選択]`（`[*****]` で頭打ち）                           |
-| `_` / `-` / `/`        | `[_ 選択]` など（もう一度押すと外れる）                      |
-| `[`                    | `[選択]`。リンクは育てるものではないので normal モードに戻る |
-| ユーザー定義記法の記号 | `[<記号> 選択]`                                              |
+テキストを選択して記号を押すと、その範囲を装飾記法で囲みます。同じキーをもう一度押すと、
+入れ子にはせず、装飾の種類だけを変更します。
 
-`edit = { surround = false }` を渡すとすべて無効になり、記号のリストを渡すと、その記号だけが有効になります。
+| キー | 結果 |
+| --- | --- |
+| <code>*</code> | <code>[* 選択範囲]</code> |
+| <code>*</code> を複数回 | <code>[*** 選択範囲]</code>（<code>[*****]</code> まで） |
+| <code>_</code> / <code>-</code> / <code>/</code> | <code>[_ 選択範囲]</code> など |
+| <code>[</code> | <code>[選択範囲]</code> |
+| ユーザー定義の記号 | <code>[&lt;記号&gt; 選択範囲]</code> |
+
+<code>edit = { surround = false }</code> を指定すると無効にできます。記号のリストを指定すると、
+その記号だけを有効にできます。
 
 ## 設定
 
-`setup()`（lazy.nvim なら `opts`）に渡します。既定値と型（LuaLS の `chatora.Config`）は
-`lua/chatora/config.lua` にあります。テーブルの代わりに関数を渡すと、プロジェクトごとに違う設定に
-できます。[下記](docs/FEATURES.md#プロジェクトごとの設定)
+<code>setup()</code> に設定を渡します。lazy.nvim を使う場合は <code>opts</code> に指定できます。
+指定した項目だけが既定値から変更されるため、必要な項目だけを設定してください。
 
-```lua
+~~~lua
 require('chatora').setup({
-  default_project = 'my-project',
-  keymaps = { sidebar = 'gk' },
-  sidebar = { tabs = { { name = 'すべて' }, { name = 'daily', related = 'daily' } } },
-  edit = { autosave = 10 },
-  view = { pads = { bullet = '•' } },
+  origin = 'https://scrapbox.io', -- Cosense の URL
+  default_project = nil,          -- 起動時に開くプロジェクト。nil なら選択画面を表示
+  server_cmd = nil,               -- LSP サーバーの起動コマンド。nil なら自動検出
+  log = false,                    -- 診断ログ。true で既定の場所、文字列で保存先を指定
+  notations = {},                 -- ユーザー定義の装飾記法
+  keymaps = true,                 -- false で既定のキーマップを無効化
+  open_external_link = 'confirm', -- 外部 URL を開くときの確認。'always' / 'never' も指定可能
+  open_video = 'browser',         -- Gyazo 動画の開き先
+
+  sidebar = {
+    width = 32,            -- サイドバーの幅
+    separator = true,      -- 行ごとの区切り線。色文字列または false も指定可能
+    thumbnails = false,    -- 各ページの最初の画像を表示（画像バックエンドが必要）
+    refresh_interval = 60, -- 一覧を更新する間隔（秒）。false で自動更新を停止
+    tabs = {
+      { name = 'すべて' },
+      { name = '未読', mine = true, unread = true },
+    },
+  },
+
+  related = {
+    position = 'bottom', -- 関連ページパネルの位置。'right' で右側に表示
+    height = 8,          -- 下に表示するときの高さ
+    width = 40,          -- 右に表示するときの幅
+    auto_open = true,    -- ページを開いたときに自動表示
+  },
+
+  edit = {
+    autosave = false,                                         -- 編集が止まってから保存するまでの秒数
+    sync = { interval = 30, on_focus = true, notify = true }, -- サーバーとの自動同期
+    save_status = true,                                       -- 保存状態を表示
+    completion = 'auto',                                      -- 外部補完がないときだけ内蔵補完を使う
+    autopair = true,                                          -- [ を入力すると [] を挿入
+    table_tab = true,                                         -- テーブル行の <Tab> に本物のタブを使う
+    surround = true,                                          -- Visual モードの装飾
+    paste_indent = true,                                      -- 貼り付けた行のインデントを揃える
+    date_format = '%Y-%m-%d %H:%M:%S',                        -- 日時の書式（os.date）
+  },
+
+  view = {
+    conceal = true,                              -- 記法のマークアップを隠す
+    pads = true,                                 -- 箇条書きの中点
+    quote = true,                                -- 引用の縦棒と背景
+    telomere = { bar = true, scrollbar = true }, -- 行ごとの更新バーとスクロールバー
+    tables = true,                               -- テーブルの罫線
+    codeblock_numbers = true,                    -- コードブロックの行番号
+    file_icon = '󰈔',                             -- アップロード済みファイルのアイコン
+    title_margin = 1,                            -- タイトル下の余白
+    spacing = { line = 0, code = 0 },            -- 行間の余白
+  },
+
+  image = {
+    enabled = true,     -- 画像表示を有効化
+    backend = 'auto',   -- image.nvim を優先し、なければ snacks.nvim を使用
+    height = 20,        -- 単独行の画像の高さの上限
+    height_large = nil, -- [[…]] の画像の高さ。nil なら height の 2 倍
+    gallery = true,     -- 画像だけの行をタイル状に表示
+    border = true,      -- 画像の枠
+  },
 })
-```
+~~~
 
-知らないキーがあると、起動時にそう言います。
+<code>origin</code>、<code>server_cmd</code>、<code>log</code>、<code>notations</code> は LSP サーバーの起動時に
+読み込まれるため、プロジェクトごとには変更できません。<code>sidebar.tabs</code> や
+<code>image.backend</code> などの詳しい設定は [高度な機能](docs/advanced.md) と [設定ガイド](docs/configuration.md) にまとめています。
 
-### 起動時に決まるもの
+### 装飾記法をカスタマイズする
 
-| オプション           | 既定                    | 意味                                                                                                  |
-| -------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------- |
-| `origin`             | `'https://scrapbox.io'` | Cosense の origin                                                                                     |
-| `default_project`    | なし                    | 最初に開くプロジェクト。未指定なら起動時に選択。`:Chatora project` で切り替えられる                   |
-| `server_cmd`         | 自動検出                | LSP サーバーの起動コマンド                                                                            |
-| `log`                | `false`                 | 診断ログ。`true` で `${XDG_STATE_HOME:-~/.local/state}/chatora/chatora.log`、文字列ならそのパス       |
-| `notations`          | `{}`                    | ユーザー定義の装飾記法。[下記](docs/FEATURES.md#カスタム装飾記法)                                     |
-| `keymaps`            | `true`                  | [上記](#キーマップ)。`false` で 1 つも入れない                                                        |
-| `open_external_link` | `'confirm'`             | 外部 URL に `follow` したとき。`'always'` は確認なし、`'never'` は何もしない                          |
-| `open_video`         | `'browser'`             | 動く Gyazo キャプチャに `follow` したときの行き先。[下記](docs/FEATURES.md#動画を再生する)            |
+<code>notations</code> に記号を追加すると、<code>[&lt;記号&gt; 本文]</code> を独自の装飾記法として扱えます。
 
-上の 4 つはサーバーの起動時に渡すので、プロジェクトごとには変えられません。
+~~~lua
+require('chatora').setup({
+  notations = {
+    ['|'] = { name = 'highlight', hl = { bg = '#3a3a00', bold = true } },
+    ['='] = { name = 'boxed', hl = { link = 'WarningMsg' } },
+    ['@'] = { name = 'heading', icon = '📌', hl = { bold = true }, rule = true },
+  },
+})
+~~~
 
-### `sidebar`
+| 項目 | 説明 |
+| --- | --- |
+| キー | 1 文字の記号。公式記法（<code>*</code>、<code>/</code>、<code>-</code>、<code>_</code>、<code>$</code>、<code>[</code>）は使用できません |
+| <code>name</code> | 英数字と <code>_</code> のみ。semantic token の型名になります |
+| <code>hl</code> | <code>nvim_set_hl</code> に渡すハイライト設定 |
+| <code>icon</code> | 開始記号の代わりに表示する 1 文字 |
+| <code>rule</code> | <code>true</code> で行の下に罫線を表示 |
 
-| キー               | 既定          | 意味                                                                                                         |
-| ------------------ | ------------- | ------------------------------------------------------------------------------------------------------------ |
-| `width`            | `32`          | 幅                                                                                                           |
-| `separator`        | `true`        | 行ごとの区切り下線。`'#RRGGBB'` で色を指定、`false` で無効                                                   |
-| `thumbnails`       | `false`       | ページの最初の画像を行頭に出す。画像バックエンドが要る。[下記](docs/FEATURES.md#サイドバーのサムネイル)       |
-| `refresh_interval` | `60`          | n 秒ごとに一覧を更新。`false` で止める、最短 5 秒                                                            |
-| `tabs`             | すべて / 未読 | 上部のタブ。ページのフィルタやリンクで絞ったタブを足せる。[下記](docs/FEATURES.md#サイドバーのタブ)           |
+## コマンドラインから起動する
 
-### `related`
+<code>bin/chatora</code> を使うと、ターミナルから Chatora を起動できます。lazy.nvim でインストールした
+場合は、プラグインのインストール先にある <code>bin</code> ディレクトリを PATH に追加すると便利です。
 
-| キー        | 既定       | 意味                                                               |
-| ----------- | ---------- | ------------------------------------------------------------------ |
-| `position`  | `'bottom'` | 関連ページパネルの位置。`'right'` で全高の縦カラム                 |
-| `height`    | `8`        | `'bottom'` のときの高さ                                            |
-| `width`     | `40`       | `'right'` のときの幅                                               |
-| `auto_open` | `true`     | ページを開いたら関連パネルも開く。`q` で閉じると次の `gR` まで抑制 |
+~~~sh
+chatora                         # 設定したプロジェクトのサイドバーを開く
+chatora -p my-project           # 指定したプロジェクトを開く
+chatora https://scrapbox.io/proj/Page_Title
+chatora open https://scrapbox.io/proj/Page
+chatora -p my-project notes.md  # そのほかの引数は nvim に渡す
+~~~
 
-### `edit`
+<code>-p</code>（<code>--project</code>）で指定したプロジェクトが現在のアカウントにない場合、保存済みの
+別アカウントを確認し、見つかったアカウントに切り替えて開きます。公開プロジェクトは、メンバーで
+なくても読み取り専用で開けます。
 
-| キー           | 既定                                                | 意味                                                                                         |
-| -------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `autosave`     | `false`                                             | 編集停止から n 秒後に自動保存                                                                |
-| `sync`         | `{ interval = 30, on_focus = true, notify = true }` | 背後での同期。[下記](docs/FEATURES.md#同期と競合)                                            |
-| `save_status`  | `true`                                              | 保存状態アイコン。`{ icons = {...}, echo = false }` で調整                                   |
-| `completion`   | `'auto'`                                            | `'auto'` は外部エンジンが無いときだけ内蔵補完を有効化。`'native'` は常に、`false` は外部任せ |
-| `autopair`     | `true`                                              | `[` で `[]` を入れる                                                                         |
-| `table_tab`    | `true`                                              | テーブル行の `<Tab>` は本物のタブ                                                            |
-| `surround`     | `true`                                              | visual モードの装飾キー。記号のリストで限定、`false` で無効                                  |
-| `paste_indent` | `true`                                              | `p` / `P` で貼った行を、その行の字下げに揃える                                               |
-| `date_format`  | `'%Y-%m-%d %H:%M:%S'`                               | `insert_date` が入れる書式（`os.date`）                                                      |
+詳しい使い方は <code>chatora --help</code> で確認できます。
 
-### `view`
+## telescope.nvim と連携する
 
-| キー                | 既定                               | 意味                                                                                                                                                                                    |
-| ------------------- | ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `conceal`           | `true`                             | 記法マークアップを隠す。`true` はカーソル行だけ元の記法に戻す。文字列を渡すとそれが `'concealcursor'` になる（`'nc'` なら読んでいる間は戻さない＝カーソル行のインライン画像も消えない） |
-| `pads`              | `true`                             | 箇条書きの中点。[下記](docs/FEATURES.md#箇条書き)                                                                                                                                       |
-| `telomere`          | `{ bar = true, scrollbar = true }` | 行ごとの更新バーと右端の一覧。[下記](docs/FEATURES.md#テロメア)                                                                                                                         |
-| `quote`             | `true`                             | `>` 行の縦棒と背景。[下記](docs/FEATURES.md#引用)                                                                                                                                       |
-| `tables`            | `true`                             | `table:` ブロックの罫線。`{ border = false, header = false }`                                                                                                                           |
-| `codeblock_numbers` | `true`                             | コードブロックの行番号                                                                                                                                                                  |
-| `file_icon`         | `'󰈔'`                              | プロジェクトにアップロードしたファイルへのリンクに付くアイコン。`false` で無し                                                                                                          |
-| `title_margin`      | `1`                                | タイトル行の下に入れる仮想空行の数                                                                                                                                                      |
-| `spacing`           | `{ line = 0, code = 0 }`           | 行間に挿入する仮想空行                                                                                                                                                                  |
+Cosense の全文検索を telescope.nvim のピッカーで使うこともできます。
 
-### `image`
+~~~lua
+require('telescope').load_extension('chatora')
+~~~
 
-| キー           | 既定         | 意味                                                                                                                                                                                        |
-| -------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enabled`      | `true`       | 描画バックエンドが使えるときに描く。`false` で無効                                                                                                                                          |
-| `backend`      | `'auto'`     | `'auto'` は image.nvim 優先で snacks.nvim にフォールバック。`'image_nvim'` / `'snacks'` で固定、テーブル（か、それを返す関数）で自前。[下記](docs/FEATURES.md#描画バックエンドを差し替える) |
-| `height`       | `20`         | 単独行の画像の高さの上限（行数）。小さい画像は元の大きさのまま。文中のインライン画像は常に 1 行                                                                                             |
-| `height_large` | `height * 2` | `[[…]]`（大きい記法）の高さ。画像とアイコンの両方に効く                                                                                                                                     |
-| `gallery`      | `true`       | 画像だけの行を、同じ大きさのタイルを横に並べて描く。[下記](docs/FEATURES.md#画像だけの行)                                                                                                   |
-| `border`       | `true`       | 画像に合成する枠。`{ width = 1, color = '#8888', padding = 12 }`                                                                                                                            |
+設定後、<code>:Telescope chatora search</code>（<code>:Telescope chatora</code> でも同じ）で検索できます。
+Chatora に内蔵されている <code>:Chatora search</code> とは別の検索画面です。
 
-## 機能
+## macOS で Cosense のリンクを開く
 
-機能ごとの詳しい説明は [docs/FEATURES.md](docs/FEATURES.md) にあります。
+<code>bin/chatora-url-handler</code> を使うと、Slack や Discord などでクリックした Cosense のリンクを、
+ブラウザではなく、起動中の Chatora で開けます。macOS のみ対応しています。
 
-|                                                                               |                                                                |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| [同期と競合](docs/FEATURES.md#同期と競合)                                     | 背後で同期し、取り込みは行単位のマージ。競合行は `]c` で回る   |
-| [テロメア](docs/FEATURES.md#テロメア)                                         | どこが更新されたかを、行の左のバーと右端のミニマップで示す     |
-| [リネームされたページ](docs/FEATURES.md#リネームされたページ)                 | 旧タイトルのリンクはリダイレクトを追って現在のページを開く     |
-| [タイトルの変更](docs/FEATURES.md#タイトルの変更)                             | 1 行目を書き換えて改名。リンクの書き換えと、同名ページへの統合を聞く |
-| [行リンク](docs/FEATURES.md#行リンク)                                         | `[ページ名#行ID]` はその行にカーソルを置いて開く               |
-| [別プロジェクトのページ](docs/FEATURES.md#別プロジェクトのページ)             | `[/other-project/page]` を開く。書けないプロジェクトはそう言う |
-| [赤リンク](docs/FEATURES.md#赤リンク)                                         | 実体のないページへのリンクを色で示す                           |
-| [箇条書き](docs/FEATURES.md#箇条書き)                                         | インデント 1 文字が 1 段。中点を仮想テキストで描く             |
-| [引用](docs/FEATURES.md#引用)                                                 | `>` を縦棒に置き換える                                         |
-| [カスタム装飾記法](docs/FEATURES.md#カスタム装飾記法)                         | `[<記号> 本文]` の記号を自分で定義する                         |
-| [動画を再生する](docs/FEATURES.md#動画を再生する)                             | Gyazo の動画を `gd` で好きなプレイヤーへ渡す                   |
-| [ファイルへのリンク](docs/FEATURES.md#ファイルへのリンク)                     | アップロードしたファイルへのリンクにアイコンを出す             |
-| [記法の色](docs/FEATURES.md#記法の色)                                         | colorscheme から借りつつ、同じ色を二度使わない                 |
-| [画像の表示](docs/FEATURES.md#画像の表示)                                     | 対応ターミナルと描画プラグインがあればバッファ内に描く         |
-| [画像だけの行](docs/FEATURES.md#画像だけの行)                                 | 同じ大きさのタイルを横に並べ、入らなければ折り返す             |
-| [描画バックエンドを差し替える](docs/FEATURES.md#描画バックエンドを差し替える) | image.nvim / snacks.nvim / 自前のバックエンド                  |
-| [画像の貼り付け](docs/FEATURES.md#画像の貼り付け)                             | クリップボードの画像をアップロードして記法を書く               |
-| [ページ情報](docs/FEATURES.md#ページ情報)                                     | 作成者・更新・被リンク・閲覧数などを 1 枚に                    |
-| [アイコン挿入](docs/FEATURES.md#アイコン挿入)                                 | 押した場所で意味が変わるアイコンキー                           |
-| [保存状態の表示](docs/FEATURES.md#保存状態の表示)                             | トーストではなく小さなアイコンで伝える                         |
-| [サイドバーとプロジェクト](docs/FEATURES.md#サイドバーとプロジェクト)         | サイドバーは今見ているページのプロジェクトを映す               |
-| [サイドバーのタブ](docs/FEATURES.md#サイドバーのタブ)                         | サイドバーに出すリストを選ぶ                                   |
-| [連携](docs/FEATURES.md#連携)                                                 | telescope、シェルから起動、Cosense のリンクを chatora で開く   |
+~~~sh
+bin/chatora-url-handler install
+~~~
+
+インストール後、macOS の「システム設定 → デスクトップと Dock → デフォルトの Web ブラウザ」で
+<code>Chatora Open</code> を選択してください。
+
+Cosense 以外の URL は、登録時に選択したブラウザへ転送されます。転送先を変更する場合は、次の
+コマンドを実行します。
+
+~~~sh
+chatora-url-handler browser
+~~~
+
+対象にする origin は <code>~/.local/share/chatora/url-handler/origins</code> に 1 行ずつ記述します。
+既定値は <code>scrapbox.io</code> です。現在の設定は <code>chatora-url-handler status</code>、
+アンインストールは <code>chatora-url-handler uninstall</code> で確認・実行できます。
 
 ## トラブルシューティング
 
-### `<C-i>` でアイコンが挿入されない
+### <code>&lt;C-i&gt;</code> でアイコンを挿入できない
 
-端末が `<C-i>` を `<Tab>` と別のキーとして送るのは、kitty keyboard protocol を話すときだけです。
-それ以外では両方が**同じバイト**で届き、`<Tab>` は補完プラグインが持っているため、アイコンでは
-なく補完メニューが出ます。
+端末が <code>&lt;C-i&gt;</code> と <code>&lt;Tab&gt;</code> を区別して入力できない場合があります。その場合は、
+既定で用意されている <code>&lt;M-i&gt;</code>（Alt+i）を使ってください。
 
-- kitty / Ghostty / WezTerm はそのまま対応。**tmux 越しなら `set -g extended-keys on` が必要**
-- 既定でもう一つ入っている **`<M-i>`（Alt+i）** を使う。どのプラグインとも競合しない
-- Ghostty なら `keybind = cmd+i=text:\x1bi` で Cmd+I を `<M-i>` として送れる
+kitty、Ghostty、WezTerm では通常そのまま動作します。tmux 越しに使う場合は、次の設定が必要に
+なることがあります。
 
-なお、chatora が `<Tab>` を奪うことはありません。テーブル行のときだけ本物のタブを挿入し
-（`expandtab` のままではセル区切りにならないためです）、それ以外は元々そのキーを持っていた
-マッピングに委譲します。
+~~~tmux
+set -g extended-keys on
+~~~
 
-### 何かが読み込めない（ページ・画像・関連ページ）或いはHTTPエラーが出た場合
+Ghostty では、次の設定で Cmd+I を <code>&lt;M-i&gt;</code> として送信できます。
 
-`log = true` を設定してから `:Chatora log` を開いてください。**2xx 以外のレスポンスはすべて**、
-メソッド・URL・status 付きで記録してあります。chatora は失敗を値に変えて UI を静かに保つ設計で、
-読めないページは「存在しないページ」に、取れない画像は「描かれない画像」になります。そのため、
-何が起きたのかはこのログでしか分かりません。
+~~~ini
+keybind = cmd+i=text:\x1bi
+~~~
 
-画像が出ない場合は、対応ターミナルと描画プラグインの両方が必要です
-（[画像の表示](docs/FEATURES.md#画像の表示)）。
+### ページや画像を読み込めない、HTTP エラーが出る
+
+<code>log = true</code> を設定してから <code>:Chatora log</code> を実行してください。HTTP レスポンスと
+エラーの詳細を確認できます。
+
+画像が表示されない場合は、対応するターミナル、ImageMagick、画像表示プラグインがそろっているか
+確認してください。画像の詳しい設定は [画像の表示](docs/advanced.md#画像の表示) を参照してください。
 
 ### コードブロックに色が付かない
 
-必要なのは **treesitter のパーサー**であって、その言語の LSP ではありません。`code:index.php` は
-`index.php` をファイル名として読んで `php` に解決し、その言語のパーサーがあるときだけ色を付けます。
-パーサーが無ければ何も起こらず、エラーにもなりません。そのため、`:TSInstall php` を実行するか、
-nvim-treesitter に `auto_install = true` を渡しておいてください。
+必要なのは、その言語の LSP ではなく Tree-sitter のパーサーです。たとえば PHP なら、次を実行
+してください。
 
-なお、`:TSInstall` で取ってこられる言語であれば、色が付かないときに chatora が一度だけ知らせます。
+~~~vim
+:TSInstall php php_only
+~~~
 
-PHP には癖があります。tree-sitter の `php` は `<?php` の**外側を HTML として読む**ため、開きタグの
-無いスニペットには色が付きません。chatora はそういうブロックを `php_only`（同じ文法をコードから
-読むほう）で読むので、`:TSInstall php php_only` と両方を入れておけば、どちらの書き方でも色が
-付きます。
+### 保存時に競合が発生する
 
-その他の問題は自由にissueを投げてください。🙌
-
-### 保存が競合で止まる
-
-同じ行がサーバー側でも編集されています。`]c` で競合行へ飛んで直してから、もう一度 `:w` して
-ください。詳しくは[同期と競合](docs/FEATURES.md#同期と競合)を見てください。
-
-## 開発
-
-設計の要点とテストの回し方は [CONTRIBUTING.md](CONTRIBUTING.md) にあります。
-
-`:Chatora reload` を使うと、nvim を再起動せずにプラグインを入れ替えられます。LSP を止め、chatora の
-ウィンドウとバッファを畳み、`package.loaded` から chatora のモジュールを落としたうえで、同じ
-オプションで `setup()` をやり直します。ただし、**サーバー側を変えたときは先に `bun run build`
-が必要です**。クライアントはサーバーのプロセスを起動し直すだけで、ビルドまではしません。
-
-```sh
-bun run verify           # typecheck + テスト + build + lint + smoke + E2E
-bun test                 # core + server の単体テスト
-nvim --headless --clean -u NORC -c "luafile tests/smoke.lua"
-bun tests/e2e/run.ts     # 偽 Cosense サーバー + headless nvim
-```
+同じ行をサーバー側でも編集している可能性があります。<code>]c</code> で競合行へ移動し、内容を確認・
+修正してから、もう一度 <code>:w</code> で保存してください。
 
 ## クレジット
 
 - [helpfeel/cosense-cli](https://github.com/helpfeel/cosense-cli)
 - [cosense-toolbox/parser](https://www.npmjs.com/package/@cosense-toolbox/parser)
-- [3rd/image.nvim](https://github.com/3rd/image.nvim) と
-  [folke/snacks.nvim](https://github.com/folke/snacks.nvim)
+- [3rd/image.nvim](https://github.com/3rd/image.nvim)
+- [folke/snacks.nvim](https://github.com/folke/snacks.nvim)
 - [petertriho/nvim-scrollbar](https://github.com/petertriho/nvim-scrollbar)
 - [folke/lazy.nvim](https://github.com/folke/lazy.nvim)
 

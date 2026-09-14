@@ -13,7 +13,9 @@ TypeScript で書いた LSP サーバーの 2 つでできています。
 | `tests/smoke.lua` | headless nvim で Lua 側を通しで検証する |
 | `tests/e2e/` | 偽 Cosense サーバー + headless nvim |
 | `CONTRIBUTING.md` | 設計の要点・テストの 3 段・セキュリティ。**設計で迷ったらここ** |
-| `docs/FEATURES.md` | 機能ごとの詳しい挙動（ユーザー向け） |
+| `docs/advanced.md` | 編集・表示・移動に関する詳しい挙動（ユーザー向け） |
+| `docs/configuration.md` | サイドバーなどの拡張設定（ユーザー向け） |
+| `docs/integrations.md` | telescope.nvim、CLI、macOS 連携（ユーザー向け） |
 
 ## 検証
 
