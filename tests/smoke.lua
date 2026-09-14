@@ -2480,6 +2480,75 @@ local ok, err = pcall(function()
       'a streamed paste is prefixed chunk by chunk: ' .. vim.inspect(got)
     )
 
+    -- A pasted page URL becomes its notation, the way the web editor rewrites one: the
+    -- title alone inside the page's own project, and `/project/`-prefixed anywhere else.
+    local LINE_ID = '0123456789abcdef01234567'
+    for _, case in ipairs({
+      { 'https://scrapbox.io/my-project/Hello_World', '[Hello World]' },
+      { 'https://scrapbox.io/other-project/Hello_World', '[/other-project/Hello World]' },
+      { 'https://cosense.io/my-project/%E3%83%9A%E3%83%BC%E3%82%B8', '[ページ]' },
+      { 'https://scrapbox.io/my-project/Title#' .. LINE_ID, '[Title#' .. LINE_ID .. ']' },
+      { 'https://scrapbox.io/other-project/Title#' .. LINE_ID, '[/other-project/Title#' .. LINE_ID .. ']' },
+      { 'https://scrapbox.io/my-project/Title#top', '[Title]' },
+      { '  https://scrapbox.io/my-project/Title  ', '[Title]' },
+      { 'https://example.com/my-project/Title', nil },
+      { 'https://scrapbox.io/my-project', nil },
+      { 'https://scrapbox.io/settings/profile', nil },
+      { '見て https://scrapbox.io/my-project/Title', nil },
+      { 'https://scrapbox.io/my-project/a%5Bb%5D', nil },
+      { '', nil },
+    }) do
+      local got_link = paste.link_for(case[1], 'my-project')
+      assert(
+        got_link == case[2],
+        ('link_for(%q) = %s'):format(case[1], vim.inspect(got_link))
+      )
+    end
+
+    -- The same rewrite through a real paste, with the buffer naming the project. The
+    -- related panel follows a `cosense://` buffer, and this one has no server behind it.
+    local auto_open = require('chatora.config').options.related.auto_open
+    require('chatora.config').options.related.auto_open = false
+    vim.api.nvim_buf_set_name(page_buf, 'cosense://my-project/タイトル')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', '' })
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.paste({ 'https://scrapbox.io/my-project/Hello_World' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', '[Hello World]' }), 'a pasted URL becomes a link: ' .. vim.inspect(got))
+
+    -- `p` from a register gets it too, and a URL of another project keeps that project.
+    vim.fn.setreg('a', { 'https://scrapbox.io/other-project/Page' }, 'v')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'x' })
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    paste.put(true, 'a')
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', 'x[/other-project/Page]' }), 'p rewrites a URL too: ' .. vim.inspect(got))
+
+    -- Inside a code block the URL stays a URL: that text is not read as notation, so a
+    -- link written there would lose it.
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:sample.md', ' ' })
+    vim.api.nvim_win_set_cursor(0, { 3, 1 })
+    vim.paste({ 'https://scrapbox.io/my-project/Hello_World' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'code:sample.md', ' https://scrapbox.io/my-project/Hello_World' }),
+      'a code block keeps the URL: ' .. vim.inspect(got)
+    )
+
+    -- Off by configuration: the URL lands as it was pasted.
+    require('chatora.config').options.edit.paste_link = false
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', '' })
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.paste({ 'https://scrapbox.io/my-project/Hello_World' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'https://scrapbox.io/my-project/Hello_World' }),
+      'paste_link = false leaves the URL: ' .. vim.inspect(got)
+    )
+    require('chatora.config').options.edit.paste_link = true
+    vim.api.nvim_buf_set_name(page_buf, '')
+    require('chatora.config').options.related.auto_open = auto_open
+
     -- Not a page: Neovim's own paste, untouched.
     vim.cmd('new')
     vim.bo.buftype = 'nofile'

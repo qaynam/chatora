@@ -332,6 +332,7 @@ require('chatora').setup({
     table_tab = true,                                         -- テーブル行の <Tab> に本物のタブを使う
     surround = true,                                          -- Visual モードの装飾
     paste_indent = true,                                      -- 貼り付けた行のインデントを揃える
+    paste_link = true,                                        -- 貼り付けたページ URL をリンク記法に変換
     date_format = '%Y-%m-%d %H:%M:%S',                        -- 日時の書式（os.date）
   },
 

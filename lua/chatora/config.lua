@@ -56,6 +56,7 @@ local M = {}
 ---@field table_tab? boolean  <Tab> inserts a real tab on a table row.
 ---@field surround? boolean|string[]  Visual-mode decoration keys; a list of markers restricts them.
 ---@field paste_indent? boolean  `p` / `P` give pasted lines the indent of the line they land on.
+---@field paste_link? boolean  A pasted Cosense page URL becomes its link notation.
 ---@field date_format? string  os.date format of what insert_date inserts.
 
 ---@class chatora.TelomereConfig
@@ -174,6 +175,7 @@ local defaults = {
     table_tab = true,
     surround = true,
     paste_indent = true,
+    paste_link = true,
     date_format = '%Y-%m-%d %H:%M:%S',
   },
   view = {

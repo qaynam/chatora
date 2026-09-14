@@ -10,18 +10,69 @@ local indent = require('chatora.indent')
 M.ns = vim.api.nvim_create_namespace('chatora_paste')
 
 -- ---------------------------------------------------------------------------
+-- link
+-- ---------------------------------------------------------------------------
+
+-- A fragment is part of the page's identity only as a line reference, which Cosense writes
+-- as 24 hex digits; uri.parse_web drops every other one.
+local LINE_ID_LENGTH = 24
+
+--- The project of the page the current buffer holds, or nil in any other buffer.
+local function buffer_project()
+  return (uri.parse(vim.api.nvim_buf_get_name(0)))
+end
+
+--- The notation a pasted page URL becomes, or nil when `text` is not one page URL: the
+--- title alone inside `project`, and `[/other/title]` for any other project — what the web
+--- editor writes for the same paste. A title carrying a bracket has no notation that would
+--- hold it, so its URL is left as it was pasted.
+function M.link_for(text, project)
+  local url = vim.trim(text)
+  if url == '' or url:find('%s') then
+    return nil
+  end
+  local target, title = uri.parse_web(url, require('chatora.config').options.origin)
+  if not target or not title or title:find('[%[%]]') then
+    return nil
+  end
+  local line_id = url:match('#(%x+)$')
+  local suffix = (line_id and #line_id == LINE_ID_LENGTH) and ('#' .. line_id) or ''
+  if target == project then
+    return '[' .. title .. suffix .. ']'
+  end
+  return '[/' .. target .. '/' .. title .. suffix .. ']'
+end
+
+-- ---------------------------------------------------------------------------
 -- text
 -- ---------------------------------------------------------------------------
 
---- Inside a `code:` or `table:` block: the nearest shallower line above is its marker.
-local function in_block(lines, row)
+--- `'code'` or `'table'` when `row` is inside such a block, else nil: the nearest shallower
+--- line above it is its marker.
+local function block_marker(lines, row)
   local depth = indent.level(lines[row])
   for r = row - 1, 1, -1 do
     if indent.level(lines[r]) < depth then
-      return lines[r]:match('^%s*code:') ~= nil or lines[r]:match('^%s*table:') ~= nil
+      if lines[r]:match('^%s*code:') then
+        return 'code'
+      end
+      return lines[r]:match('^%s*table:') and 'table' or nil
     end
   end
-  return false
+  return nil
+end
+
+--- `text` as it should land in the buffer, or nil to paste it as it came. A code block is
+--- left alone: its text is not read as notation, so a link written there loses the URL.
+local function pasted(text)
+  if not require('chatora.config').options.edit.paste_link then
+    return nil
+  end
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  if block_marker(vim.api.nvim_buf_get_lines(0, 0, -1, false), row) == 'code' then
+    return nil
+  end
+  return M.link_for(text, buffer_project())
 end
 
 --- What every pasted line after the first gets in front of it, and whether that is a quote
@@ -81,13 +132,20 @@ function M.put(after, register)
   local info = vim.fn.getreginfo(register)
   local lines = info.regcontents or {}
   local regtype = (info.regtype or 'v'):sub(1, 1)
-  if #lines < 2 or regtype == '\22' then
+  -- Without a count only: `3p` asks for three copies, and one link is not that edit.
+  if #lines == 1 and count == 1 then
+    local link = pasted(lines[1])
+    if link then
+      return vim.api.nvim_put({ link }, regtype == 'V' and 'l' or 'c', after, true)
+    end
+  end
+  if #lines < 2 or regtype == '\22' or not require('chatora.config').options.edit.paste_indent then
     return vims_own()
   end
   local row, col = unpack(vim.api.nvim_win_get_cursor(0))
   local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
   local line = buf_lines[row] or ''
-  local block = in_block(buf_lines, row)
+  local block = block_marker(buf_lines, row) ~= nil
   if regtype == 'V' then
     if not block then
       return vims_own()
@@ -108,16 +166,18 @@ function M.put(after, register)
   vim.api.nvim_put(M.prefixed(lines, prefix, quote), 'c', after, true)
 end
 
---- Map `p` and `P` in a page buffer to M.put, unless `edit.paste_indent` is off. A
---- read-only page keeps the mapping that explains why it cannot be edited.
+--- Map `p` and `P` in a page buffer to M.put, which both `edit.paste_indent` and
+--- `edit.paste_link` need. A read-only page keeps the mapping that explains why it cannot
+--- be edited.
 function M.attach(bufnr)
-  if vim.b[bufnr].chatora_read_only or not require('chatora.config').options.edit.paste_indent then
+  local edit = require('chatora.config').options.edit
+  if vim.b[bufnr].chatora_read_only or not (edit.paste_indent or edit.paste_link) then
     return
   end
   for key, after in pairs({ p = true, P = false }) do
     vim.keymap.set('n', key, function()
       M.put(after, vim.v.register)
-    end, { buffer = bufnr, silent = true, desc = 'chatora: 貼り付け（ブロックの中では字下げを揃える）' })
+    end, { buffer = bufnr, silent = true, desc = 'chatora: 貼り付け（ページ URL はリンクに、ブロックの中では字下げを揃える）' })
   end
 end
 
@@ -134,13 +194,21 @@ function M.install()
     local first_chunk = phase < 2
     if first_chunk then
       prefix, quote = nil, false
-      local mode = vim.api.nvim_get_mode().mode
-      local lands_on_cursor_line = mode:find('^i') or mode:find('^n')
-      if vim.bo.filetype == 'cosense' and #lines > 1 and lands_on_cursor_line then
-        local row, col = unpack(vim.api.nvim_win_get_cursor(0))
-        local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-        local line = buf_lines[row] or ''
-        prefix, quote = M.line_prefix(line, insert_offset(mode, line, col), in_block(buf_lines, row))
+    end
+    if first_chunk and vim.bo.filetype == 'cosense' then
+      if #lines == 1 then
+        -- One line with nothing after it is the whole paste, whatever the phase says: a
+        -- newline of its own would have left a second entry here.
+        lines = { pasted(lines[1]) or lines[1] }
+      else
+        local mode = vim.api.nvim_get_mode().mode
+        if mode:find('^i') or mode:find('^n') then
+          local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+          local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+          local line = buf_lines[row] or ''
+          local block = block_marker(buf_lines, row) ~= nil
+          prefix, quote = M.line_prefix(line, insert_offset(mode, line, col), block)
+        end
       end
     end
     if prefix then
