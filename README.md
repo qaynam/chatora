@@ -353,6 +353,7 @@ require('chatora').setup({
   image = {
     enabled = true,     -- 画像表示を有効化
     backend = 'auto',   -- image.nvim を優先し、なければ snacks.nvim を使用
+    completion = true,  -- 補完メニューに候補ページのアイコンを描画（nvim-cmp のみ）
     height = 20,        -- 単独行の画像の高さの上限
     height_large = nil, -- [[…]] の画像の高さ。nil なら height の 2 倍
     gallery = true,     -- 画像だけの行をタイル状に表示

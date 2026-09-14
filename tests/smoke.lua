@@ -2565,6 +2565,94 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(page_buf, { force = true })
   end
 
+  -- A suggested page's own picture, drawn in the completion menu the way Cosense draws it.
+  do
+    local icons = require('chatora.completion_icons')
+    local byte_col, screen_col = icons.icon_column('Chatora  ', 'Chatora')
+    assert(byte_col == 7 and screen_col == 7, 'the icon goes after the title: ' .. tostring(byte_col))
+    local wide_col, wide_screen = icons.icon_column('日本語  ', '日本語')
+    assert(wide_col == 9 and wide_screen == 6, 'bytes for the buffer, cells for the screen')
+    assert(icons.icon_column('Chatora', 'Chatora') == nil, 'no blank cells after it, no icon')
+    assert(icons.icon_column('ほかのページ  ', 'Chatora') == nil, 'the title is not on that line')
+
+    -- The whole draw, with a menu buffer of the shape nvim-cmp leaves behind.
+    local config = require('chatora.config')
+    local lsp = require('chatora.lsp')
+    local orig_request, orig_backend = lsp.request, config.options.image.backend
+    local auto_open = config.options.related.auto_open
+    config.options.related.auto_open = false
+    local placements = {}
+    config.options.image.backend = {
+      place = function(bufnr, path, geom, opts)
+        placements[#placements + 1] = { bufnr = bufnr, path = path, geom = geom, opts = opts }
+        return { close = function() end }
+      end,
+    }
+    local fetched = {}
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/fetchAsset' then
+        fetched[#fetched + 1] = params
+        cb(nil, { ok = true, path = '/tmp/icon.png' })
+      end
+    end
+    package.loaded['cmp'] = {
+      get_entries = function()
+        return {
+          { get_completion_item = function() return { label = 'Chatora' } end },
+          { get_completion_item = function() return { label = 'ほかのページ' } end },
+        }
+      end,
+    }
+
+    vim.cmd('new')
+    local page = vim.api.nvim_get_current_buf()
+    vim.bo.buftype = 'nofile'
+    vim.api.nvim_buf_set_name(page, 'cosense://my-project/ページ')
+    local menu = vim.api.nvim_create_buf(false, true)
+    vim.bo[menu].filetype = 'cmp_menu'
+    vim.api.nvim_buf_set_lines(menu, 0, -1, false, { 'Chatora  ', 'ほかのページ  ' })
+    local menu_win = vim.api.nvim_open_win(menu, false, {
+      relative = 'editor',
+      row = 1,
+      col = 1,
+      width = 20,
+      height = 2,
+      style = 'minimal',
+    })
+
+    icons.draw()
+    assert(#placements == 2, 'one picture per row on screen: ' .. #placements)
+    assert(placements[1].bufnr == menu, 'the picture goes in the menu buffer')
+    assert(placements[1].geom.row == 1 and placements[2].geom.row == 2, 'rows follow the entries')
+    assert(placements[1].geom.screen_col == 7, 'after the title, in the blank cells')
+    assert(
+      fetched[1].url == 'https://scrapbox.io/api/pages/my-project/Chatora/icon',
+      'the icon endpoint names the page: ' .. tostring(fetched[1].url)
+    )
+    assert(fetched[1].thumb == 64, 'fetched small')
+
+    -- Drawn once: a settled menu does not ask again.
+    icons.draw()
+    assert(#placements == 2, 'a row that already has its picture keeps it')
+
+    config.options.image.completion = false
+    icons.draw()
+    config.options.image.completion = true
+    icons.draw()
+    assert(#placements == 4, 'turning it off takes the pictures down, and back on draws them')
+
+    icons.clear()
+    vim.api.nvim_win_close(menu_win, true)
+    vim.api.nvim_buf_delete(menu, { force = true })
+    package.loaded['cmp'] = nil
+    lsp.request = orig_request
+    config.options.image.backend = orig_backend
+    config.options.related.auto_open = auto_open
+    vim.api.nvim_buf_set_name(page, '')
+    vim.cmd('close!')
+    vim.api.nvim_buf_delete(page, { force = true })
+  end
+
   -- Export for AI: the hop count comes from the argument or from a picker that says how
   -- many pages each choice would take, and the file that comes back opens beside the page.
   do

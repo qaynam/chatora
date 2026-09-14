@@ -86,6 +86,7 @@ local M = {}
 ---@field backend? 'auto'|'image_nvim'|'snacks'|table|fun(): table  'auto' prefers image.nvim, then snacks.nvim.
 ---@field height? integer  Rows for a picture on a line of its own.
 ---@field height_large? integer  Rows for the `[[…]]` notation; defaults to twice `height`.
+---@field completion? boolean  Draw each suggested page's icon in the completion menu (nvim-cmp).
 ---@field gallery? boolean|integer|{ rows?: integer, aspect?: number }  Tiles for a line of pictures only.
 ---@field border? boolean|{ width?: integer, color?: string, padding?: integer }
 
@@ -193,6 +194,7 @@ local defaults = {
   image = {
     enabled = true,
     backend = 'auto',
+    completion = true,
     height = 20,
     height_large = nil,
     gallery = true,

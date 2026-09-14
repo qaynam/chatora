@@ -257,6 +257,7 @@ end
 
 function M.attach(bufnr)
   enable_native_if_needed(bufnr)
+  require('chatora.completion_icons').attach(bufnr)
   if vim.b[bufnr].chatora_completion_attached then
     return
   end
