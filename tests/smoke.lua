@@ -221,6 +221,42 @@ local ok, err = pcall(function()
     assert(blocks[1].start_line == blocks[1].end_line, 'expected empty interior')
   end
 
+  -- A language no grammar is named after, and a block that carries another language
+  -- inside it: `.mdx` reads as markdown, and the lua fenced in it is an injected layer,
+  -- which is only lit when every tree is walked and not just the root.
+  do
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      'code:test.mdx',
+      ' # 見出し',
+      ' ',
+      ' ```lua',
+      ' local x = 1',
+      ' ```',
+    })
+    vim.bo[buf].filetype = 'cosense'
+    codeblock.refresh(buf)
+
+    local groups = {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, codeblock.ns, 0, -1, { details = true })) do
+      if mark[4].hl_group then
+        groups[mark[4].hl_group] = true
+      end
+    end
+    local markdown_lit, lua_lit = false, false
+    for group in pairs(groups) do
+      markdown_lit = markdown_lit or group:match('%.markdown$') ~= nil
+      lua_lit = lua_lit or group:match('%.lua$') ~= nil
+    end
+    if pcall(vim.treesitter.language.add, 'markdown') then
+      assert(markdown_lit, 'mdx reads as markdown: ' .. vim.inspect(vim.tbl_keys(groups)))
+      if pcall(vim.treesitter.language.add, 'lua') then
+        assert(lua_lit, 'the fenced lua is lit too: ' .. vim.inspect(vim.tbl_keys(groups)))
+      end
+    end
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- codeblock.attach + a forced refresh: if the bundled lua parser is
   -- available headless, at least one extmark must land in the namespace.
   do
