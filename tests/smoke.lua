@@ -2505,6 +2505,23 @@ local ok, err = pcall(function()
       )
     end
 
+    -- A Gyazo capture is bracketed instead, which is how Cosense draws the picture.
+    local HASH = '0123456789abcdef0123456789abcdef'
+    for _, case in ipairs({
+      { 'https://gyazo.com/' .. HASH, '[https://gyazo.com/' .. HASH .. ']' },
+      { 'https://my-team.gyazo.com/' .. HASH, '[https://my-team.gyazo.com/' .. HASH .. ']' },
+      { 'https://i.gyazo.com/' .. HASH .. '.png', '[https://i.gyazo.com/' .. HASH .. '.png]' },
+      { 'https://gyazo.com/' .. HASH .. '/thumb/60', '[https://gyazo.com/' .. HASH .. '/thumb/60]' },
+      { '  https://gyazo.com/' .. HASH .. '  ', '[https://gyazo.com/' .. HASH .. ']' },
+      { 'https://gyazo.com/collections/' .. HASH, nil },
+      { 'https://gyazo.com/', nil },
+      { 'https://example.com/' .. HASH, nil },
+      { 'これ https://gyazo.com/' .. HASH, nil },
+    }) do
+      local got_gyazo = paste.gyazo_link(case[1])
+      assert(got_gyazo == case[2], ('gyazo_link(%q) = %s'):format(case[1], vim.inspect(got_gyazo)))
+    end
+
     -- The same rewrite through a real paste, with the buffer naming the project. The
     -- related panel follows a `cosense://` buffer, and this one has no server behind it.
     local auto_open = require('chatora.config').options.related.auto_open
@@ -2523,6 +2540,17 @@ local ok, err = pcall(function()
     paste.put(true, 'a')
     got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
     assert(vim.deep_equal(got, { 'タイトル', 'x[/other-project/Page]' }), 'p rewrites a URL too: ' .. vim.inspect(got))
+
+    -- A paste that ends in a newline is still one line of text, which is what a URL copied
+    -- from a browser often looks like.
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', '' })
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.api.nvim_paste('https://scrapbox.io/my-project/Hello_World\n', true, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', '[Hello World]', '' }),
+      'a trailing newline does not stop the rewrite: ' .. vim.inspect(got)
+    )
 
     -- Inside a code block the URL stays a URL: that text is not read as notation, so a
     -- link written there would lose it.
