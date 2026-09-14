@@ -62,6 +62,44 @@ local function block_marker(lines, row)
   return nil
 end
 
+-- What a capture's id is, and what a collection's or an album's path is not.
+local GYAZO_ID_LENGTH = 32
+
+--- `[<url>]` for a pasted Gyazo capture, or nil for anything else — a team's own domain
+--- included. Cosense draws a bracketed Gyazo URL as the picture and a bare one as a link,
+--- which is why the web editor brackets one on paste.
+---
+--- The URL is bracketed as it was written: which form it names — the capture's page, the
+--- image itself, a thumbnail — is what decides what gets drawn.
+function M.gyazo_link(text)
+  local url = vim.trim(text)
+  if url:find('%s') then
+    return nil
+  end
+  local host, path = url:match('^https?://([^/]+)(/.*)$')
+  if not host or not (host == 'gyazo.com' or host:match('%.gyazo%.com$')) then
+    return nil
+  end
+  local id = path:match('^/(%x+)')
+  if not id or #id ~= GYAZO_ID_LENGTH then
+    return nil
+  end
+  return '[' .. url .. ']'
+end
+
+--- The single line a paste carries, or nil when it carries more. A paste ending in a
+--- newline — which is how a browser hands over a copied URL — arrives with an empty entry
+--- after it, and that is still one line of text.
+local function single_line(lines)
+  if #lines == 1 then
+    return lines[1]
+  end
+  if #lines == 2 and lines[2] == '' then
+    return lines[1]
+  end
+  return nil
+end
+
 --- `text` as it should land in the buffer, or nil to paste it as it came. A code block is
 --- left alone: its text is not read as notation, so a link written there loses the URL.
 local function pasted(text)
@@ -72,7 +110,7 @@ local function pasted(text)
   if block_marker(vim.api.nvim_buf_get_lines(0, 0, -1, false), row) == 'code' then
     return nil
   end
-  return M.link_for(text, buffer_project())
+  return M.link_for(text, buffer_project()) or M.gyazo_link(text)
 end
 
 --- What every pasted line after the first gets in front of it, and whether that is a quote
@@ -133,10 +171,12 @@ function M.put(after, register)
   local lines = info.regcontents or {}
   local regtype = (info.regtype or 'v'):sub(1, 1)
   -- Without a count only: `3p` asks for three copies, and one link is not that edit.
-  if #lines == 1 and count == 1 then
-    local link = pasted(lines[1])
+  local only = count == 1 and single_line(lines) or nil
+  if only then
+    local link = pasted(only)
     if link then
-      return vim.api.nvim_put({ link }, regtype == 'V' and 'l' or 'c', after, true)
+      local put = #lines == 1 and { link } or { link, '' }
+      return vim.api.nvim_put(put, regtype == 'V' and 'l' or 'c', after, true)
     end
   end
   if #lines < 2 or regtype == '\22' or not require('chatora.config').options.edit.paste_indent then
@@ -196,11 +236,13 @@ function M.install()
       prefix, quote = nil, false
     end
     if first_chunk and vim.bo.filetype == 'cosense' then
-      if #lines == 1 then
-        -- One line with nothing after it is the whole paste, whatever the phase says: a
-        -- newline of its own would have left a second entry here.
-        lines = { pasted(lines[1]) or lines[1] }
-      else
+      -- Decided on the first chunk, whatever the phase says it is: a paste of more than
+      -- one line would have left a second line of text in this one.
+      local only = single_line(lines)
+      local link = only and pasted(only) or nil
+      if link then
+        lines = #lines == 1 and { link } or { link, '' }
+      elseif #lines > 1 then
         local mode = vim.api.nvim_get_mode().mode
         if mode:find('^i') or mode:find('^n') then
           local row, col = unpack(vim.api.nvim_win_get_cursor(0))
