@@ -174,6 +174,7 @@ Linux で画像を貼り付ける場合は、環境に応じて <code>wl-paste</
 | <code>:Chatora account</code> | アカウントを切り替える、または追加する |
 | <code>:Chatora logout</code> | 現在のアカウントの PAT を削除する |
 | <code>:Chatora images [redraw&#124;clear]</code> | 画像の状態を表示する。<code>redraw</code> で再描画し、<code>clear</code> でキャッシュを削除して再取得します |
+| <code>:Chatora export [1hop&#124;2hop]</code> | ページとリンク先を AI 向けに 1 つのファイルへ書き出す |
 | <code>:Chatora help</code> | 操作一覧を表示する |
 | <code>:Chatora log</code> | 診断ログを開く。<code>log</code> オプションを有効にしている場合に使えます |
 | <code>:Chatora reload</code> | Neovim を再起動せずにプラグインを再読み込みする |
@@ -240,6 +241,7 @@ vim.api.nvim_create_autocmd('FileType', {
 | <code>&lt;leader&gt;cf</code> | <code>pull</code> | サーバーの変更を取り込む |
 | <code>&lt;leader&gt;cc</code> / <code>]c</code> | <code>next_conflict</code> | 次の競合行へ移動 |
 | <code>]u</code> / <code>[u</code> | <code>next_updated</code> / <code>prev_updated</code> | 次／前の更新行へ移動 |
+| <code>&lt;leader&gt;ce</code> | <code>export</code> | ページとリンク先を AI 向けに書き出す |
 | <code>&lt;leader&gt;cv</code> | <code>paste_image</code> | クリップボードの画像を貼り付け |
 | <code>&lt;leader&gt;cd</code> | <code>delete</code> | ページを削除（確認あり） |
 | <code>&lt;leader&gt;cI</code> | <code>normalize_indent</code> | インデントを半角スペースに揃える |
@@ -332,6 +334,7 @@ require('chatora').setup({
     table_tab = true,                                         -- テーブル行の <Tab> に本物のタブを使う
     surround = true,                                          -- Visual モードの装飾
     paste_indent = true,                                      -- 貼り付けた行のインデントを揃える
+    paste_link = true,                                        -- 貼り付けたページ URL をリンク記法に変換
     date_format = '%Y-%m-%d %H:%M:%S',                        -- 日時の書式（os.date）
   },
 
@@ -350,6 +353,7 @@ require('chatora').setup({
   image = {
     enabled = true,     -- 画像表示を有効化
     backend = 'auto',   -- image.nvim を優先し、なければ snacks.nvim を使用
+    completion = true,  -- 補完メニューに候補ページのアイコンを描画（nvim-cmp のみ）
     height = 20,        -- 単独行の画像の高さの上限
     height_large = nil, -- [[…]] の画像の高さ。nil なら height の 2 倍
     gallery = true,     -- 画像だけの行をタイル状に表示

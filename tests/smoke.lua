@@ -2480,6 +2480,75 @@ local ok, err = pcall(function()
       'a streamed paste is prefixed chunk by chunk: ' .. vim.inspect(got)
     )
 
+    -- A pasted page URL becomes its notation, the way the web editor rewrites one: the
+    -- title alone inside the page's own project, and `/project/`-prefixed anywhere else.
+    local LINE_ID = '0123456789abcdef01234567'
+    for _, case in ipairs({
+      { 'https://scrapbox.io/my-project/Hello_World', '[Hello World]' },
+      { 'https://scrapbox.io/other-project/Hello_World', '[/other-project/Hello World]' },
+      { 'https://cosense.io/my-project/%E3%83%9A%E3%83%BC%E3%82%B8', '[ページ]' },
+      { 'https://scrapbox.io/my-project/Title#' .. LINE_ID, '[Title#' .. LINE_ID .. ']' },
+      { 'https://scrapbox.io/other-project/Title#' .. LINE_ID, '[/other-project/Title#' .. LINE_ID .. ']' },
+      { 'https://scrapbox.io/my-project/Title#top', '[Title]' },
+      { '  https://scrapbox.io/my-project/Title  ', '[Title]' },
+      { 'https://example.com/my-project/Title', nil },
+      { 'https://scrapbox.io/my-project', nil },
+      { 'https://scrapbox.io/settings/profile', nil },
+      { '見て https://scrapbox.io/my-project/Title', nil },
+      { 'https://scrapbox.io/my-project/a%5Bb%5D', nil },
+      { '', nil },
+    }) do
+      local got_link = paste.link_for(case[1], 'my-project')
+      assert(
+        got_link == case[2],
+        ('link_for(%q) = %s'):format(case[1], vim.inspect(got_link))
+      )
+    end
+
+    -- The same rewrite through a real paste, with the buffer naming the project. The
+    -- related panel follows a `cosense://` buffer, and this one has no server behind it.
+    local auto_open = require('chatora.config').options.related.auto_open
+    require('chatora.config').options.related.auto_open = false
+    vim.api.nvim_buf_set_name(page_buf, 'cosense://my-project/タイトル')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', '' })
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.paste({ 'https://scrapbox.io/my-project/Hello_World' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', '[Hello World]' }), 'a pasted URL becomes a link: ' .. vim.inspect(got))
+
+    -- `p` from a register gets it too, and a URL of another project keeps that project.
+    vim.fn.setreg('a', { 'https://scrapbox.io/other-project/Page' }, 'v')
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'x' })
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    paste.put(true, 'a')
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(vim.deep_equal(got, { 'タイトル', 'x[/other-project/Page]' }), 'p rewrites a URL too: ' .. vim.inspect(got))
+
+    -- Inside a code block the URL stays a URL: that text is not read as notation, so a
+    -- link written there would lose it.
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:sample.md', ' ' })
+    vim.api.nvim_win_set_cursor(0, { 3, 1 })
+    vim.paste({ 'https://scrapbox.io/my-project/Hello_World' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'code:sample.md', ' https://scrapbox.io/my-project/Hello_World' }),
+      'a code block keeps the URL: ' .. vim.inspect(got)
+    )
+
+    -- Off by configuration: the URL lands as it was pasted.
+    require('chatora.config').options.edit.paste_link = false
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', '' })
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.paste({ 'https://scrapbox.io/my-project/Hello_World' }, -1)
+    got = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+    assert(
+      vim.deep_equal(got, { 'タイトル', 'https://scrapbox.io/my-project/Hello_World' }),
+      'paste_link = false leaves the URL: ' .. vim.inspect(got)
+    )
+    require('chatora.config').options.edit.paste_link = true
+    vim.api.nvim_buf_set_name(page_buf, '')
+    require('chatora.config').options.related.auto_open = auto_open
+
     -- Not a page: Neovim's own paste, untouched.
     vim.cmd('new')
     vim.bo.buftype = 'nofile'
@@ -2494,6 +2563,159 @@ local ok, err = pcall(function()
     vim.cmd('close!')
     vim.api.nvim_buf_delete(plain_buf, { force = true })
     vim.api.nvim_buf_delete(page_buf, { force = true })
+  end
+
+  -- A suggested page's own picture, drawn in the completion menu the way Cosense draws it.
+  do
+    local icons = require('chatora.completion_icons')
+    local byte_col, screen_col = icons.icon_column('Chatora  ', 'Chatora')
+    assert(byte_col == 7 and screen_col == 7, 'the icon goes after the title: ' .. tostring(byte_col))
+    local wide_col, wide_screen = icons.icon_column('日本語  ', '日本語')
+    assert(wide_col == 9 and wide_screen == 6, 'bytes for the buffer, cells for the screen')
+    assert(icons.icon_column('Chatora', 'Chatora') == nil, 'no blank cells after it, no icon')
+    assert(icons.icon_column('ほかのページ  ', 'Chatora') == nil, 'the title is not on that line')
+
+    -- The whole draw, with a menu buffer of the shape nvim-cmp leaves behind.
+    local config = require('chatora.config')
+    local lsp = require('chatora.lsp')
+    local orig_request, orig_backend = lsp.request, config.options.image.backend
+    local auto_open = config.options.related.auto_open
+    config.options.related.auto_open = false
+    local placements = {}
+    config.options.image.backend = {
+      place = function(bufnr, path, geom, opts)
+        placements[#placements + 1] = { bufnr = bufnr, path = path, geom = geom, opts = opts }
+        return { close = function() end }
+      end,
+    }
+    local fetched = {}
+    lsp.request = function(method, params, cb)
+      if method == 'chatora/fetchAsset' then
+        fetched[#fetched + 1] = params
+        cb(nil, { ok = true, path = '/tmp/icon.png' })
+      end
+    end
+    package.loaded['cmp'] = {
+      get_entries = function()
+        return {
+          { get_completion_item = function() return { label = 'Chatora' } end },
+          { get_completion_item = function() return { label = 'ほかのページ' } end },
+        }
+      end,
+    }
+
+    vim.cmd('new')
+    local page = vim.api.nvim_get_current_buf()
+    vim.bo.buftype = 'nofile'
+    vim.api.nvim_buf_set_name(page, 'cosense://my-project/ページ')
+    local menu = vim.api.nvim_create_buf(false, true)
+    vim.bo[menu].filetype = 'cmp_menu'
+    vim.api.nvim_buf_set_lines(menu, 0, -1, false, { 'Chatora  ', 'ほかのページ  ' })
+    local menu_win = vim.api.nvim_open_win(menu, false, {
+      relative = 'editor',
+      row = 1,
+      col = 1,
+      width = 20,
+      height = 2,
+      style = 'minimal',
+    })
+
+    icons.draw()
+    assert(#placements == 2, 'one picture per row on screen: ' .. #placements)
+    assert(placements[1].bufnr == menu, 'the picture goes in the menu buffer')
+    assert(placements[1].geom.row == 1 and placements[2].geom.row == 2, 'rows follow the entries')
+    assert(placements[1].geom.screen_col == 7, 'after the title, in the blank cells')
+    assert(
+      fetched[1].url == 'https://scrapbox.io/api/pages/my-project/Chatora/icon',
+      'the icon endpoint names the page: ' .. tostring(fetched[1].url)
+    )
+    assert(fetched[1].thumb == 64, 'fetched small')
+
+    -- Drawn once: a settled menu does not ask again.
+    icons.draw()
+    assert(#placements == 2, 'a row that already has its picture keeps it')
+
+    config.options.image.completion = false
+    icons.draw()
+    config.options.image.completion = true
+    icons.draw()
+    assert(#placements == 4, 'turning it off takes the pictures down, and back on draws them')
+
+    icons.clear()
+    vim.api.nvim_win_close(menu_win, true)
+    vim.api.nvim_buf_delete(menu, { force = true })
+    package.loaded['cmp'] = nil
+    lsp.request = orig_request
+    config.options.image.backend = orig_backend
+    config.options.related.auto_open = auto_open
+    vim.api.nvim_buf_set_name(page, '')
+    vim.cmd('close!')
+    vim.api.nvim_buf_delete(page, { force = true })
+  end
+
+  -- Export for AI: the hop count comes from the argument or from a picker that says how
+  -- many pages each choice would take, and the file that comes back opens beside the page.
+  do
+    local export = require('chatora.export')
+    assert(export.parse_hop('1') == 1, '1 is one hop')
+    assert(export.parse_hop('2hop') == 2, 'the spelling the command line uses')
+    for _, bad in ipairs({ '', '3', 'x', '12' }) do
+      assert(export.parse_hop(bad) == nil, ('%q is not a hop count'):format(bad))
+    end
+
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_request, auto_open = lsp.request, config.options.related.auto_open
+    config.options.related.auto_open = false
+    local requested = {}
+    local exported = vim.fn.tempname() .. '.txt'
+    vim.fn.writefile({ 'export text' }, exported)
+    lsp.request = function(method, params, cb)
+      requested[#requested + 1] = { method = method, params = params }
+      if method == 'chatora/relatedPages' then
+        cb(nil, { ok = true, links1hop = { {}, {} }, links2hop = { {}, {}, {} } })
+      elseif method == 'chatora/exportForAi' then
+        cb(nil, { ok = true, path = exported, bytes = 2048 })
+      end
+    end
+
+    vim.cmd('new')
+    local export_buf = vim.api.nvim_get_current_buf()
+    vim.bo.buftype = 'nofile'
+    vim.api.nvim_buf_set_name(export_buf, 'cosense://my-project/ページ')
+
+    export.run(2)
+    assert(requested[1].method == 'chatora/exportForAi', 'a hop given asks outright: ' .. requested[1].method)
+    assert(requested[1].params.hop == 2 and requested[1].params.title == 'ページ', 'the page and the hop go with it')
+    assert(
+      vim.fn.resolve(vim.api.nvim_buf_get_name(0)) == vim.fn.resolve(exported),
+      'the export opens in a window of its own: ' .. vim.api.nvim_buf_get_name(0)
+    )
+    vim.cmd('close!')
+
+    local labels
+    local orig_select = vim.ui.select
+    vim.ui.select = function(items, opts, on_choice)
+      labels = vim.tbl_map(opts.format_item, items)
+      on_choice(items[1])
+    end
+    requested = {}
+    export.run()
+    vim.ui.select = orig_select
+    assert(requested[1].method == 'chatora/relatedPages', 'the counts come first')
+    assert(
+      labels[1]:match('3 ページ') and labels[2]:match('6 ページ'),
+      'the page itself counts, and 2 hop adds to 1 hop: ' .. vim.inspect(labels)
+    )
+    assert(requested[2].params.hop == 1, 'the choice decides the hop')
+    vim.cmd('close!')
+
+    lsp.request = orig_request
+    config.options.related.auto_open = auto_open
+    vim.api.nvim_buf_set_name(export_buf, '')
+    vim.cmd('close!')
+    vim.api.nvim_buf_delete(export_buf, { force = true })
+    os.remove(exported)
   end
 
   -- The sidebar follows the page the reader moves to, and a project it has listed before

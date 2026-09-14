@@ -23,6 +23,7 @@ local SECTIONS = {
       { ':Chatora logout', 'ログアウト（Keychain から PAT を削除）' },
       { ':Chatora log', '診断ログを開く（log オプションが有効にする必要がある）' },
       { ':Chatora images [redraw|clear]', 'ページの画像の状態を表示 / 描き直す / 取得した画像を捨てて取り直す' },
+      { ':Chatora export [1hop|2hop]', 'ページとリンク先を AI 向けに 1 ファイルへ書き出す' },
       { ':Chatora reload', 'nvim を閉じずにプラグインを再読み込み' },
       { ':Chatora help', 'ヘルプを開く' },
     },

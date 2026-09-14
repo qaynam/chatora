@@ -56,6 +56,7 @@ local M = {}
 ---@field table_tab? boolean  <Tab> inserts a real tab on a table row.
 ---@field surround? boolean|string[]  Visual-mode decoration keys; a list of markers restricts them.
 ---@field paste_indent? boolean  `p` / `P` give pasted lines the indent of the line they land on.
+---@field paste_link? boolean  A pasted Cosense page URL becomes its link notation.
 ---@field date_format? string  os.date format of what insert_date inserts.
 
 ---@class chatora.TelomereConfig
@@ -85,6 +86,7 @@ local M = {}
 ---@field backend? 'auto'|'image_nvim'|'snacks'|table|fun(): table  'auto' prefers image.nvim, then snacks.nvim.
 ---@field height? integer  Rows for a picture on a line of its own.
 ---@field height_large? integer  Rows for the `[[…]]` notation; defaults to twice `height`.
+---@field completion? boolean  Draw each suggested page's icon in the completion menu (nvim-cmp).
 ---@field gallery? boolean|integer|{ rows?: integer, aspect?: number }  Tiles for a line of pictures only.
 ---@field border? boolean|{ width?: integer, color?: string, padding?: integer }
 
@@ -107,6 +109,7 @@ local M = {}
 ---@field next_conflict? string|string[]|false
 ---@field next_updated? string|string[]|false
 ---@field prev_updated? string|string[]|false
+---@field export? string|string[]|false
 ---@field paste_image? string|string[]|false
 ---@field delete? string|string[]|false
 ---@field normalize_indent? string|string[]|false
@@ -174,6 +177,7 @@ local defaults = {
     table_tab = true,
     surround = true,
     paste_indent = true,
+    paste_link = true,
     date_format = '%Y-%m-%d %H:%M:%S',
   },
   view = {
@@ -190,6 +194,7 @@ local defaults = {
   image = {
     enabled = true,
     backend = 'auto',
+    completion = true,
     height = 20,
     height_large = nil,
     gallery = true,

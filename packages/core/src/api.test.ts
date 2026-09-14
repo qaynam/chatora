@@ -187,6 +187,30 @@ describe('CosenseApi happy paths', () => {
     )
   })
 
+  test('exportForAi() asks for the hop the caller wants and hands the text back', async () => {
+    const { layer, calls } = testHttpClient(
+      () => new Response('page text', { headers: { 'content-type': 'text/plain' } }),
+    )
+    const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+    expect(await run(api.exportForAi('myproject', 'My Page', 1), layer)).toBe('page text')
+    expect(calls[0]?.url).toBe(
+      'https://scrapbox.io/api/smart-context/export-1hop-links/myproject.txt?title=My+Page',
+    )
+  })
+
+  test('exportForAi() passes a search filter on, and drops an empty one', async () => {
+    const { layer, calls } = testHttpClient(() => new Response('text'))
+    const api = makeCosenseApi({ origin: 'https://scrapbox.io', credential: PAT })
+    await run(api.exportForAi('myproject', 'ページ', 2, ' 検索 '), layer)
+    await run(api.exportForAi('myproject', 'ページ', 2, '   '), layer)
+    expect(calls[0]?.url).toBe(
+      'https://scrapbox.io/api/smart-context/export-2hop-links/myproject.txt?title=%E3%83%9A%E3%83%BC%E3%82%B8&search=%E6%A4%9C%E7%B4%A2',
+    )
+    expect(calls[1]?.url).toBe(
+      'https://scrapbox.io/api/smart-context/export-2hop-links/myproject.txt?title=%E3%83%9A%E3%83%BC%E3%82%B8',
+    )
+  })
+
   test('searchFullText()', async () => {
     const { layer, calls } = testHttpClient(() =>
       json({ count: 1, existsExactTitleMatch: true, pages: [{ id: 'a', title: 'A' }] }),

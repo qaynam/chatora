@@ -40,6 +40,7 @@ import { type NotationSpec, notationSpecs, setNotations } from './notations'
 import * as handlers from './pages'
 import { computeQuoteRanges } from './quote'
 import { type ReadState, ReadStateLive } from './readState'
+import { exportForAi } from './smartContext'
 import { makeSessionStateLayer, type SessionState } from './state'
 import { computeTokens, encodeTokens, type RawToken, TOKEN_TYPES } from './tokens'
 import { uploadImage } from './upload'
@@ -332,6 +333,11 @@ connection.onRequest('chatora/emptyLinks', (params: { uri: string }) =>
 )
 connection.onRequest('chatora/relatedPages', (params: { project: string; title: string }) =>
   runtime.runPromise(handlers.relatedPages(params)),
+)
+connection.onRequest(
+  'chatora/exportForAi',
+  (params: { project: string; title: string; hop: 1 | 2; search?: string }) =>
+    runtime.runPromise(exportForAi(params)),
 )
 type DecorationsResult =
   | {

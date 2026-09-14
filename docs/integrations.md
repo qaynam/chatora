@@ -4,9 +4,33 @@ Chatora を他のツールや macOS と組み合わせて使う方法を説明�
 
 ## 目次
 
+- [Export for AI](#export-for-ai)
 - [telescope.nvim](#telescopenvim)
 - [シェルから起動](#シェルから起動)
 - [Slack や Chrome のリンクを Chatora で開く（macOS）](#slack-や-chrome-のリンクを-chatora-で開くmacos)
+
+## Export for AI
+
+Cosense Web の Smart Context（Export for AI）に相当する機能です。`<leader>ce` または `:Chatora export`
+を実行すると、開いているページとそのリンク先をまとめた 1 つのテキストファイルを作成し、別の
+ウィンドウで開きます。AI に渡したい文脈を、そのまま利用できます。
+
+引数を省略すると、含まれるページ数を添えた選択肢が表示されます。
+
+| 選択         | 含まれるページ                               |
+| ------------ | -------------------------------------------- |
+| 1 hop | ページ自身と、そこからリンクしているページ   |
+| 2 hop | それに加えて、リンク先がリンクしているページ |
+
+`:Chatora export 1hop` のように指定すると、選択を省略できます。
+
+書き出し先は `$XDG_CACHE_HOME/chatora/export/<プロジェクト>/<タイトル>-1hop.txt` です（既定は
+`~/.cache/chatora/export/…`）。同じページをもう一度書き出すと、ファイルを上書きします。開いた
+バッファから `:w` で任意の場所へ保存できます。
+
+> [!NOTE]
+> Cosense Web の「一時的な URL の生成」は Chatora にはありません。この API はブラウザの
+> セッションでのみ動作し、PAT では 401 が返るためです。書き出されるファイルの内容は同じものです。
 
 ## telescope.nvim
 

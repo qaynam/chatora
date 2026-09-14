@@ -119,13 +119,13 @@ const sameOriginPath = (origin: string, location: string): string | undefined =>
   }
 }
 
-const requestJson = (
+const requestRaw = (
   origin: string,
   credential: Credential,
   path: string,
   init?: { method?: Method; body?: unknown },
   hop = 0,
-): Effect.Effect<RawResponse, CosenseApiError, HttpClient> =>
+): Effect.Effect<Response, CosenseApiError, HttpClient> =>
   Effect.gen(function* () {
     const client = yield* HttpClient
     const hasBody = init?.body !== undefined
@@ -150,7 +150,7 @@ const requestJson = (
       const location = res.headers.get('location')
       const next = location === null ? undefined : sameOriginPath(origin, location)
       if (next !== undefined && hop < MAX_REDIRECTS) {
-        return yield* requestJson(origin, credential, next, init, hop + 1)
+        return yield* requestRaw(origin, credential, next, init, hop + 1)
       }
       return yield* Effect.fail(
         new CosenseApiError({
@@ -172,17 +172,48 @@ const requestJson = (
         }),
       )
     }
-    const body = yield* Effect.tryPromise({
-      try: () => res.json(),
-      catch: (cause) =>
-        new CosenseApiError({
-          status: res.status,
-          code: 'DecodeError',
-          message: `Response body was not valid JSON: ${String(cause)}`,
-        }),
-    })
-    return { status: res.status, body, headers: res.headers }
+    return res
   })
+
+const requestJson = (
+  origin: string,
+  credential: Credential,
+  path: string,
+  init?: { method?: Method; body?: unknown },
+): Effect.Effect<RawResponse, CosenseApiError, HttpClient> =>
+  requestRaw(origin, credential, path, init).pipe(
+    Effect.flatMap((res) =>
+      Effect.tryPromise({
+        try: () => res.json(),
+        catch: (cause) =>
+          new CosenseApiError({
+            status: res.status,
+            code: 'DecodeError',
+            message: `Response body was not valid JSON: ${String(cause)}`,
+          }),
+      }).pipe(Effect.map((body) => ({ status: res.status, body, headers: res.headers }))),
+    ),
+  )
+
+/** For the endpoints that answer with a file rather than JSON. */
+const requestText = (
+  origin: string,
+  credential: Credential,
+  path: string,
+): Effect.Effect<string, CosenseApiError, HttpClient> =>
+  requestRaw(origin, credential, path).pipe(
+    Effect.flatMap((res) =>
+      Effect.tryPromise({
+        try: () => res.text(),
+        catch: (cause) =>
+          new CosenseApiError({
+            status: res.status,
+            code: 'DecodeError',
+            message: `Response body could not be read: ${String(cause)}`,
+          }),
+      }),
+    ),
+  )
 
 const decode = <A, I>(
   schema: Schema.Schema<A, I>,
@@ -235,6 +266,18 @@ export interface CosenseApiShape {
     project: string,
     title: string,
   ) => Effect.Effect<RelatedPages, CosenseApiError, HttpClient>
+  /**
+   * Cosense's "Export for AI" (Smart Context): the page and everything within `hop` links
+   * of it, as one text file. `search` narrows the linked pages the way the related-page
+   * box does. The web offers a temporary shared URL for the same text, but the endpoint
+   * behind it answers only to a browser session, not to a token.
+   */
+  readonly exportForAi: (
+    project: string,
+    title: string,
+    hop: 1 | 2,
+    search?: string,
+  ) => Effect.Effect<string, CosenseApiError, HttpClient>
   readonly searchFullText: (
     project: string,
     query: string,
@@ -370,6 +413,19 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
     ).pipe(Effect.map(([hop1, hop2]) => ({ links1hop: hop1.links1hop, links2hop: hop2.links2hop })))
   }
 
+  const exportForAi: CosenseApiShape['exportForAi'] = (project, title, hop, search) => {
+    // The title travels as a query parameter, so it takes the ordinary encoding here and
+    // not encodeTitleForUrl, which is for the path.
+    const query = new URLSearchParams({ title })
+    const filter = search?.trim() ?? ''
+    if (filter !== '') query.append('search', filter)
+    return requestText(
+      origin,
+      credential,
+      `/api/smart-context/export-${hop}hop-links/${encodeURIComponent(project)}.txt?${query.toString()}`,
+    )
+  }
+
   const searchFullText: CosenseApiShape['searchFullText'] = (project, query) =>
     request(
       `/api/pages/${project}/search/query?${new URLSearchParams({
@@ -481,6 +537,7 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
     listPages,
     getPage,
     relatedPages,
+    exportForAi,
     searchFullText,
     searchVector,
     searchTitles,
