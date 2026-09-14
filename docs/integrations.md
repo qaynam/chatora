@@ -2,6 +2,11 @@
 
 Chatora を他のツールや macOS と組み合わせて使う方法を説明します。
 
+## 目次
+
+- [telescope.nvim](#telescopenvim)
+- [シェルから起動](#シェルから起動)
+- [Slack や Chrome のリンクを Chatora で開く（macOS）](#slack-や-chrome-のリンクを-chatora-で開くmacos)
 
 ## telescope.nvim
 
@@ -78,4 +83,3 @@ HTML を開くアプリ、つまりシステム設定でブラウザとして表
 
 配布物をダウンロードしないため、署名や公証は必要ありません。ダウンロードしたアプリに付く
 Gatekeeper の quarantine 属性がなく、`osacompile` が ad-hoc 署名まで行うためです。
-
