@@ -4,7 +4,7 @@
 #   chatora-url-handler <install [--browser <app>]|status|uninstall|browser [<app>]>
 #
 # macOS routes links by application, so the handler is one: AppleScript that hands the URL to
-# `chatora-open`. See docs/FEATURES.md for why it needs no signing.
+# `chatora-open`. See docs/integrations.md for why it needs no signing.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)

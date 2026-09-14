@@ -19,7 +19,23 @@ Chatora は、Cosense のページを Neovim のバッファとして開き、�
 > を使って API に接続します。リアルタイム通信ではないため、同じページを複数の場所で同時に編集する
 > ときは、競合に注意してください。
 
-詳しい機能の説明は [docs/FEATURES.md](docs/FEATURES.md) を参照してください。
+詳しい機能は、[高度な機能](docs/advanced.md)、[設定ガイド](docs/configuration.md)、[外部連携](docs/integrations.md) に分けて説明しています。
+
+## 目次
+
+- [デモ](#デモ)
+- [名前の由来](#名前の由来)
+- [対応している機能](#対応している機能)
+- [動作環境](#動作環境)
+- [インストール](#インストール)
+- [基本操作](#基本操作)
+- [設定](#設定)
+- [コマンドラインから起動する](#コマンドラインから起動する)
+- [telescope.nvim と連携する](#telescopenvim-と連携する)
+- [macOS で Cosense のリンクを開く](#macos-で-cosense-のリンクを開く)
+- [トラブルシューティング](#トラブルシューティング)
+- [クレジット](#クレジット)
+- [ライセンス](#ライセンス)
 
 ## デモ
 
@@ -101,7 +117,7 @@ Chatora は、Cosense のページを Neovim のバッファとして開き、�
 | --- | --- |
 | Ghostty | 確認済み |
 | kitty / WezTerm | kitty graphics protocol に対応していますが、未確認です |
-| VS Code の内蔵ターミナル | 設定が必要です。詳しくは [docs/FEATURES.md](docs/FEATURES.md) を参照してください |
+| VS Code の内蔵ターミナル | 設定が必要です。詳しくは [画像の表示](docs/advanced.md#画像の表示) を参照してください |
 
 画像を表示するには、kitty graphics protocol に対応したターミナル（kitty / Ghostty など）と、
 画像表示用のプラグイン（[3rd/image.nvim](https://github.com/3rd/image.nvim) など）が必要です。
@@ -344,7 +360,7 @@ require('chatora').setup({
 
 <code>origin</code>、<code>server_cmd</code>、<code>log</code>、<code>notations</code> は LSP サーバーの起動時に
 読み込まれるため、プロジェクトごとには変更できません。<code>sidebar.tabs</code> や
-<code>image.backend</code> などの詳しい設定は [docs/FEATURES.md](docs/FEATURES.md) にまとめています。
+<code>image.backend</code> などの詳しい設定は [高度な機能](docs/advanced.md) と [設定ガイド](docs/configuration.md) にまとめています。
 
 ### 装飾記法をカスタマイズする
 
@@ -447,7 +463,7 @@ keybind = cmd+i=text:\x1bi
 エラーの詳細を確認できます。
 
 画像が表示されない場合は、対応するターミナル、ImageMagick、画像表示プラグインがそろっているか
-確認してください。画像の詳しい設定は [docs/FEATURES.md](docs/FEATURES.md) を参照してください。
+確認してください。画像の詳しい設定は [画像の表示](docs/advanced.md#画像の表示) を参照してください。
 
 ### コードブロックに色が付かない
 
