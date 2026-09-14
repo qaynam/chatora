@@ -108,6 +108,7 @@ local M = {}
 ---@field next_conflict? string|string[]|false
 ---@field next_updated? string|string[]|false
 ---@field prev_updated? string|string[]|false
+---@field export? string|string[]|false
 ---@field paste_image? string|string[]|false
 ---@field delete? string|string[]|false
 ---@field normalize_indent? string|string[]|false

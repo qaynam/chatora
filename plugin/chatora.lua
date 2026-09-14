@@ -14,7 +14,8 @@ vim.g.loaded_chatora = true
 -- extension, so this is what makes that answer `cosense` too.
 vim.filetype.add({ pattern = { ['cosense://.*'] = 'cosense' } })
 
-local subcommands = { 'open', 'toggle', 'new', 'search', 'related', 'project', 'account', 'logout', 'log', 'reload', 'help' }
+local subcommands =
+  { 'open', 'toggle', 'new', 'search', 'related', 'project', 'account', 'export', 'images', 'logout', 'log', 'reload', 'help' }
 
 vim.api.nvim_create_user_command('Chatora', function(opts)
   local raw = opts.args or ''

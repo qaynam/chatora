@@ -42,7 +42,7 @@ export interface ErrEnvelope {
 }
 
 const err = (code: ErrCode, message: string): ErrEnvelope => ({ ok: false, code, message })
-const noCredential = (): ErrEnvelope => err('unauthorized', 'not logged in')
+export const noCredential = (): ErrEnvelope => err('unauthorized', 'not logged in')
 
 const UNAUTHORIZED_STATUSES: ReadonlySet<number> = new Set([401, 403])
 const TOO_MANY_REQUESTS = 429
@@ -70,7 +70,7 @@ const fromCosenseApiError = (error: CosenseApiError): ErrEnvelope => {
  * become the `{ok:false,...}` wire envelope instead of an LSP-level error; a success value
  * passes through untouched.
  */
-const handle = <A, R>(
+export const handle = <A, R>(
   effect: Effect.Effect<A, CosenseApiError | KeychainError, R>,
 ): Effect.Effect<A | ErrEnvelope, never, R> =>
   effect.pipe(

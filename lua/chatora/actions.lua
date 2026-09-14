@@ -251,6 +251,11 @@ end
 ---
 --- Author icons are drawn over the gutter each of their rows reserves, so a terminal that
 --- cannot render pictures simply shows the names — the layout does not depend on them.
+--- `:Chatora export` — hand the page and its neighbours to an AI as one file.
+function M.export()
+  require('chatora.export').run()
+end
+
 function M.info()
   local project, title, bufnr = current_page()
   if not project then

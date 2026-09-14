@@ -33,6 +33,7 @@ local ACTIONS = {
   { name = 'next_conflict', keys = { '<prefix>c', ']c' }, desc = '次の競合へ', scope = 'page' },
   { name = 'next_updated', keys = ']u', desc = '次の更新行へ', scope = 'page' },
   { name = 'prev_updated', keys = '[u', desc = '前の更新行へ', scope = 'page' },
+  { name = 'export', keys = '<prefix>e', desc = 'AI 向けに書き出す（1 hop / 2 hop）', scope = 'page' },
   { name = 'paste_image', keys = '<prefix>v', desc = 'クリップボードの画像を貼り付け', scope = 'page' },
   { name = 'delete', keys = '<prefix>d', desc = 'ページを削除（確認あり）', scope = 'page' },
   { name = 'normalize_indent', keys = '<prefix>I', desc = 'インデントを半角スペースに揃える', scope = 'page' },

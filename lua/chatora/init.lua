@@ -307,6 +307,17 @@ function M.images(args)
   vim.notify(table.concat(images.status(bufnr), '\n'), vim.log.levels.INFO)
 end
 
+--- `:Chatora export [1hop|2hop]`: write the page and its linked pages out for an AI.
+--- Without an argument it asks which of the two to take.
+function M.export(args)
+  local export = require('chatora.export')
+  if args ~= '' and export.parse_hop(args) == nil then
+    vim.notify('[chatora] export の引数は 1hop か 2hop です', vim.log.levels.WARN)
+    return
+  end
+  export.run(export.parse_hop(args))
+end
+
 --- Dispatcher for the :Chatora user command.
 function M.dispatch(subcmd, args)
   -- `:Chatora <url>` — a pasted page URL is not a subcommand, so it reaches `open`
@@ -331,6 +342,8 @@ function M.dispatch(subcmd, args)
     M.logout()
   elseif subcmd == 'images' then
     M.images(args)
+  elseif subcmd == 'export' then
+    M.export(args)
   elseif subcmd == 'help' then
     M.help()
   elseif subcmd == 'log' then

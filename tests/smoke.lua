@@ -2565,6 +2565,71 @@ local ok, err = pcall(function()
     vim.api.nvim_buf_delete(page_buf, { force = true })
   end
 
+  -- Export for AI: the hop count comes from the argument or from a picker that says how
+  -- many pages each choice would take, and the file that comes back opens beside the page.
+  do
+    local export = require('chatora.export')
+    assert(export.parse_hop('1') == 1, '1 is one hop')
+    assert(export.parse_hop('2hop') == 2, 'the spelling the command line uses')
+    for _, bad in ipairs({ '', '3', 'x', '12' }) do
+      assert(export.parse_hop(bad) == nil, ('%q is not a hop count'):format(bad))
+    end
+
+    local lsp = require('chatora.lsp')
+    local config = require('chatora.config')
+    local orig_request, auto_open = lsp.request, config.options.related.auto_open
+    config.options.related.auto_open = false
+    local requested = {}
+    local exported = vim.fn.tempname() .. '.txt'
+    vim.fn.writefile({ 'export text' }, exported)
+    lsp.request = function(method, params, cb)
+      requested[#requested + 1] = { method = method, params = params }
+      if method == 'chatora/relatedPages' then
+        cb(nil, { ok = true, links1hop = { {}, {} }, links2hop = { {}, {}, {} } })
+      elseif method == 'chatora/exportForAi' then
+        cb(nil, { ok = true, path = exported, bytes = 2048 })
+      end
+    end
+
+    vim.cmd('new')
+    local export_buf = vim.api.nvim_get_current_buf()
+    vim.bo.buftype = 'nofile'
+    vim.api.nvim_buf_set_name(export_buf, 'cosense://my-project/ページ')
+
+    export.run(2)
+    assert(requested[1].method == 'chatora/exportForAi', 'a hop given asks outright: ' .. requested[1].method)
+    assert(requested[1].params.hop == 2 and requested[1].params.title == 'ページ', 'the page and the hop go with it')
+    assert(
+      vim.fn.resolve(vim.api.nvim_buf_get_name(0)) == vim.fn.resolve(exported),
+      'the export opens in a window of its own: ' .. vim.api.nvim_buf_get_name(0)
+    )
+    vim.cmd('close!')
+
+    local labels
+    local orig_select = vim.ui.select
+    vim.ui.select = function(items, opts, on_choice)
+      labels = vim.tbl_map(opts.format_item, items)
+      on_choice(items[1])
+    end
+    requested = {}
+    export.run()
+    vim.ui.select = orig_select
+    assert(requested[1].method == 'chatora/relatedPages', 'the counts come first')
+    assert(
+      labels[1]:match('3 ページ') and labels[2]:match('6 ページ'),
+      'the page itself counts, and 2 hop adds to 1 hop: ' .. vim.inspect(labels)
+    )
+    assert(requested[2].params.hop == 1, 'the choice decides the hop')
+    vim.cmd('close!')
+
+    lsp.request = orig_request
+    config.options.related.auto_open = auto_open
+    vim.api.nvim_buf_set_name(export_buf, '')
+    vim.cmd('close!')
+    vim.api.nvim_buf_delete(export_buf, { force = true })
+    os.remove(exported)
+  end
+
   -- The sidebar follows the page the reader moves to, and a project it has listed before
   -- comes back without asking the server again.
   do
