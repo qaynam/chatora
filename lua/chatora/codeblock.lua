@@ -114,10 +114,17 @@ end
 --- Resolve a treesitter lang for a `code:<name>` marker, or nil if no
 --- parser is available. Tries filetype-by-extension first, then falls back
 --- to treating the whole name as the lang (`code:lua`, `code:bash`, ...).
+-- A language nobody ships a grammar for, read by one that covers most of it. MDX is
+-- Markdown with JSX in it, and `markdown` reaches the JSX through its html injection.
+local FALLBACK_LANG = { mdx = 'markdown' }
+
 local function resolve_lang(name, text)
   local ok_ft, filetype = pcall(vim.filetype.match, { filename = name })
   if not ok_ft or not filetype or filetype == '' then
-    filetype = name
+    -- Nothing on this machine claims the extension (`.mdx` needs a plugin for that). The
+    -- extension is still a better guess than the whole file name, which names no grammar,
+    -- and `code:python` — a bare language — has none to take.
+    filetype = name:match('%.([%w_]+)$') or name
   end
   local ok_get, lang = pcall(vim.treesitter.language.get_lang, filetype)
   if not ok_get or not lang then
@@ -138,6 +145,10 @@ local function resolve_lang(name, text)
     return nil
   end
   if not loadable(lang) then
+    local fallback = FALLBACK_LANG[lang]
+    if fallback and loadable(fallback) then
+      return fallback
+    end
     report_missing(lang)
     return nil
   end
@@ -189,45 +200,45 @@ local function highlight_block(bufnr, lines, block)
     return
   end
 
-  local ok_trees, trees = pcall(function()
-    return parser:parse()
+  -- `true`: the injected layers as well. A markdown block's own grammar says nothing about
+  -- the YAML in its frontmatter or the HTML in its body, and a fenced block inside it is
+  -- another language again — all of them injections, and all unlit without this.
+  local ok_parse = pcall(function()
+    parser:parse(true)
   end)
-  if not ok_trees or not trees or not trees[1] then
-    return
-  end
-
-  local ok_root, root = pcall(function()
-    return trees[1]:root()
-  end)
-  if not ok_root or not root then
-    return
-  end
-
-  local ok_query, query = pcall(vim.treesitter.query.get, lang, 'highlights')
-  if not ok_query or not query then
+  if not ok_parse then
     return
   end
 
   local hl_group_cache = {}
   pcall(function()
-    for id, node in query:iter_captures(root, text, 0, -1) do
-      local capture = query.captures[id]
-      if capture then
-        local hl_group = hl_group_cache[capture]
-        if not hl_group then
-          hl_group = '@' .. capture .. '.' .. lang
-          hl_group_cache[capture] = hl_group
-        end
-        local srow, scol, erow, ecol = node:range()
-        pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, block.start_line + srow, common_indent + scol, {
-          end_row = block.start_line + erow,
-          end_col = common_indent + ecol,
-          hl_group = hl_group,
-          priority = PRIORITY,
-          strict = false,
-        })
+    parser:for_each_tree(function(tree, layer)
+      local layer_lang = layer:lang()
+      local ok_query, query = pcall(vim.treesitter.query.get, layer_lang, 'highlights')
+      if not ok_query or not query then
+        return
       end
-    end
+      local root = tree:root()
+      for id, node in query:iter_captures(root, text, 0, -1) do
+        local capture = query.captures[id]
+        if capture then
+          local key = layer_lang .. '\0' .. capture
+          local hl_group = hl_group_cache[key]
+          if not hl_group then
+            hl_group = '@' .. capture .. '.' .. layer_lang
+            hl_group_cache[key] = hl_group
+          end
+          local srow, scol, erow, ecol = node:range()
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, M.ns, block.start_line + srow, common_indent + scol, {
+            end_row = block.start_line + erow,
+            end_col = common_indent + ecol,
+            hl_group = hl_group,
+            priority = PRIORITY,
+            strict = false,
+          })
+        end
+      end
+    end)
   end)
 end
 
