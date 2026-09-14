@@ -67,10 +67,8 @@ const webpSize = (bytes: Uint8Array, view: DataView): ImageSize | undefined => {
  * Intrinsic pixel dimensions read from the image's own header — PNG, GIF, JPEG and WebP.
  * Undefined for anything else and for a truncated file, which the caller answers with a
  * fixed size rather than a computed one.
- *
- * The web client asks the browser (or, for Gyazo, `/api/oembed-proxy/gyazo`); chatora
- * already has the bytes on disk, so reading them needs no request and no ImageMagick.
- * SVG never reaches here: it is rasterized to PNG first.
+ * The bytes are already on disk, so reading them needs no request or ImageMagick.
+ * SVG never reaches here because it is rasterized to PNG first.
  */
 export const imageSizeOf = (bytes: Uint8Array): ImageSize | undefined => {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)

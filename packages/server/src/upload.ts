@@ -62,8 +62,6 @@ const succeed = (url: string): UploadResult => ({ ok: true, notation: `[${url}]`
  * Upload to Gyazo, the way the web client does for a project whose `uploadImageTo` is
  * `gyazo`: mint a *Cosense* upload token, then post the bytes to Gyazo with it. The Gyazo
  * request carries no session of its own — the token is the whole authorization.
- *
- * Decoded from `.dev/scrapbox.io(image-upload-throw-gyazo).har`.
  */
 const uploadToGyazo = (args: {
   readonly origin: string
@@ -96,7 +94,7 @@ const uploadToGyazo = (args: {
       new Blob([args.bytes], { type: args.contentType }),
       `image.${EXTENSION[args.contentType] ?? 'png'}`,
     )
-    // Both are what the web client sends; they are what Gyazo shows as the image's origin.
+    // These fields preserve the page context shown by Gyazo.
     form.append('title', args.title)
     form.append('referer_url', `${args.origin}/${args.project}/${args.title}`)
 
@@ -120,8 +118,6 @@ const uploadToGyazo = (args: {
  * ask Cosense to sign a Google Cloud Storage URL, PUT the bytes straight to Google, then
  * tell Cosense the upload landed. The md5 is the object's name on the bucket, so all three
  * calls have to agree on it.
- *
- * Decoded from `.dev/scrapbox.io(image-upload-throw-scrapbox.io).har`.
  */
 const uploadToGcs = (args: {
   readonly origin: string
@@ -154,9 +150,7 @@ const uploadToGcs = (args: {
       return err('アップロード先 URL を取得できませんでした')
     }
     const answer = ((yield* readJson(requested)) as GcsUploadRequest | null) ?? {}
-    // Cosense keeps one copy per md5: bytes it already holds are answered with the file's
-    // URL outright, and there is nothing left to send or verify. Pasting the same picture
-    // twice is the everyday case (cosense-cli reads the answer the same way).
+    // A file already stored for the same md5 can be reused without another upload.
     if (typeof answer.embedUrl === 'string' && answer.embedUrl !== '') {
       yield* log('info', 'image already uploaded', { to: 'gcs', url: answer.embedUrl })
       return succeed(answer.embedUrl)
@@ -210,11 +204,8 @@ const uploadToGcs = (args: {
  * Which of the two destinations a project wants is its `uploadImageTo` setting, read per
  * upload so switching projects switches destination with nothing cached to go stale.
  *
- * A personal access token cannot read that setting — plain `/api/projects/<name>` answers
- * one with 401 — so an unreadable setting means the project's own storage rather than
- * Gyazo. That is the right guess precisely because the unreadable case *is* the PAT case,
- * and Cosense's Gyazo token endpoint lives under `/api/login/`: it answers a browser
- * session, never a token. Whichever goes first, the other is tried if it fails.
+ * If the preferred destination cannot be determined or fails, the other supported
+ * destination is tried as a fallback.
  */
 export const uploadImage = (params: {
   readonly project: string
@@ -249,8 +240,7 @@ export const uploadImage = (params: {
       ),
       Effect.orElseSucceed(() => null),
     )
-    // `/users` is the project-id route a PAT can take, so the storage upload stays
-    // reachable even when the settings above came back 401.
+    // The project id is available from the user list even when project settings are absent.
     const projectId =
       detail?.id !== undefined && detail.id !== ''
         ? detail.id

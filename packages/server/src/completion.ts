@@ -374,12 +374,9 @@ export const toCompletionItems = (
   })
 
 /**
- * Fetches candidates and builds LSP CompletionItems. Impure — not unit tested (the pure
- * ranking/merge functions above are). Primary source is Cosense's vector (semantic) title
- * search — the same endpoint the real web editor queries on every keystroke (verified via a
- * HAR capture of scrapbox.io) — with the local title index (exact/prefix/substring/asearch
- * tiers) merged in behind it, and as the sole source when vector search is unavailable
- * (HTTP 490/404, a title/titles fetch failure, or an empty query).
+ * Fetches candidates and builds LSP CompletionItems. Impure — the pure ranking/merge
+ * functions above are tested separately. Semantic search is preferred when available, with
+ * the local title index merged in and used alone when the remote search is unavailable.
  */
 export const buildCompletionItems = (
   project: string,

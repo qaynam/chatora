@@ -6,9 +6,6 @@
  * deletions, substitutions) — this is an anchored match, not a substring search.
  * ASCII is case-insensitive; a halfwidth space in the pattern is epsilon (matches
  * anything, including nothing). 4 states (0..3 errors). Pure TS, no dependencies.
- *
- * Ported as-is (semantics preserved, not "improved") from the user's own prior art:
- * cosense-app-client/packages/domain/src/asearch.ts.
  */
 const INITPAT = 0x80000000
 const MAXCHAR = 0x10000

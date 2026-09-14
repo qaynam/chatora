@@ -5,11 +5,8 @@ import type { KeychainError } from './errors'
 import { addGenericPassword, deleteGenericPassword, findGenericPassword } from './keychain'
 
 export type CredentialSource = 'env' | 'keychain'
-// 'serviceAccount' has no resolver in this package right now — cosense-cli's
-// settings.json (the only source that ever produced one) was dropped in favor of
-// chatora managing credentials itself. The variant stays so header-building
-// (x-service-account-access-key vs x-personal-access-token) and any future source can
-// keep using one `Credential` shape without a breaking change.
+// Service-account credentials are kept in the shared shape so future credential sources can
+// use the same header-building path.
 export type CredentialType = 'pat' | 'serviceAccount'
 
 export interface Credential {

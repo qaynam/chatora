@@ -3,15 +3,7 @@ import { dirname } from 'node:path'
 import { stateFilePath } from '@chatora/core'
 import { Clock, Context, Effect, Layer, Ref } from 'effect'
 
-/**
- * When each page was last opened in chatora, per project.
- *
- * Cosense's own `accessed` field is the authority for this, but nothing chatora can call
- * updates it: `/api/pages/:project/:pageId/accessed` answers 404 (observed in cosense-app-client's
- * own request logs, on cookie auth), and the real client records reads over its websocket
- * commit channel. Until that channel exists here, opening a page has to be remembered locally
- * or the unread mark would come straight back on the next poll.
- */
+/** When each page was last opened in chatora, stored locally per project. */
 export interface ReadStateShape {
   /** Unix seconds of the local visit to `pageId`, or 0 if never opened here. */
   readonly readAt: (project: string, pageId: string) => Effect.Effect<number>

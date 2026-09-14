@@ -1,9 +1,6 @@
 // Decoders for CosenseApi's read responses. Every field is `optionalWith` with a default
 // (or, for fields the plain type itself marks `?`, `optionalWith({ exact: true })`), so
-// decoding a response the server actually sends never fails: a missing field falls back
-// to a zero value and an unrecognized extra field is dropped (effect Schema's default
-// Struct behavior). Cosense adds fields without notice, and there is no documentation to
-// check a shape against, so a field this code has never seen must not be a decode error.
+// missing fields fall back to a zero value and unrecognized fields are ignored.
 //
 // Each schema's decoded type is checked against its types.ts counterpart where it's
 // actually used — `CosenseApiShape`'s method signatures in api.ts — rather than through a
@@ -20,7 +17,7 @@ const optionalNullableString = Schema.optionalWith(Schema.NullOr(Schema.String),
   default: () => null,
 })
 
-// The saved page filters shown in Cosense's web list UI, e.g. { type: 'icon', value: 'qaynam' }.
+// The saved page filters shown in Cosense's web list UI, e.g. { type: 'icon', value: 'taro' }.
 export const PageFilterSchema = Schema.Struct({
   type: optionalString,
   value: optionalString,
@@ -46,8 +43,7 @@ export const ProjectSummarySchema = Schema.Struct({
   updated: optionalNumber,
 })
 
-// `/api/projects/<name>` — everything `/api/projects` returns plus the project's own
-// settings. `uploadImageTo` is the one that decides where a pasted image goes.
+// Project details include the settings that determine where a pasted image is stored.
 export const ProjectDetailSchema = Schema.Struct({
   id: optionalString,
   name: optionalString,
@@ -176,13 +172,8 @@ export const PageV2ResponseSchema = Schema.Struct({
   users: Schema.optionalWith(Schema.Array(UserRefSchema), { default: () => [] }),
 })
 
-// `/api/projects/<name>/users` — the page body names its author by id alone, so this is
-// where an id becomes something to show. Members who have left survive in
-// `memberSnapshots`, which is why an author can still be named after they are gone.
-//
-// It also carries `projectId`, and is the only route to it that a personal access token can
-// take: plain `/api/projects/<name>` answers a PAT with 401 (cosense-cli reaches for this
-// same endpoint in resolveProjectId.ts for exactly that reason).
+// The page body names authors by id alone. This response supplies their display data and the
+// project id; departed members remain available through `memberSnapshots`.
 export const ProjectUsersResponseSchema = Schema.Struct({
   projectId: optionalString,
   users: Schema.optionalWith(Schema.Array(UserRefSchema), { default: () => [] }),

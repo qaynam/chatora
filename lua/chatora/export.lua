@@ -1,7 +1,5 @@
--- "Export for AI" (Cosense's Smart Context): the page, and the pages within one or two
--- links of it, written to a file an AI can read. The web offers the same text behind a
--- temporary shared URL too, but that endpoint answers to a browser session only, so a
--- token-authenticated client has the download half and not the link half.
+-- "Export for AI" (Cosense's Smart Context): write the page and the pages within one or two
+-- links of it to a file an AI can read.
 local M = {}
 
 local lsp = require('chatora.lsp')

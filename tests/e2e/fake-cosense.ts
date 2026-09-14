@@ -10,9 +10,7 @@
 // exposed via `GET /__test/requests` (no auth) for the orchestrator (run.ts) to assert
 // against after the Neovim scenario finishes. `POST /__test/reset` restores fixtures.
 //
-// Auth: every `/api/*` route requires header `x-personal-access-token: test-pat`;
-// otherwise it 401s with `{"error":"NotLoggedIn"}` (mirrors the real API's error shape —
-// see packages/core/src/api.ts parseErrorCode/CosenseApiError).
+// Auth: every API route requires the test token; otherwise it returns an authentication error.
 
 const TOKEN = 'test-pat'
 const PROJECT = 'testproj'
@@ -240,7 +238,7 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         return respond({ error: 'NotFound', path }, 404)
       }
 
-      // --- auth gate: every real API route requires the PAT header ---
+      // --- auth gate: every API route requires the PAT header ---
       const token = req.headers.get('x-personal-access-token')
       if (token !== TOKEN) {
         return respond({ error: 'NotLoggedIn' }, 401)
@@ -332,7 +330,7 @@ export const startFakeCosense = (): FakeCosenseHandle => {
           return respond({ error: 'InvalidPreview' }, 422)
         }
         // A preview without a page id creates the page: its lines are the inserts, in
-        // order, and the first of them is the title (the real API works the same way).
+        // order, with the first line treated as the title.
         const { pageId, changes } = pendingPreview
         pendingPreview = null
         if (pageId === undefined) {
@@ -378,8 +376,7 @@ export const startFakeCosense = (): FakeCosenseHandle => {
         return respond({ commitId: 'c2', page: { title: page.title } }, 200)
       }
 
-      // POST /api/pages/:project/:pageId/accessed -> 204, the real read-tracking
-      // endpoint (verified against a scrapbox.io capture).
+      // Record a page visit for the local unread-state test.
       if (method === 'POST' && /^\/api\/pages\/[^/]+\/[^/]+\/accessed$/.test(path)) {
         requests.push({ method, path, query: url.search, body, status: 204 })
         return new Response(null, { status: 204 })
@@ -390,7 +387,7 @@ export const startFakeCosense = (): FakeCosenseHandle => {
       if (path.startsWith(v2Prefix) && method === 'GET') {
         let rest = path.slice(v2Prefix.length)
         // getPage asks for `<title>/?followRename=true`, so the segment arrives with a
-        // trailing slash the real API tolerates.
+        // trailing slash included by the client.
         if (rest.endsWith('/')) rest = rest.slice(0, -1)
         let hop: 'links1hop' | 'links2hop' | null = null
         if (rest.endsWith('/links1hop')) {
