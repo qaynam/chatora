@@ -130,11 +130,8 @@ local function resolve_lang(name, text)
   if not ok_get or not lang then
     lang = filetype
   end
-  -- tree-sitter's `php` grammar starts *outside* PHP, in the HTML a .php file may open
-  -- with, so a block carrying no `<?` tag at all parses as text and comes out with nothing
-  -- highlighted (measured: 0 captures against 7). `php_only` is the same grammar entered at
-  -- the code, which is what a page pasted from the middle of a file holds. A block that
-  -- does open a tag is left to `php`, which is the grammar actually written for it.
+  -- tree-sitter's `php` grammar starts outside PHP, so a block without an opening tag needs
+  -- the `php_only` grammar. A block that does open a tag is left to `php`.
   if lang == 'php' and not text:find('<?', 1, true) then
     local only = loadable('php_only')
     if only then

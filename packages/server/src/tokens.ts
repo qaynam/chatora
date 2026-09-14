@@ -76,9 +76,8 @@ const spanToken = (type: TokenType, position: Position): RawToken => ({
 
 const decorationTokenType = (node: Decoration): TokenType | null => {
   if (node.bold) {
-    // Cosense sizes emphasis by asterisk count ([*]..[*****]); @cosense-toolbox/parser's
-    // Decoration.sizeLevel is 0-indexed (0 = one asterisk, verified against the installed
-    // 0.1.0-beta.0). A terminal has one cell size, so weight is graded via color instead:
+    // Cosense sizes emphasis by asterisk count ([*]..[*****]); sizeLevel is 0-indexed.
+    // A terminal has one cell size, so weight is graded via color instead:
     // bold (*) < bold2 (**) < bold3 (*** and up).
     if (node.sizeLevel >= 2) return 'bold3'
     if (node.sizeLevel === 1) return 'bold2'

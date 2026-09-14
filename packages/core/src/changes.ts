@@ -154,7 +154,7 @@ export const alignLines = <T extends BaseLine>(
   return aligned
 }
 
-/** Line-level diff producing page-edit-for-ai RawChange ops (cosense-cli src/commands/previewEdit.ts). */
+/** Line-level diff producing the operations accepted by the page editing API. */
 export const computeChanges = (
   base: readonly BaseLine[],
   next: readonly string[],

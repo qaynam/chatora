@@ -37,9 +37,8 @@ export interface AssetCacheShape {
 
 /**
  * How long a failed asset waits before it is fetched again, per attempt. Only successes are
- * cached, so without this a picture that 404s is re-requested on every redraw — measured at
- * 69 requests for one deleted image, and 24 rate-limited ones for a GitHub preview that had
- * already said no. After the last of these the URL is left alone for the session.
+ * cached, so without this a missing picture would be re-requested on every redraw. After
+ * the backoff steps are exhausted, the URL is left alone for the session.
  */
 const FAILURE_BACKOFF_MS = [30_000, 120_000, 600_000] as const
 

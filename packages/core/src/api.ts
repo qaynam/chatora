@@ -36,10 +36,8 @@ import type {
   VectorResult,
 } from './types'
 
-// Human-readable-URL title encoder, ported from cosense-cli src/lib/encodeTitle.ts
-// (encodeTitleForUrl). Deliberately not encodeURIComponent: Cosense keeps unicode raw in
-// the URL and maps space -> '_', only percent-encoding the characters that would otherwise
-// break route matching (%, /, ?, #). Unrelated to the cosense:// URI scheme (uriScheme.ts).
+// Keep Unicode and spaces readable in page URLs while escaping characters that would change
+// route matching. This is separate from the `cosense://` URI encoding.
 const encodeTitleForUrl = (title: string): string =>
   title
     .replace(/%/g, '%25')
@@ -52,8 +50,7 @@ const REDIRECT_STATUS_MIN = 300
 const REDIRECT_STATUS_MAX = 400
 const VECTOR_SEARCH_DISABLED_STATUS = 490
 
-// Same page cap the web client asks for. The picker renders whatever comes back, so this
-// is the only thing bounding a broad query.
+// The picker renders the response directly, so this cap bounds a broad query.
 const FULL_TEXT_SEARCH_LIMIT = 100
 const NOT_FOUND_STATUS = 404
 
@@ -77,7 +74,7 @@ export interface CosenseApiConfig {
   readonly credential: Credential
 }
 
-// Headers per cosense-cli src/lib/request.ts buildCredentialHeaders.
+// Build the credential header required by the selected credential type.
 const buildHeaders = (credential: Credential, hasBody: boolean): Record<string, string> => {
   const headers: Record<string, string> =
     credential.type === 'serviceAccount'
@@ -94,11 +91,8 @@ interface RawResponse {
   readonly headers: Headers
 }
 
-// redirect: 'manual' + treat any 3xx as an error so credential headers never travel to a
-// redirect target on a different origin (architecture doc "セキュリティ / 作法"; cosense-cli
-// applies the same policy for file downloads in src/lib/request.ts downloadToFile).
-// Cosense keeps a renamed page reachable under its old title and answers with a redirect
-// to the current one, so following a link written before the rename means following that.
+// Handle redirects manually so credential headers never travel to another origin. Following
+// same-origin redirects keeps links written before a page rename working.
 const MAX_REDIRECTS = 3
 
 /**
@@ -282,7 +276,7 @@ export interface CosenseApiShape {
     project: string,
     query: string,
   ) => Effect.Effect<SearchResult, CosenseApiError, HttpClient>
-  /** HTTP 490 (vector search disabled for this project) folds into `{ pages: [] }` instead of failing. */
+  /** Unavailable vector search folds into `{ pages: [] }` instead of failing. */
   readonly searchVector: (
     project: string,
     query: string,
@@ -430,9 +424,8 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
     request(
       `/api/pages/${project}/search/query?${new URLSearchParams({
         q: query,
-        // The web client's own parameters. `field=lines` is the load-bearing one: without
-        // it the response carries titles only, which reads as a title search. `pageRank`
-        // is what puts the page you meant near the top.
+        // `field=lines` requests full-text matches, while `pageRank` keeps useful pages near
+        // the top of the result.
         skip: '0',
         limit: String(FULL_TEXT_SEARCH_LIMIT),
         sort: 'pageRank',
@@ -443,7 +436,7 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
   const searchVector: CosenseApiShape['searchVector'] = (project, query) =>
     request(`/api/pages/${project}/search/vector/titles?q=${encodeURIComponent(query)}`).pipe(
       Effect.flatMap((res) => decode(SearchVectorResponseSchema, res)),
-      // HTTP 490 means vector search is disabled for this project, which is not a failure.
+      // An unavailable vector index is not a failure for the local completion flow.
       Effect.catchAll((err) =>
         err.status === VECTOR_SEARCH_DISABLED_STATUS
           ? Effect.succeed<VectorResult>({ pages: [] })
@@ -496,13 +489,7 @@ export const makeCosenseApi = (config: CosenseApiConfig): CosenseApiShape => {
       return all
     })
 
-  /**
-   * `POST /api/pages/:project/:pageId/accessed`, falling back to `GET` — the two
-   * reverse-engineered records of this endpoint disagree on the method, and it is
-   * undocumented in cosense-cli. Marking a page read is a background nicety, so every
-   * failure (including "neither method exists") is swallowed: the client updates its own
-   * view optimistically either way.
-   */
+  /** Record a page visit in the background; failure does not block the local view. */
   const markAccessed: CosenseApiShape['markAccessed'] = (project, pageId) => {
     const path = `/api/pages/${project}/${encodeURIComponent(pageId)}/accessed`
     return request(path, { method: 'POST', body: {} }).pipe(

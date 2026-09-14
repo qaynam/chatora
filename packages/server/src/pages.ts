@@ -900,10 +900,8 @@ export interface DeletePageResult {
  * Delete the page a buffer holds, through the same two-step edit endpoint a save uses: the
  * whole-page sentinel `changes: [{ deleted: true }]` instead of line ops.
  *
- * The preview is only submitted once the server has echoed `pageDelete`, which is the
- * check cosense-cli's own previewDelete refuses to skip — a previewId built from something
- * the server read differently would commit whatever it did read, and this is the one
- * operation with nothing to undo it.
+ * The preview is only submitted once the server has echoed `pageDelete`, so a delete cannot
+ * accidentally submit a preview with a different meaning.
  */
 export const deletePage = (
   uri: string,

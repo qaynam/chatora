@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { Asearch } from './asearch'
 
-// Cases ported from cosense-app-client/packages/domain/src/asearch.test.ts, plus a few
-// extra 2-error / miss cases per this port's own requirements.
+// Cover exact matches, bounded errors, and misses, including two-error cases.
 
 describe('Asearch — anchored approximate match', () => {
   test('0 errors requires an exact match', () => {

@@ -82,10 +82,10 @@ export interface SessionStateShape {
   readonly apiFor: (credential: Credential) => CosenseApiShape
   /** Login/logout invalidate every cache — a fresh credential may resolve, or verify, differently. */
   readonly invalidateCredentials: () => Effect.Effect<void>
-  /** Verifies /api/users/me at most once per session; both success and failure stay cached until invalidated. */
+  /** Verifies credentials at most once per session; the result stays cached until invalidated. */
   /**
    * The user the credential belongs to, verified once per session. `Option.none` means the
-   * credential was refused (401/403), or there is none; that answer is kept. A failure
+   * credential was refused, or there is none; that answer is kept. A failure
    * that says nothing about the credential (a rate limit, the network) fails instead, and
    * the next call asks again.
    */
@@ -98,8 +98,7 @@ export interface SessionStateShape {
   /**
    * Vector (semantic) title search, cached briefly per (project, query) — completion
    * re-queries on every keystroke, and backspacing replays recent queries. Fails on API
-   * error (490 = disabled already folds into `{pages:[]}` inside @chatora/core); callers
-   * fall back to the local title index on failure.
+   * error; callers fall back to the local title index on failure.
    */
   readonly searchVectorCached: (
     project: string,
@@ -148,10 +147,7 @@ export const makeSessionStateLayer = (
       const titlesCacheRef = yield* Ref.make<ReadonlyMap<string, TitlesCacheEntry>>(new Map())
       const usersCacheRef = yield* Ref.make<ReadonlyMap<string, UsersCacheEntry>>(new Map())
       const vectorCacheRef = yield* Ref.make<ReadonlyMap<string, VectorCacheEntry>>(new Map())
-      // The cache is written only when the answer arrives, so anything that asks while the
-      // first request is in flight misses it and goes out too: 14 identical requests inside
-      // 1.7 seconds against one project, every one answered with 429. A failed fetch caches
-      // nothing, so the next redraw repeated it.
+      // Share an in-flight title request so concurrent redraws do not issue duplicate calls.
       const titlesPendingRef = yield* SynchronizedRef.make<
         ReadonlyMap<string, Deferred.Deferred<readonly TitleEntry[], CosenseApiError>>
       >(new Map())

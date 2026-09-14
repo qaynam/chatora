@@ -1,7 +1,4 @@
-// Cosense's "Export for AI" (Smart Context): the page, and the pages within one or two
-// links of it, as a single text file for an AI to read. The web offers the same text behind
-// a temporary shared URL as well, but that endpoint answers to a browser session only — a
-// token gets HTTP 401 back — so only the download half of the feature is here.
+// Export the page and the pages within one or two links of it as a single text file for an AI.
 import { mkdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'

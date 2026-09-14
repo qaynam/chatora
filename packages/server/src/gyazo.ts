@@ -7,8 +7,7 @@ import { Effect, Option, Schema } from 'effect'
  * There is no guessing it. `https://gyazo.com/<hash>` has a direct form
  * (`https://i.gyazo.com/<hash>.png`) only when the capture is a still image — for the
  * animated ones that form is a 404 — and a team's `https://<team>.gyazo.com/<hash>` has no
- * public form at all. Cosense's web client does not guess either: it asks its own oembed
- * proxy for every Gyazo URL on the page and uses what comes back, and so does this.
+ * public form at all. The proxy is queried for every Gyazo URL instead.
  */
 
 const OEMBED_PATH = '/api/oembed-proxy/gyazo?url='

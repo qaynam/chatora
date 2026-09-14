@@ -2,7 +2,7 @@
 // optional-with-default, see schemas.ts): unknown fields are ignored, missing fields fall
 // back to a zero value.
 
-/** A saved page filter from Cosense's list UI, e.g. `{ type: 'icon', value: 'qaynam' }`. */
+/** A saved page filter from Cosense's list UI, e.g. `{ type: 'icon', value: 'taro' }`. */
 export interface PageFilter {
   readonly type: string
   readonly value: string
@@ -79,12 +79,9 @@ export interface PageDetailLine {
 }
 
 /**
- * getPage() contract. cosense-cli's readPage (src/commands/readPage.ts) shows that the
- * server returns HTTP 200 with `persistent: false` for a title that has no real page yet
- * (a template response whose id/commitId/lines[].id are fake and unsafe to use as preview
- * anchors — cosense-cli strips them client-side for exactly this reason). @chatora/core's
- * getPage() folds that case into `Option.none()` too, alongside a real HTTP 404, so callers
- * get one non-existent-page signal without ever seeing a fake anchor id.
+ * A page that does not exist is represented by `persistent: false` or a not-found response.
+ * `getPage()` folds both cases into `Option.none()` so callers never use placeholder ids as
+ * edit anchors.
  */
 export interface PageDetail {
   readonly id: string
@@ -168,8 +165,7 @@ export interface TitleEntry {
   readonly image: string | null
 }
 
-// RawChange / preview / submit shapes verified against cosense-cli
-// src/commands/previewEdit.ts and src/commands/submitEdit.ts.
+// Shapes accepted by the page preview and submit operations.
 
 export interface RawInsertChange {
   readonly _insert: string // anchor lineId, or '_end' to append
@@ -182,7 +178,6 @@ export interface RawUpdateChange {
 }
 
 export interface RawDeleteChange {
-  // No `lines` field at all — cosense-cli's RawDeleteChange is exactly `{_delete: string}`.
   readonly _delete: string // lineId
 }
 
@@ -208,12 +203,7 @@ export interface PreviewResponse {
   readonly previewId: string
   readonly expireAt: string
   readonly pagePreview: PagePreview | null
-  /**
-   * True only when the server accepted the preview *as a page deletion*. cosense-cli
-   * refuses to submit a delete preview without it (src/commands/previewDelete.ts), and so
-   * does this client: submitting a previewId the server read as something else would run
-   * whatever it did read.
-   */
+  /** True only when the server accepted the preview as a page deletion. */
   readonly pageDelete?: boolean
 }
 
