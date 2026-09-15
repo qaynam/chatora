@@ -478,9 +478,10 @@ keybind = cmd+i=text:\x1bi
 :TSInstall php php_only
 ~~~
 
-言語は <code>code:&lt;ファイル名&gt;</code> の拡張子から決まります。拡張子に対応する filetype が
-無い場合は、拡張子そのものを言語として扱います。パーサーが存在しない <code>mdx</code> は
-Markdown として読みます。JSX は Markdown の HTML 埋め込みとして色が付きます。
+言語は <code>code:</code> に続く名前から決まります。<code>code:test.rb</code> のようなファイル名
+でも、<code>code:rb</code> や <code>code:md</code> のような拡張子だけでも、<code>code:ruby</code> の
+ような言語名でも同じように解決します。パーサーが存在しない <code>mdx</code> は Markdown として
+読みます。JSX は Markdown の HTML 埋め込みとして色が付きます。
 
 ブロックの中に別の言語が埋め込まれている場合（Markdown の中のコードフェンス、Markdown の
 frontmatter、HTML の中の JavaScript など）も、埋め込み側の言語で色を付けます。ただし、その言語の

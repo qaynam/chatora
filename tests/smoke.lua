@@ -221,6 +221,34 @@ local ok, err = pcall(function()
     assert(blocks[1].start_line == blocks[1].end_line, 'expected empty interior')
   end
 
+  -- The label is as often a bare extension as a file name. `code:md` names markdown the
+  -- same way `code:markdown` does, though Neovim only reads `md` as part of a file name.
+  do
+    local function lit_languages(label)
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'code:' .. label, ' # 見出し', ' 本文' })
+      vim.bo[buf].filetype = 'cosense'
+      codeblock.refresh(buf)
+      local langs = {}
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, codeblock.ns, 0, -1, { details = true })) do
+        local group = mark[4].hl_group or ''
+        local lang = group:match('^@.*%.([%w_]+)$')
+        if lang then
+          langs[lang] = true
+        end
+      end
+      vim.api.nvim_buf_delete(buf, { force = true })
+      return langs
+    end
+
+    if pcall(vim.treesitter.language.add, 'markdown') then
+      assert(lit_languages('md').markdown, '`code:md` reads as markdown')
+      assert(lit_languages('markdown').markdown, 'and so does the language written out')
+      assert(lit_languages('test.md').markdown, 'as does a file name that ends in it')
+    end
+    assert(next(lit_languages('memo')) == nil, 'a label naming no language lights nothing')
+  end
+
   -- A language no grammar is named after, and a block that carries another language
   -- inside it: `.mdx` reads as markdown, and the lua fenced in it is an injected layer,
   -- which is only lit when every tree is walked and not just the root.
