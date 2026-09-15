@@ -236,14 +236,17 @@ function M.install()
       prefix, quote = nil, false
     end
     if first_chunk and vim.bo.filetype == 'cosense' then
+      local mode = vim.api.nvim_get_mode().mode
+      -- `vim.bo.filetype` remains `cosense` outside page editing, so use the mode to avoid
+      -- rewriting URLs in command-line and terminal modes.
+      local into_page = not (mode:find('^c') or mode:find('^t'))
       -- Decided on the first chunk, whatever the phase says it is: a paste of more than
       -- one line would have left a second line of text in this one.
-      local only = single_line(lines)
+      local only = into_page and single_line(lines) or nil
       local link = only and pasted(only) or nil
       if link then
         lines = #lines == 1 and { link } or { link, '' }
       elseif #lines > 1 then
-        local mode = vim.api.nvim_get_mode().mode
         if mode:find('^i') or mode:find('^n') then
           local row, col = unpack(vim.api.nvim_win_get_cursor(0))
           local buf_lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
