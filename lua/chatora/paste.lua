@@ -237,9 +237,8 @@ function M.install()
     end
     if first_chunk and vim.bo.filetype == 'cosense' then
       local mode = vim.api.nvim_get_mode().mode
-      -- The command line is not the page: `:Chatora open <url>` wants the URL as it was
-      -- copied, and a link notation there names nothing. `vim.bo` still reads the page's
-      -- filetype while the command line is open, so the mode is what tells them apart.
+      -- `vim.bo.filetype` remains `cosense` outside page editing, so use the mode to avoid
+      -- rewriting URLs in command-line and terminal modes.
       local into_page = not (mode:find('^c') or mode:find('^t'))
       -- Decided on the first chunk, whatever the phase says it is: a paste of more than
       -- one line would have left a second line of text in this one.

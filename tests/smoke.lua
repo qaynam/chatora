@@ -2580,8 +2580,7 @@ local ok, err = pcall(function()
       'a trailing newline does not stop the rewrite: ' .. vim.inspect(got)
     )
 
-    -- The command line is not the page: `:Chatora open <url>` needs the URL as copied. What
-    -- reaches Neovim's own paste is what the command line gets, so that is what is read.
+    -- Command-line paste must receive the original URL rather than page notation.
     local orig_fallback = _G.chatora_paste_fallback
     local handed_over
     _G.chatora_paste_fallback = function(lines)
