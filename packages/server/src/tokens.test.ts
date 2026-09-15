@@ -88,19 +88,37 @@ describe('computeTokens', () => {
     expect(findAll(computeTokens('Title\n[***** five]'), 'bold3')).toHaveLength(1)
   })
 
-  test('decoration priority: bold > italic > strike > underline, no separate child tokens', () => {
+  test('one marker, one decoration', () => {
     const bold = computeTokens('Title\n[* bold text]')
     expect(findAll(bold, 'bold')).toHaveLength(1)
     expect(findAll(bold, 'italic')).toHaveLength(0)
+    expect(findAll(computeTokens('Title\n[_ underlined]'), 'underline')).toHaveLength(1)
+  })
 
-    // strike + italic combined -> italic wins (bold > italic > strike > underline).
-    const combo = computeTokens('Title\n[-/ strike and italic]')
-    expect(findAll(combo, 'italic')).toHaveLength(1)
-    expect(findAll(combo, 'strike')).toHaveLength(0)
-    expect(findAll(combo, 'bold')).toHaveLength(0)
+  test('a run wears every decoration in it, in the order it was written or not', () => {
+    for (const source of ['Title\n[-/ struck and italic]', 'Title\n[/- struck and italic]']) {
+      const tokens = computeTokens(source)
+      expect(findAll(tokens, 'strike')).toHaveLength(1)
+      expect(findAll(tokens, 'italic')).toHaveLength(1)
+      expect(findAll(tokens, 'bold')).toHaveLength(0)
+    }
+  })
 
-    const underline = computeTokens('Title\n[_ underlined]')
-    expect(findAll(underline, 'underline')).toHaveLength(1)
+  test('the loudest decoration is emitted last, so it wins the color they both set', () => {
+    const tokens = computeTokens('Title\n[/*_- everything]')
+    expect(
+      tokens.filter((t) => ['underline', 'strike', 'italic', 'bold'].includes(t.type)),
+    ).toEqual([
+      { line: 1, char: 0, length: '[/*_- everything]'.length, type: 'underline' },
+      { line: 1, char: 0, length: '[/*_- everything]'.length, type: 'strike' },
+      { line: 1, char: 0, length: '[/*_- everything]'.length, type: 'italic' },
+      { line: 1, char: 0, length: '[/*_- everything]'.length, type: 'bold' },
+    ])
+  })
+
+  test('the size of an emphasis survives the company it keeps', () => {
+    expect(findAll(computeTokens('Title\n[-*** struck and large]'), 'bold3')).toHaveLength(1)
+    expect(findAll(computeTokens('Title\n[-*** struck and large]'), 'strike')).toHaveLength(1)
   })
 
   test('a link nested in a decoration keeps its own token, overlapping the decoration', () => {
@@ -239,6 +257,23 @@ describe('computeTokens with custom notations', () => {
     const line = (src.split('\n')[1] as string).length
     const spans = computeTokens(src).filter((t) => t.char === 0 && t.length === line)
     expect(spans.map((t) => t.type)).toEqual(['bold', 'important'])
+  })
+
+  test('every marker of a long mixed run lands, official and configured alike', () => {
+    setNotations([
+      { marker: '!', name: 'important' },
+      { marker: '~', name: 'warning' },
+    ])
+    const src = 'Title\n[-*!~_ 三つぐらいバリアント作成]'
+    const length = (src.split('\n')[1] as string).length
+    const spans = computeTokens(src).filter((t) => t.char === 0 && t.length === length)
+    expect(spans.map((t) => t.type)).toEqual([
+      'underline',
+      'strike',
+      'bold',
+      'warning',
+      'important',
+    ])
   })
 
   test('a decoration character with no notation behind it keeps the run tokenized', () => {
