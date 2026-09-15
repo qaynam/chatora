@@ -121,10 +121,14 @@ local FALLBACK_LANG = { mdx = 'markdown' }
 local function resolve_lang(name, text)
   local ok_ft, filetype = pcall(vim.filetype.match, { filename = name })
   if not ok_ft or not filetype or filetype == '' then
-    -- Nothing on this machine claims the extension (`.mdx` needs a plugin for that). The
-    -- extension is still a better guess than the whole file name, which names no grammar,
-    -- and `code:python` — a bare language — has none to take.
-    filetype = name:match('%.([%w_]+)$') or name
+    -- A block is as often labelled `code:md` or `code:test.mdx` as it is with a whole file
+    -- name, and Neovim reads an extension only as part of one — so the extension gets a
+    -- file name to be read in. What is left when that says nothing is the label itself,
+    -- which covers `code:python`, and an extension no filetype claims (`mdx`).
+    local extension = name:match('%.([%w_]+)$') or name
+    local ok_ext, from_extension = pcall(vim.filetype.match, { filename = 'x.' .. extension })
+    filetype = (ok_ext and from_extension ~= nil and from_extension ~= '' and from_extension)
+      or extension
   end
   local ok_get, lang = pcall(vim.treesitter.language.get_lang, filetype)
   if not ok_get or not lang then
