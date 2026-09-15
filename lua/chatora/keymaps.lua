@@ -183,11 +183,16 @@ local function char_at(line, col)
   return line:sub(col + 1, col + 1)
 end
 
---- True when the 0-based `row` is a body row of some table block.
+--- True when the 0-based `row` is a table row or the next blank row to be started.
 local function in_table_row(bufnr, row)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local starting_a_row = (lines[row + 1] or ''):match('^%s*$') ~= nil
   for _, block in ipairs(require('chatora.table').find_blocks(lines)) do
     if row >= block.start_line and row < block.end_line then
+      return true
+    end
+    -- `end_line` is exclusive; the following blank line is where a new row starts.
+    if row == block.end_line and starting_a_row then
       return true
     end
   end
@@ -233,23 +238,41 @@ local function replay_tab(map)
   )
 end
 
+-- Expression mappings cannot capture the displaced mapping, so keep it by buffer.
+local displaced_tab = {}
+
+--- What `<Tab>` produces: a real tab inside a table row, and otherwise whatever the key
+--- did before chatora took it.
+function M.tab()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  if in_table_row(bufnr, row - 1) then
+    return vim.api.nvim_replace_termcodes('<C-v><Tab>', true, true, true)
+  end
+  local displaced = displaced_tab[bufnr]
+  if displaced then
+    replay_tab(displaced)
+    return ''
+  end
+  return vim.api.nvim_replace_termcodes('<Tab>', true, true, true)
+end
+
 --- Claim `<Tab>` only inside a table row, where it must insert a *real* tab: page buffers
 --- use expandtab, so a plain Tab would type a space and the row would parse as one cell.
 --- Every other keystroke goes back to the mapping chatora displaced — `<Tab>` belongs to
 --- the completion plugin, and taking it outright is what made <C-i> stop working.
+---
+--- Keep the mapping as an expression string so completion plugins can replay its rhs.
 local function tab_map(bufnr)
-  local displaced = foreign_tab_map()
-  vim.keymap.set('i', '<Tab>', function()
-    local row = vim.api.nvim_win_get_cursor(0)[1]
-    if in_table_row(bufnr, row - 1) then
-      return vim.api.nvim_replace_termcodes('<C-v><Tab>', true, true, true)
-    end
-    if displaced then
-      replay_tab(displaced)
-      return ''
-    end
-    return vim.api.nvim_replace_termcodes('<Tab>', true, true, true)
-  end, { buffer = bufnr, expr = true, silent = true, desc = TAB_DESC })
+  displaced_tab[bufnr] = foreign_tab_map()
+  vim.keymap.set('i', '<Tab>', [[v:lua.require'chatora.keymaps'.tab()]], {
+    buffer = bufnr,
+    expr = true,
+    silent = true,
+    -- The returned keys already contain terminal codes.
+    replace_keycodes = false,
+    desc = TAB_DESC,
+  })
 end
 
 local function autopair_maps(bufnr)
