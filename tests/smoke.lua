@@ -2580,6 +2580,31 @@ local ok, err = pcall(function()
       'a trailing newline does not stop the rewrite: ' .. vim.inspect(got)
     )
 
+    -- The command line is not the page: `:Chatora open <url>` needs the URL as copied. What
+    -- reaches Neovim's own paste is what the command line gets, so that is what is read.
+    local orig_fallback = _G.chatora_paste_fallback
+    local handed_over
+    _G.chatora_paste_fallback = function(lines)
+      handed_over = vim.deepcopy(lines)
+      return true
+    end
+    paste.install()
+    local orig_get_mode = vim.api.nvim_get_mode
+    for _, case in ipairs({ { 'c', false }, { 'i', true } }) do
+      vim.api.nvim_get_mode = function()
+        return { mode = case[1], blocking = false }
+      end
+      vim.paste({ 'https://scrapbox.io/my-project/Hello_World' }, -1)
+      local converted = handed_over[1] == '[Hello World]'
+      assert(
+        converted == case[2],
+        ('mode %q: handed over %s'):format(case[1], vim.inspect(handed_over))
+      )
+    end
+    vim.api.nvim_get_mode = orig_get_mode
+    _G.chatora_paste_fallback = orig_fallback
+    paste.install()
+
     -- Inside a code block the URL stays a URL: that text is not read as notation, so a
     -- link written there would lose it.
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { 'タイトル', 'code:sample.md', ' ' })
