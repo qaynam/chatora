@@ -257,7 +257,7 @@ vim.api.nvim_create_autocmd('FileType', {
 | <code>&lt;C-t&gt;</code> | 日時を挿入 |
 | <code>&lt;C-i&gt;</code> / <code>&lt;M-i&gt;</code> | アイコンを挿入 |
 | <code>[</code> | <code>[]</code> を自動的に補完 |
-| <code>&lt;Tab&gt;</code> | テーブル行ではタブを入力し、それ以外では既存のマッピングに委譲 |
+| <code>&lt;Tab&gt;</code> | テーブルの行（これから書く行を含む）ではタブを入力し、それ以外では既存のマッピングに委譲 |
 
 #### サイドバー
 

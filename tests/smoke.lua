@@ -1305,6 +1305,35 @@ local ok, err = pcall(function()
     vim.notify = orig_notify
   end
 
+  -- <Tab> inside a table: a real tab, which is what separates two cells. A page buffer
+  -- expands tabs, so anything else would type spaces and the row would parse as one cell.
+  do
+    local keymaps = require('chatora.keymaps')
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    keymaps.attach(buf)
+    local mapping = vim.fn.maparg('<Tab>', 'i', false, true)
+    local real_tab = vim.api.nvim_replace_termcodes('<C-v><Tab>', true, true, true)
+
+    local function tab_on(lines, row)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+      vim.api.nvim_win_set_cursor(0, { row, 0 })
+      return mapping.callback() == real_tab
+    end
+
+    assert(
+      tab_on({ 'タイトル', 'table:名前', '' }, 3),
+      'the empty line under the marker is where the first row starts'
+    )
+    assert(tab_on({ 'タイトル', 'table:名前', '  ' }, 3), 'and so is one holding only its indent')
+    assert(tab_on({ 'タイトル', 'table:名前', '\theader' }, 3), 'a row being written keeps it')
+    assert(tab_on({ 'タイトル', 'table:名前', '\ta\tb', '' }, 4), 'as does the line under the last row')
+    assert(not tab_on({ 'タイトル', 'ふつうの行' }, 2), 'a line outside a table hands <Tab> back')
+    assert(not tab_on({ 'タイトル', '' }, 2), 'and so does an empty line of its own')
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
+
   -- A key setup() does not know is called out once and does nothing — at the top, inside
   -- a group, and in keymaps — so a misspelled one is not quietly lost.
   do

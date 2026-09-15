@@ -184,10 +184,20 @@ local function char_at(line, col)
 end
 
 --- True when the 0-based `row` is a body row of some table block.
+--- True when the 0-based `row` is a body row of some table block, or the empty line where
+--- the next row is about to be typed. A block reaches only the lines already indented past
+--- its marker, so the row being started is not in one yet — and the Tab that would start it
+--- is exactly the one that has to be a real tab.
 local function in_table_row(bufnr, row)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  local starting_a_row = (lines[row + 1] or ''):match('^%s*$') ~= nil
   for _, block in ipairs(require('chatora.table').find_blocks(lines)) do
     if row >= block.start_line and row < block.end_line then
+      return true
+    end
+    -- `end_line` is exclusive: the line just past the last row, which is the marker's own
+    -- next line while the table has none.
+    if row == block.end_line and starting_a_row then
       return true
     end
   end
