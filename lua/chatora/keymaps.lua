@@ -243,23 +243,45 @@ local function replay_tab(map)
   )
 end
 
+-- The mapping chatora displaced, by buffer. Held here rather than in the mapping's own
+-- closure because the mapping is an expression string, which has no closure.
+local displaced_tab = {}
+
+--- What `<Tab>` produces: a real tab inside a table row, and otherwise whatever the key
+--- did before chatora took it.
+function M.tab()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local row = vim.api.nvim_win_get_cursor(0)[1]
+  if in_table_row(bufnr, row - 1) then
+    return vim.api.nvim_replace_termcodes('<C-v><Tab>', true, true, true)
+  end
+  local displaced = displaced_tab[bufnr]
+  if displaced then
+    replay_tab(displaced)
+    return ''
+  end
+  return vim.api.nvim_replace_termcodes('<Tab>', true, true, true)
+end
+
 --- Claim `<Tab>` only inside a table row, where it must insert a *real* tab: page buffers
 --- use expandtab, so a plain Tab would type a space and the row would parse as one cell.
 --- Every other keystroke goes back to the mapping chatora displaced — `<Tab>` belongs to
 --- the completion plugin, and taking it outright is what made <C-i> stop working.
+---
+--- Written as an expression *string*, not a Lua callback. A completion plugin that takes
+--- the key over keeps what it displaced and replays it by evaluating that rhs (nvim-cmp's
+--- keymap.solve); a callback leaves no rhs to evaluate, and cmp errors on the nil instead
+--- of reaching the callback — which is what silenced Tab in a table.
 local function tab_map(bufnr)
-  local displaced = foreign_tab_map()
-  vim.keymap.set('i', '<Tab>', function()
-    local row = vim.api.nvim_win_get_cursor(0)[1]
-    if in_table_row(bufnr, row - 1) then
-      return vim.api.nvim_replace_termcodes('<C-v><Tab>', true, true, true)
-    end
-    if displaced then
-      replay_tab(displaced)
-      return ''
-    end
-    return vim.api.nvim_replace_termcodes('<Tab>', true, true, true)
-  end, { buffer = bufnr, expr = true, silent = true, desc = TAB_DESC })
+  displaced_tab[bufnr] = foreign_tab_map()
+  vim.keymap.set('i', '<Tab>', [[v:lua.require'chatora.keymaps'.tab()]], {
+    buffer = bufnr,
+    expr = true,
+    silent = true,
+    -- The keys come back with their codes already replaced.
+    replace_keycodes = false,
+    desc = TAB_DESC,
+  })
 end
 
 local function autopair_maps(bufnr)

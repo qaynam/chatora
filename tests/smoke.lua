@@ -1315,10 +1315,17 @@ local ok, err = pcall(function()
     local mapping = vim.fn.maparg('<Tab>', 'i', false, true)
     local real_tab = vim.api.nvim_replace_termcodes('<C-v><Tab>', true, true, true)
 
+    -- A completion plugin that takes <Tab> over replays what it displaced by evaluating
+    -- the mapping's rhs (nvim-cmp's keymap.solve does exactly this). A Lua callback leaves
+    -- no rhs there, and cmp errors on the nil instead of reaching the callback — so the
+    -- mapping has to be an expression string, and evaluating it has to do the work.
+    assert(type(mapping.rhs) == 'string' and mapping.rhs ~= '', '<Tab> keeps an rhs to evaluate')
+    assert(mapping.callback == nil, 'and no Lua callback in its place')
+
     local function tab_on(lines, row)
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
       vim.api.nvim_win_set_cursor(0, { row, 0 })
-      return mapping.callback() == real_tab
+      return vim.api.nvim_eval(mapping.rhs) == real_tab
     end
 
     assert(
