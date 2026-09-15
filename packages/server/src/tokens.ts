@@ -74,19 +74,24 @@ const spanToken = (type: TokenType, position: Position): RawToken => ({
   type,
 })
 
-const decorationTokenType = (node: Decoration): TokenType | null => {
-  if (node.bold) {
-    // Cosense sizes emphasis by asterisk count ([*]..[*****]); sizeLevel is 0-indexed.
-    // A terminal has one cell size, so weight is graded via color instead:
-    // bold (*) < bold2 (**) < bold3 (*** and up).
-    if (node.sizeLevel >= 2) return 'bold3'
-    if (node.sizeLevel === 1) return 'bold2'
-    return 'bold'
-  }
-  if (node.italic) return 'italic'
-  if (node.strike) return 'strike'
-  if (node.underline) return 'underline'
-  return null
+// Cosense sizes emphasis by asterisk count ([*]..[*****]); sizeLevel is 0-indexed. A
+// terminal has one cell size, so weight is graded by color instead: bold (*) < bold2 (**)
+// < bold3 (*** and up).
+const boldTokenType = (sizeLevel: number): TokenType =>
+  sizeLevel >= 2 ? 'bold3' : sizeLevel === 1 ? 'bold2' : 'bold'
+
+/**
+ * Every decoration a run carries, since Cosense applies all of them: `[-* x]` is struck
+ * *and* bold. Ordered by how loudly each one colors its text, because two tokens over one
+ * span combine attribute by attribute and the later one wins the color they both set.
+ */
+const decorationTokenTypes = (node: Decoration): TokenType[] => {
+  const types: TokenType[] = []
+  if (node.underline) types.push('underline')
+  if (node.strike) types.push('strike')
+  if (node.italic) types.push('italic')
+  if (node.bold) types.push(boldTokenType(node.sizeLevel))
+  return types
 }
 
 /** Pure AST -> tokens. No LSP delta-encoding here (see encodeTokens) so this stays unit-testable. */
@@ -122,16 +127,17 @@ export const computeTokens = (text: string): RawToken[] => {
         }
         return undefined
       case 'decoration': {
-        // A marker run wears every marker in it (`[!* x]` is both), the way Cosense's own
-        // renderer emits a CSS class per character and lets them combine. Each gets a token
-        // over the same span, and Neovim combines overlapping marks of equal priority
+        // A marker run wears every marker in it (`[-*!~_ x]` is all five), the way Cosense's
+        // own renderer emits a CSS class per character and lets them combine. Each gets a
+        // token over the same span, and Neovim combines overlapping marks of equal priority
         // attribute by attribute — the later one winning a tie.
         //
-        // Order is therefore the precedence: official markers first, then the configured
+        // Order is therefore the precedence: the official markers first, then the configured
         // notations in reverse. What the user configured ends up over what the syntax
         // implied, and the earlier marker of two over the later.
-        const official = decorationTokenType(node)
-        if (official) tokens.push(spanToken(official, node.position))
+        for (const official of decorationTokenTypes(node)) {
+          tokens.push(spanToken(official, node.position))
+        }
         for (const name of [...notationNamesForDecoration(node)].reverse()) {
           tokens.push(spanToken(name, node.position))
         }
