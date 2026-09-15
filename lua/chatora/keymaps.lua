@@ -183,11 +183,7 @@ local function char_at(line, col)
   return line:sub(col + 1, col + 1)
 end
 
---- True when the 0-based `row` is a body row of some table block.
---- True when the 0-based `row` is a body row of some table block, or the empty line where
---- the next row is about to be typed. A block reaches only the lines already indented past
---- its marker, so the row being started is not in one yet — and the Tab that would start it
---- is exactly the one that has to be a real tab.
+--- True when the 0-based `row` is a table row or the next blank row to be started.
 local function in_table_row(bufnr, row)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local starting_a_row = (lines[row + 1] or ''):match('^%s*$') ~= nil
@@ -195,8 +191,7 @@ local function in_table_row(bufnr, row)
     if row >= block.start_line and row < block.end_line then
       return true
     end
-    -- `end_line` is exclusive: the line just past the last row, which is the marker's own
-    -- next line while the table has none.
+    -- `end_line` is exclusive; the following blank line is where a new row starts.
     if row == block.end_line and starting_a_row then
       return true
     end
@@ -243,8 +238,7 @@ local function replay_tab(map)
   )
 end
 
--- The mapping chatora displaced, by buffer. Held here rather than in the mapping's own
--- closure because the mapping is an expression string, which has no closure.
+-- Expression mappings cannot capture the displaced mapping, so keep it by buffer.
 local displaced_tab = {}
 
 --- What `<Tab>` produces: a real tab inside a table row, and otherwise whatever the key
@@ -268,17 +262,14 @@ end
 --- Every other keystroke goes back to the mapping chatora displaced — `<Tab>` belongs to
 --- the completion plugin, and taking it outright is what made <C-i> stop working.
 ---
---- Written as an expression *string*, not a Lua callback. A completion plugin that takes
---- the key over keeps what it displaced and replays it by evaluating that rhs (nvim-cmp's
---- keymap.solve); a callback leaves no rhs to evaluate, and cmp errors on the nil instead
---- of reaching the callback — which is what silenced Tab in a table.
+--- Keep the mapping as an expression string so completion plugins can replay its rhs.
 local function tab_map(bufnr)
   displaced_tab[bufnr] = foreign_tab_map()
   vim.keymap.set('i', '<Tab>', [[v:lua.require'chatora.keymaps'.tab()]], {
     buffer = bufnr,
     expr = true,
     silent = true,
-    -- The keys come back with their codes already replaced.
+    -- The returned keys already contain terminal codes.
     replace_keycodes = false,
     desc = TAB_DESC,
   })

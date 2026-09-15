@@ -1305,8 +1305,7 @@ local ok, err = pcall(function()
     vim.notify = orig_notify
   end
 
-  -- <Tab> inside a table: a real tab, which is what separates two cells. A page buffer
-  -- expands tabs, so anything else would type spaces and the row would parse as one cell.
+  -- A table cell separator must be a real tab, not spaces.
   do
     local keymaps = require('chatora.keymaps')
     local buf = vim.api.nvim_create_buf(false, true)
@@ -1315,10 +1314,7 @@ local ok, err = pcall(function()
     local mapping = vim.fn.maparg('<Tab>', 'i', false, true)
     local real_tab = vim.api.nvim_replace_termcodes('<C-v><Tab>', true, true, true)
 
-    -- A completion plugin that takes <Tab> over replays what it displaced by evaluating
-    -- the mapping's rhs (nvim-cmp's keymap.solve does exactly this). A Lua callback leaves
-    -- no rhs there, and cmp errors on the nil instead of reaching the callback — so the
-    -- mapping has to be an expression string, and evaluating it has to do the work.
+    -- Completion plugins replay the mapping rhs, so this must be an expression string.
     assert(type(mapping.rhs) == 'string' and mapping.rhs ~= '', '<Tab> keeps an rhs to evaluate')
     assert(mapping.callback == nil, 'and no Lua callback in its place')
 
